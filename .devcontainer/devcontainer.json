@@ -48,13 +48,13 @@
         "ms-toolsai.jupyter",
         "morningstart.astral-sh-py",
         "charliermarsh.ruff",
-        "astral-sh.ty"
+        "astral-sh.ty",
+        "eamodio.gitlens"
       ]
     }
   },
 
   "containerEnv": {
-    "HOSTNAME": "${localEnv:HOSTNAME}"
   },
   "remoteEnv": {
     "PROJECT_NAME": "Stanford CS336",
