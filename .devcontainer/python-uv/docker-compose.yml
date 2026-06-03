@@ -6,5 +6,5 @@ services:
     image: python_playground
     container_name: python_playground
     volumes:
-      - ..:/workspace:cached
+      - ../..:/workspace:cached
     command: sleep infinity
