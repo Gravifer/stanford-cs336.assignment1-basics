@@ -1,5 +1,6 @@
 {
     "recommendations": [
-        "morningstart.astral-sh-py"
+        "morningstart.astral-sh-py",
+        "charliermarsh.ruff"
     ]
 }
