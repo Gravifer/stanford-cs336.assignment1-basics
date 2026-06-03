@@ -5,44 +5,43 @@
   "workspaceFolder": "/workspace",
   "remoteUser": "vscode",
   "features": {
-	"ghcr.io/devcontainers-extra/features/uv:1": {},
-	"ghcr.io/devcontainers/features/common-utils:2": {
-		"installZsh": true,
-		"installOhMyZshConfig": true,
-		"upgradePackages": true,
-		"installSsl": true,
-		"username": "automatic",
-		"userUid": "automatic",
-		"userGid": "automatic"
-	},
-	"ghcr.io/devcontainers/features/python:1": {
-		"installTools": true,
-		"installJupyterlab": true,
-		"version": "latest"
-	},
-	"ghcr.io/devcontainers-extra/features/age:1": {
-		"version": "latest"
-	},
-	"ghcr.io/devcontainers-extra/features/age-keygen:1": {
-		"version": "latest"
-	},
-	"ghcr.io/devcontainers-extra/features/ruff:2": {
-		"version": "latest"
-	},
-	"ghcr.io/devcontainers-extra/features/ty:1": {
-		"version": "latest"
-	},
-	"ghcr.io/devcontainer-community/devcontainer-features/astral.sh-uv:1": {
-		"shellautocompletion": true,
-		"version": "latest"
-	},
-	"ghcr.io/devcontainer-config/features/dot-config:4": {}
+    "ghcr.io/devcontainers-extra/features/uv:1": {},
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "installOhMyZshConfig": true,
+      "upgradePackages": true,
+      "installSsl": true,
+      "username": "automatic",
+      "userUid": "automatic",
+      "userGid": "automatic"
+    },
+    "ghcr.io/devcontainers/features/python:1": {
+      "installTools": true,
+      "installJupyterlab": true,
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers-extra/features/age:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers-extra/features/age-keygen:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers-extra/features/ruff:2": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers-extra/features/ty:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainer-community/devcontainer-features/astral.sh-uv:1": {
+      "shellautocompletion": true,
+      "version": "latest"
+    },
+    "ghcr.io/devcontainer-config/features/dot-config:4": {}
   },
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-python.python",
-        "ms-python.vscode-pylance",
         "charliermarsh.ruff",
         "ms-python.mypy-type-checker",
         "ms-toolsai.jupyter"

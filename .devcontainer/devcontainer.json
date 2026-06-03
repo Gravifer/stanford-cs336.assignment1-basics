@@ -4,12 +4,13 @@
   "name": "stanford-cs336",
 
   "image": "mcr.microsoft.com/devcontainers/python:3-3.13-trixie",  // Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-  "remoteUser": "student",  // Change to "root" to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+  "remoteUser": "vscode",  // Change to "root" to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 
   "features": {  // Features to add to the dev container. More info: https://containers.dev/features.
     "ghcr.io/devcontainers/features/common-utils:2": {
-      "installZsh": false,
-      "installOhMyZshConfig": false,
+      "installZsh": true,
+      "installOhMyZsh": true,
+      "installOhMyZshConfig": true,
       "upgradePackages": true,
       "installSsl": true,
       "username": "automatic",
@@ -52,6 +53,9 @@
     }
   },
 
+  "containerEnv": {
+    "HOSTNAME": "${localEnv:HOSTNAME}"
+  },
   "remoteEnv": {
     "PROJECT_NAME": "Stanford CS336",
     "PYTHON_VERSION": "3.13",
@@ -59,7 +63,7 @@
     "UV_CACHE_DIR": "/workspaces/.uv-cache",
     "INSTALL_IPYKERNEL": "true"
   },
-  "postCreateCommand": ".devcontainer/test_tools.sh > /tmp/test-tools.log 2>&1",  // Run commands after the container is created.
+  "postCreateCommand": ".devcontainer/welcome.sh && .devcontainer/test_tools.sh > /tmp/test-tools.log 2>&1 && uv sync",  // Run commands after the container is created.
   "mounts": []
 
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
