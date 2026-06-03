@@ -1,0 +1,71 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/python
+{
+  "name": "stanford-cs336",
+
+  "image": "mcr.microsoft.com/devcontainers/python:3-3.13-trixie",  // Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+  "remoteUser": "vscode",  // Change to "root" to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+
+  "features": {  // Features to add to the dev container. More info: https://containers.dev/features.
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "installOhMyZsh": true,
+      "installOhMyZshConfig": true,
+      "upgradePackages": true,
+      "installSsl": true,
+      "username": "automatic",
+      "userUid": "automatic",
+      "userGid": "automatic"
+    },
+    // "ghcr.io/devcontainers/features/python:1": {
+    //   "installTools": true,
+    //   "installJupyterlab": true,
+    //   "version": "latest"
+    // },
+    // "ghcr.io/devcontainers-extra/features/age:1": {
+    //   "version": "latest"
+    // },
+    // "ghcr.io/devcontainers-extra/features/age-keygen:1": {
+    //   "version": "latest"
+    // },
+    // "ghcr.io/devcontainers-extra/features/uv:1": {},
+    "ghcr.io/devcontainer-community/devcontainer-features/astral.sh-uv:1": {
+      "shellautocompletion": true,
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers-extra/features/ruff:2": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers-extra/features/ty:1": {
+      "version": "latest"
+    }
+  },
+
+  "customizations": {  // Configure tool-specific properties.
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "morningstart.astral-sh-py",
+        "charliermarsh.ruff", // not moved to astral-sh.ruff quite yet
+        "astral-sh.ty",
+        "eamodio.gitlens"
+      ]
+    }
+  },
+
+  "containerEnv": {
+  },
+  "remoteEnv": {
+    "PROJECT_NAME": "Stanford CS336",
+    "PYTHON_VERSION": "3.13",
+    "UV_INIT_BARE": "false",
+    "UV_CACHE_DIR": "/workspaces/.uv-cache",
+    "INSTALL_IPYKERNEL": "true"
+  },
+  "postCreateCommand": ".devcontainer/welcome.sh; .devcontainer/test_tools.sh > /tmp/test-tools.log 2>&1; uv sync",  // Run commands after the container is created.
+  "mounts": []
+
+  // Use 'forwardPorts' to make a list of ports inside the container available locally.
+  // "forwardPorts": [],
+}

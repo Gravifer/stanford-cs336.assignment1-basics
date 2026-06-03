@@ -1,0 +1,8 @@
+{
+    "recommendations": [
+        "morningstart.astral-sh-py",
+        "charliermarsh.ruff", // not moved to astral-sh.ruff quite yet
+        "astral-sh.ty",
+        "eamodio.gitlens"
+    ]
+}
