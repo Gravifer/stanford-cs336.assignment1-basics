@@ -1,6 +1,6 @@
 {
   "[python]": {
-    "editor.defaultFormatter": "astral-sh.ruff",
+    "editor.defaultFormatter": "charliermarsh.ruff", // not moved to astral-sh.ruff quite yet
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {
       "source.organizeImports": "explicit",
