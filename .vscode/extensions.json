@@ -1,7 +1,8 @@
 {
     "recommendations": [
         "morningstart.astral-sh-py",
-        "charliermarsh.ruff",
+        "astral-sh.ruff",
+        "astral-sh.ty",
         "eamodio.gitlens"
     ]
 }

@@ -47,7 +47,7 @@
         "ms-python.python",
         "ms-toolsai.jupyter",
         "morningstart.astral-sh-py",
-        "charliermarsh.ruff",
+        "astral-sh.ruff",
         "astral-sh.ty",
         "eamodio.gitlens"
       ]
@@ -63,7 +63,7 @@
     "UV_CACHE_DIR": "/workspaces/.uv-cache",
     "INSTALL_IPYKERNEL": "true"
   },
-  "postCreateCommand": ".devcontainer/welcome.sh && .devcontainer/test_tools.sh > /tmp/test-tools.log 2>&1 && uv sync",  // Run commands after the container is created.
+  "postCreateCommand": ".devcontainer/welcome.sh; .devcontainer/test_tools.sh > /tmp/test-tools.log 2>&1; uv sync",  // Run commands after the container is created.
   "mounts": []
 
   // Use 'forwardPorts' to make a list of ports inside the container available locally.

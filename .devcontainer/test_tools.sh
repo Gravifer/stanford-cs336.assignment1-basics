@@ -21,9 +21,10 @@ echo "  - openssh-client: SSH tools"
 echo "  - gnupg: Encryption/signing"
 echo "  - zip/unzip: Archive tools"
 echo "  - Standard utilities: grep, sed, awk, cut, sort, find, etc."
-echo
-echo "Note: Python is NOT pre-installed. Use 'uv python install' to add it."
-echo
+echo 
+echo "Note: Python is pre-installed in this image. "
+echo "      Use 'uv python install' if you need to add/manage additional Python versions."
+echo 
 echo "=== Running Tool Tests ==="
 echo
 
