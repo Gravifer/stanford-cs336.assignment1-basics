@@ -10,5 +10,10 @@
   "ruff.nativeServer": true,
   "ruff.configurationPreference": "filesystemFirst",
   "mypy-type-checker.args": ["--config-file=pyproject.toml"], // for compatibility with other users
-  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.testing.pytestArgs": [
+    "tests"
+  ],
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestEnabled": true
 }
