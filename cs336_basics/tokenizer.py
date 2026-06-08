@@ -17,22 +17,28 @@ _pattern: re.Pattern[str] = re.compile(_PAT)
 
 class _BPECandidate[T]:
     # python only has min-heaps before 3.14, so we use a wrapper class that inverts comparison
-    __slots__ = ("pair", "count")
+    __slots__ = ("pair", "count", "vocab")
 
     # @property
     # def count(self) -> int:
     #     return self.occurrences.total()
 
-    def __init__(self, pair: tuple[T, T], count: int):
+    def __init__(self, pair: tuple[T, T], count: int, vocab: dict[T, bytes] | None):
         self.pair = pair  # starts as byte digrams, but as merges happen, becomes longer
         self.count = count
+        self.vocab = vocab
 
     def __lt__(self, other: "_BPECandidate") -> bool:
         if not isinstance(other, _BPECandidate):
             raise NotImplementedError(f"Cannot compare _BPECandidate with {type(other)}")
         if (s := self.count) != (o := other.count):
             return s > o
-        return self.pair > other.pair  # lexicographical
+        assert self.vocab is other.vocab, "Comparison only makes sense within the same corpus"
+        if self.vocab is None or other.vocab is None:
+            return self.pair > other.pair
+        s: tuple[bytes, bytes] = (self.vocab[self[0]], self.vocab[self[1]])
+        o: tuple[bytes, bytes] = (other.vocab[other[0]], other.vocab[other[1]])
+        return s > o  # lexicographical
 
     def __getitem__(self, key: Literal[0] | Literal[1]) -> T:
         if isinstance(key, slice):
@@ -95,11 +101,12 @@ def train_bpe(
     num_processes = os.cpu_count() or multiprocessing or 1  # if os.cpu_count() is None, fall back to no capping
     num_processes = max(1, min(multiprocessing or 1, num_processes))  # clamp between 1 and os.cpu_count()
 
-    vocab: dict[int, bytes] = {  # initial byte vocabulary; special tokens will be the highest IDs
-        i: chr(i).encode() for i in range(256)
-    }
+    # ! SPEC: special tokens goes at the beginning
+    vocab: dict[int, bytes] = {i: t for i, t in enumerate(special_tokens)} | {
+        len(special_tokens) + i: chr(i).encode() for i in range(256)
+    }  # initial byte vocabulary
     merges: list[tuple[bytes, bytes]] = []
-    num_merges = vocab_size - len(vocab) - len(special_tokens)
+    num_merges = vocab_size - len(vocab)
 
     with open(input_path, "rb") as f:
         boundaries = (
@@ -129,7 +136,7 @@ def train_bpe(
     SeqHandle: type = int
     SeqCnt: type = NamedTuple("SeqCnt", [("seq", Seq), ("count", int)])
     seqs: tuple[SeqCnt, ...] = tuple(  # // tuple(ch.encode() for ch in pt)
-        SeqCnt(list(pt.encode()), count) for pt, count in sorted(pretokens.items())
+        SeqCnt([len(special_tokens) + c for c in pt.encode()], count) for pt, count in sorted(pretokens.items())
     )
 
     PC: type = _BPECandidate  # using a wrapper because python only has min-heap before 3.14
@@ -140,7 +147,7 @@ def train_bpe(
         for offset, digram in enumerate(zip(seq, seq[1:])):
             pairs[digram][seqno] += 1
     pairs_heap: list[PC[int]] = [  # will be used lazily
-        PC(digram, sum(seqs[seqno].count * n for seqno, n in occurrences.items()))
+        PC(digram, sum(seqs[seqno].count * n for seqno, n in occurrences.items()), vocab)
         for digram, occurrences in pairs.items()
     ]
     pairs_cnts: defaultdict[Pair, int] = defaultdict(
@@ -149,14 +156,16 @@ def train_bpe(
     heapq.heapify(pairs_heap)
 
     # -------------------------------------------------------------
-    # TODO: compute merges
+    # compute merges
     # -------------------------------------------------------------
     for _ in range(num_merges):
         while pairs_heap:  # Pop the highest frequency pair lazily
             top: PC[int] = heapq.heappop(pairs_heap)
-            if top.count == pairs_cnts[top.pair]:  # Validate against our authoritative counter
+            if top.count == (authoritative := pairs_cnts[top.pair]):  # Validate against our authoritative counter
                 break  # breaks while -> goto token registration
             # if we got here, the record was stale
+            elif top.count < authoritative:
+                heapq.heappush(pairs_heap, PC(top.pair, authoritative, vocab))
         else:
             break  # No more pairs left to merge; breaks for -> goto return
 
@@ -164,9 +173,21 @@ def train_bpe(
 
         # Register the new token
         tok0, tok1 = vocab[top[0]], vocab[top[1]]
+
+        # # DEBUG: if this is (' c', 'om'), print the count of it and ('t', 'h')
+        # if tok0 == b" c" and tok1 == b"om":
+        #     print(
+        #         f"""DEBUG: merging {top.pair} with count {top.count}, which is {" ".join(map(repr, (tok0, tok1)))};
+        #         count of ('t', 'h') is {pairs_cnts[(1 + ord("t"), 1 + ord("h"))]}
+        #         """
+        #     )
+        #     assert False, "Debug break"
+
         tokid = len(vocab)
         vocab[tokid] = tok0 + tok1
         merges.append((tok0, tok1))
+
+        affected_pairs: set[Pair] = set()
 
         for seqno, n in pairs[top.pair].items():  # For each sequence the pair occurs in
             seq: list[int] = seqs[seqno].seq
@@ -178,25 +199,26 @@ def train_bpe(
                         # We found an occurrence at index i; we need to merge it
                         del seq[i]  # remove the first token
                         seq[i] = tokid  # replace the second token with the new merged token
+                        pairs_cnts[top.pair] -= seqs[seqno].count
 
                         # Update pairs_cnts and pairs for the affected digrams around the merged token
                         if i > 0:  # there's a preceding token, so a new digram is formed with the merged token
                             prev_pair: tuple[int, int] = (seq[i - 1], top[0])
                             pairs_cnts[prev_pair] -= seqs[seqno].count
-                            # pairs[prev_pair][seqno] -= 1 # lazy heap
+                            affected_pairs.add(prev_pair)
                             new_prev_pair: tuple[int, int] = (seq[i - 1], tokid)
                             pairs_cnts[new_prev_pair] += seqs[seqno].count
                             pairs[new_prev_pair][seqno] += 1
-                            heapq.heappush(pairs_heap, PC(new_prev_pair, pairs_cnts[new_prev_pair]))
+                            affected_pairs.add(new_prev_pair)
 
                         if i < len(seq) - 1:  # there's a following token, do the same
                             next_pair: tuple[int, int] = (top[1], seq[i + 1])
                             pairs_cnts[next_pair] -= seqs[seqno].count
-                            # pairs[next_pair][seqno] -= 1 # lazy heap
+                            affected_pairs.add(next_pair)
                             new_next_pair: tuple[int, int] = (tokid, seq[i + 1])
                             pairs_cnts[new_next_pair] += seqs[seqno].count
                             pairs[new_next_pair][seqno] += 1
-                            heapq.heappush(pairs_heap, PC(new_next_pair, pairs_cnts[new_next_pair]))
+                            affected_pairs.add(new_next_pair)
                     pos += 1  # Move past the merged token to avoid overlapping merges
                 except ValueError:
                     break  # No more occurrences of the first token
@@ -204,12 +226,14 @@ def train_bpe(
         #     assert pairs[top.pair][seqno] == 0, (
         #         f"Expect the {seqno}-th sequence to be free of {top.pair}, got {pairs[top.pair][seqno]} left"
         #     )
-        # assert pairs_cnts[top.pair] == 0, f"Expect the pair {top.pair} to be depleted, got {pairs_cnts[top.pair]} left"
+        # Push final authoritative counts for all affected pairs in one shot
+        for p in affected_pairs:
+            heapq.heappush(pairs_heap, PC(p, pairs_cnts[p], vocab))
+
+        assert pairs_cnts[top.pair] == 0, f"Expect the pair {top.pair} to be depleted, got {pairs_cnts[top.pair]} left"
         del pairs[top.pair]
         del pairs_cnts[top.pair]
 
-    # put the special tokens at the end of the vocab with the highest IDs
-    for token in special_tokens:
-        vocab[len(vocab)] = token
+    # ! SPEC: do not put the special tokens in the vocab
 
     return vocab, merges
