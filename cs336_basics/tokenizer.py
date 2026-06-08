@@ -3,13 +3,12 @@ import heapq
 import multiprocessing as mp
 import os
 from collections import Counter, defaultdict
-from collections.abc import Iterable
-from itertools import chain
+from queue import Queue
 from typing import Literal, LiteralString, NamedTuple
 
 import regex as re
-from regex._main import Match
 
+from .chunk_progress_monitor import ChunkedProgressBar
 from .pretokenization_example import find_chunk_boundaries
 
 __all__: list[str] = ["train_bpe"]
@@ -55,7 +54,12 @@ class _BPECandidate[T]:  # python only has min-heaps before 3.14, so we use a wr
 
 
 def _pretokenize_chunk(
-    input_path: str | os.PathLike, chunk: tuple[int, int], sep: re.Pattern[bytes], pattern: re.Pattern[str]
+    input_path: str | os.PathLike,
+    chunk: tuple[int, int],
+    sep: re.Pattern[bytes],
+    pattern: re.Pattern[str],
+    worker_idx: int | None = None,
+    progress_queue: Queue | None = None,
 ) -> Counter[str]:
     """subprocess worker to pretokenize a chunk of a file and return the pre-token counts;
     used for multiprocessing support in train_bpe
@@ -63,12 +67,25 @@ def _pretokenize_chunk(
     with open(input_path, "rb") as f:  # * we acquire a file handle for each process
         start, end = chunk
         f.seek(start)
-        chunk: bytes = f.read(end - start)
-    docs: Iterable[str] = (
-        doc.decode("utf-8", errors="ignore") for doc in sep.split(chunk)
-    )  # remove special tokens before pre-tokenization
-    matches: Iterable[Match[str]] = chain.from_iterable(pattern.finditer(doc) for doc in docs)  # re.finditer(_PAT, doc)
-    pretokens: Counter[str] = Counter(match.group() for match in matches)
+        chunk_data: bytes = f.read(end - start)
+    pretokens: Counter[str] = Counter()
+    bytes_processed = 0
+    update_threshold = 1024 * 1024 * 5  # Report every 5MB to minimize lock contention
+    # Iterating eagerly allows us to update the progress bar,
+    # replacing the generator comprehension
+    for doc_bytes in sep.split(chunk_data):
+        doc: str = doc_bytes.decode("utf-8", errors="ignore")
+        matches = pattern.finditer(doc)
+        pretokens.update(match.group() for match in matches)
+
+        bytes_processed += len(doc_bytes)
+        if bytes_processed >= update_threshold and (progress_queue is not None and worker_idx is not None):
+            progress_queue.put((worker_idx, bytes_processed))
+            bytes_processed = 0
+
+    # Final sync for this chunk
+    if progress_queue is not None and worker_idx is not None:
+        progress_queue.put((worker_idx, end - start))
     return pretokens
 
 
@@ -79,7 +96,7 @@ def train_bpe(
     *,
     pretokenization: re.Pattern[str] | bool = True,
     multiprocessing: int | bool = True,
-    repetitive_pretokens: bool = False,
+    report_progress: bool = True,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """
     Train a BPE tokenizer on the given input text file.
@@ -97,8 +114,8 @@ def train_bpe(
         multiprocessing: If True, use as many processes as there are CPU cores;
                     if an integer, use at most that many processes;
                     if False or None, do not use multiprocessing.
-        repetitive_pretokens: If True, Count byte pairs within each pre-token first, then multiply by the pre-token's count.
-                    if False, iterate through each pre-token directly.
+        report_progress: If True, display a progress bar during training.
+                    Only applicable if multiprocessing is enabled.
 
     Returns:
         A tuple containing:
@@ -119,7 +136,9 @@ def train_bpe(
     )  # if pretokenization is False, the pre-token is the entire document
 
     num_processes = os.cpu_count() or multiprocessing or 1  # if os.cpu_count() is None, fall back to no capping
-    num_processes = max(1, min(multiprocessing or 1, num_processes))  # clamp between 1 and os.cpu_count()
+    num_processes = max(
+        1, min(num_processes if multiprocessing is True else multiprocessing or 1, num_processes)
+    )  # clamp between 1 and os.cpu_count()
 
     # ! SPEC: special tokens goes at the beginning
     vocab: dict[int, bytes] = {i: t for i, t in enumerate(special_tokens)} | {
@@ -143,12 +162,36 @@ def train_bpe(
         for start, end in zip(boundaries, boundaries[1:]):
             pretokens.update(_pretokenize_chunk(input_path, (start, end), sep, pattern))
     else:
-        with mp.Pool(num_processes) as pool:
-            counters: list[Counter[str]] = pool.starmap(
-                _pretokenize_chunk,
-                [(input_path, (start, end), sep, pattern) for start, end in zip(boundaries, boundaries[1:])],
-            )  # send the tallies back to the main process
-        pretokens.update(chain.from_iterable(counters))  # collect counts from all chunks
+        with mp.Manager() as manager:
+            if report_progress:
+                progress_queue: Queue[tuple[int, int]] = manager.Queue()
+                monitor = ChunkedProgressBar(
+                    boundaries, progress_queue, f"Training BPE with {num_processes} processes..."
+                )
+            try:
+                if report_progress:
+                    monitor.start()
+                with mp.Pool(num_processes) as pool:
+                    counters: list[Counter[str]] = pool.starmap(
+                        _pretokenize_chunk,
+                        [
+                            (
+                                input_path,
+                                (start, end),
+                                sep,
+                                pattern,
+                                worker_idx,
+                                progress_queue if report_progress else None,
+                            )
+                            for worker_idx, (start, end) in enumerate(zip(boundaries, boundaries[1:]))
+                        ],
+                    )
+            finally:
+                if report_progress:
+                    monitor.stop()
+        # // pretokens.update(chain.from_iterable(counters))  # ! WRONG
+        for counter in counters:
+            pretokens.update(counter)  # collect counts from all chunks
 
     Seq: type = list[int]  # we need mutability // tuple[bytes, ...]  # * the representation suggested by the handout
     SeqHandle: type = int
