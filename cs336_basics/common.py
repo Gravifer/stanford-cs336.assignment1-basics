@@ -1,3 +1,8 @@
+import os
+import threading
+
+import psutil
+
 from tests.common import gpt2_bytes_to_unicode
 
 b2u: dict[int, str] = gpt2_bytes_to_unicode()
@@ -32,3 +37,43 @@ def prettyprint_vocab(vocab: dict[int, bytes], cols: int = 10, col_width: int = 
             if idx < len(vocab):
                 print(f"{token_to_readable(vocab[idx]):>{col_width}}", end=sep)
         print()
+
+
+class PeakMemoryMonitor:
+    """Polls RSS of the current process + all children at 0.5s intervals."""
+
+    def __init__(self):
+        self._proc = psutil.Process(os.getpid())
+        self._peak_mb = 0.0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._poll, daemon=True)
+
+    def _rss_mb(self) -> float:
+        try:
+            total = self._proc.memory_info().rss
+            for child in self._proc.children(recursive=True):
+                try:
+                    total += child.memory_info().rss
+                except psutil.NoSuchProcess:
+                    pass
+            return total / 1024**2
+        except psutil.NoSuchProcess:
+            return 0.0
+
+    def _poll(self):
+        while not self._stop.wait(0.5):
+            self._peak_mb = max(self._peak_mb, self._rss_mb())
+
+    def __enter__(self):
+        self._peak_mb = self._rss_mb()  # baseline
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_):
+        self._stop.set()
+        self._thread.join()
+        self._peak_mb = max(self._peak_mb, self._rss_mb())
+
+    @property
+    def peak_mb(self) -> float:
+        return self._peak_mb
