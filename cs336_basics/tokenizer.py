@@ -7,6 +7,7 @@ from queue import Queue
 from typing import Literal, LiteralString, NamedTuple
 
 import regex as re
+from tqdm import tqdm
 
 from .chunk_progress_monitor import ChunkedProgressBar
 from .pretokenization_example import find_chunk_boundaries
@@ -193,6 +194,8 @@ def train_bpe(
         for counter in counters:
             pretokens.update(counter)  # collect counts from all chunks
 
+    print(f"Computing merges among {len(pretokens)} pretokens...")
+
     Seq: type = list[int]  # we need mutability // tuple[bytes, ...]  # * the representation suggested by the handout
     SeqHandle: type = int
     SeqCnt: type = NamedTuple("SeqCnt", [("seq", Seq), ("count", int)])
@@ -219,7 +222,7 @@ def train_bpe(
     # -------------------------------------------------------------
     # compute merges
     # -------------------------------------------------------------
-    for _ in range(num_merges):
+    for _ in tqdm(range(num_merges)):
         while pairs_heap:  # Pop the highest frequency pair lazily
             top: PC[int] = heapq.heappop(pairs_heap)
             if top.count == (authoritative := pairs_cnts[top.pair]):  # Validate against our authoritative counter
@@ -296,3 +299,34 @@ def train_bpe(
         del pairs_cnts[top.pair]
 
     return vocab, merges
+
+
+if __name__ == "__main__":
+    import argparse
+    import json
+    import pickle
+
+    parser = argparse.ArgumentParser(description="Train a BPE tokenizer")
+    parser.add_argument("input_path", help="Path to training corpus")
+    parser.add_argument("--vocab-size", type=int, default=10000)
+    parser.add_argument("--special-tokens", nargs="+", default=["<|endoftext|>"])
+    parser.add_argument("--no-multiprocessing", action="store_true")
+    parser.add_argument("--out-vocab", default="vocab.json", help="Output path for vocabulary (JSON)")
+    parser.add_argument("--out-merges", default="merges.pkl", help="Output path for merges (pickle)")
+    args = parser.parse_args()
+
+    vocab, merges = train_bpe(
+        args.input_path,
+        args.vocab_size,
+        args.special_tokens,
+        multiprocessing=not args.no_multiprocessing,
+    )
+
+    with open(args.out_vocab, "w") as f:
+        json.dump(
+            {str(k): v.decode("utf-8", errors="replace") for k, v in vocab.items()}, f, ensure_ascii=False, indent=2
+        )
+    with open(args.out_merges, "wb") as f:
+        pickle.dump(merges, f)
+    print(f"Saved vocab ({len(vocab)} tokens) → {args.out_vocab}")
+    print(f"Saved merges ({len(merges)}) → {args.out_merges}")
