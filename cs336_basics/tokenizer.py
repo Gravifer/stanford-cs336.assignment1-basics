@@ -222,7 +222,7 @@ def train_bpe(
     # -------------------------------------------------------------
     # compute merges
     # -------------------------------------------------------------
-    for _ in tqdm(range(num_merges)):
+    for _ in tqdm(range(num_merges), disable=not report_progress):
         while pairs_heap:  # Pop the highest frequency pair lazily
             top: PC[int] = heapq.heappop(pairs_heap)
             if top.count == (authoritative := pairs_cnts[top.pair]):  # Validate against our authoritative counter
@@ -311,6 +311,7 @@ if __name__ == "__main__":
     parser.add_argument("--vocab-size", type=int, default=10000)
     parser.add_argument("--special-tokens", nargs="+", default=["<|endoftext|>"])
     parser.add_argument("--no-multiprocessing", action="store_true")
+    parser.add_argument("--no-progress", action="store_true")
     parser.add_argument("--out-vocab", default="vocab.json", help="Output path for vocabulary (JSON)")
     parser.add_argument("--out-merges", default="merges.pkl", help="Output path for merges (pickle)")
     args = parser.parse_args()
@@ -320,6 +321,7 @@ if __name__ == "__main__":
         args.vocab_size,
         args.special_tokens,
         multiprocessing=not args.no_multiprocessing,
+        report_progress=not args.no_progress,
     )
 
     with open(args.out_vocab, "w") as f:
