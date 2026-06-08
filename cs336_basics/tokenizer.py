@@ -103,7 +103,7 @@ def train_bpe(
 
     # ! SPEC: special tokens goes at the beginning
     vocab: dict[int, bytes] = {i: t for i, t in enumerate(special_tokens)} | {
-        len(special_tokens) + i: chr(i).encode() for i in range(256)
+        len(special_tokens) + i: bytes([i]) for i in range(256)
     }  # initial byte vocabulary
     merges: list[tuple[bytes, bytes]] = []
     num_merges = vocab_size - len(vocab)
