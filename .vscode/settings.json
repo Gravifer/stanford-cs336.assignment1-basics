@@ -15,5 +15,7 @@
     "tests"
   ],
   "python.testing.unittestEnabled": false,
-  "python.testing.pytestEnabled": true
+  "python.testing.pytestEnabled": true,
+  "workbench.editor.defaultBinaryEditor": "hexEditor.hexedit",
+  "workbench.editor.pinnedTabSizing": "shrink"
 }
