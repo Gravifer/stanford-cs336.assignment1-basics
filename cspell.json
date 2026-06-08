@@ -4,11 +4,12 @@
     "dictionaryDefinitions": [],
     "dictionaries": [],
     "words": [
-        "<|endoftext|>",
+        "endoftext",
         "cnts",
         "codepoint",
         "digram",
         "pretoken",
+        "pretokenize",
         "pretokenization",
         "pretokens",
         "seqid",

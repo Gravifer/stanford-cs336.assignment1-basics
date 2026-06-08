@@ -1,5 +1,6 @@
 #! /usr/bin/env python3
 import heapq
+import multiprocessing as mp
 import os
 from collections import Counter, defaultdict
 from collections.abc import Iterable
@@ -11,12 +12,13 @@ from regex._main import Match
 
 from .pretokenization_example import find_chunk_boundaries
 
+__all__: list[str] = ["train_bpe"]
+
 _PAT: LiteralString = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""  # see <https://github.com/openai/tiktoken/pull/234/change>
 _pattern: re.Pattern[str] = re.compile(_PAT)
 
 
-class _BPECandidate[T]:
-    # python only has min-heaps before 3.14, so we use a wrapper class that inverts comparison
+class _BPECandidate[T]:  # python only has min-heaps before 3.14, so we use a wrapper class that inverts comparison
     __slots__ = ("pair", "count", "vocab")
 
     # @property
@@ -52,13 +54,31 @@ class _BPECandidate[T]:
         return f"BPECandidate(digram={self.pair}, count={self.count})"
 
 
+def _pretokenize_chunk(
+    input_path: str | os.PathLike, chunk: tuple[int, int], sep: re.Pattern[bytes], pattern: re.Pattern[str]
+) -> Counter[str]:
+    """subprocess worker to pretokenize a chunk of a file and return the pre-token counts;
+    used for multiprocessing support in train_bpe
+    """
+    with open(input_path, "rb") as f:  # * we acquire a file handle for each process
+        start, end = chunk
+        f.seek(start)
+        chunk: bytes = f.read(end - start)
+    docs: Iterable[str] = (
+        doc.decode("utf-8", errors="ignore") for doc in sep.split(chunk)
+    )  # remove special tokens before pre-tokenization
+    matches: Iterable[Match[str]] = chain.from_iterable(pattern.finditer(doc) for doc in docs)  # re.finditer(_PAT, doc)
+    pretokens: Counter[str] = Counter(match.group() for match in matches)
+    return pretokens
+
+
 def train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
-    special_tokens: list[LiteralString | bytes],
+    special_tokens: list[str | bytes],
     *,
     pretokenization: re.Pattern[str] | bool = True,
-    multiprocessing: int | bool = False,
+    multiprocessing: int | bool = True,
     repetitive_pretokens: bool = False,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """
@@ -114,23 +134,21 @@ def train_bpe(
             if num_processes > 1
             else [0, os.path.getsize(input_path)]
         )
-        num_processes = len(boundaries) - 1 or 1  # in case we got fewer boundaries than desired
+    num_processes = len(boundaries) - 1 or 1  # in case we got fewer boundaries than desired
 
+    pretokens: Counter[str] = Counter()
+    if num_processes <= 1:
         # The following is a serial implementation, but you can parallelize this
         # by sending each start/end pair to a set of processes.
         for start, end in zip(boundaries, boundaries[1:]):
-            f.seek(start)
-            chunk: bytes = f.read(end - start)
-            # remove special tokens before pre-tokenization
-            docs: Iterable[str] = (doc.decode("utf-8", errors="ignore") for doc in sep.split(chunk))
-            # Run pre-tokenization on your chunk and store the counts for each pre-token
-            matches: Iterable[Match[str]] = chain.from_iterable(
-                pattern.finditer(doc) for doc in docs
-            )  # re.finditer(_PAT, doc)
-            pretokens: Counter[str] = Counter(match.group() for match in matches)
-            # TODO: for now the tally is complete; for multiprocessing, send the tally back to the main process
-        # ? will we need to acquire a file handle for each process?
-    # TODO: for multiprocessing, collect counts from all chunks
+            pretokens.update(_pretokenize_chunk(input_path, (start, end), sep, pattern))
+    else:
+        with mp.Pool(num_processes) as pool:
+            counters: list[Counter[str]] = pool.starmap(
+                _pretokenize_chunk,
+                [(input_path, (start, end), sep, pattern) for start, end in zip(boundaries, boundaries[1:])],
+            )  # send the tallies back to the main process
+        pretokens.update(chain.from_iterable(counters))  # collect counts from all chunks
 
     Seq: type = list[int]  # we need mutability // tuple[bytes, ...]  # * the representation suggested by the handout
     SeqHandle: type = int
@@ -233,7 +251,5 @@ def train_bpe(
         assert pairs_cnts[top.pair] == 0, f"Expect the pair {top.pair} to be depleted, got {pairs_cnts[top.pair]} left"
         del pairs[top.pair]
         del pairs_cnts[top.pair]
-
-    # ! SPEC: do not put the special tokens in the vocab
 
     return vocab, merges
