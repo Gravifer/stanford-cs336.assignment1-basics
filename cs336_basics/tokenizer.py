@@ -48,7 +48,7 @@ class _BPECandidate[T]:  # python only has min-heaps before 3.14, so we use a wr
         if key == 0 or key == 1:
             return self.pair[key]
         else:
-            raise IndexError(f"_BPECandidate is a pair of '{T}'s; got {key} as index when expecting 0 or 1")
+            raise IndexError(f"_BPECandidate is a pair; got {key} as index when expecting 0 or 1")
 
     def __repr__(self) -> str:
         return f"BPECandidate(digram={self.pair}, count={self.count})"
@@ -285,7 +285,7 @@ def train_bpe(
                             pairs_cnts[new_next_pair] += seqs[seqno].count
                             pairs[new_next_pair][seqno] += 1
                             affected_pairs.add(new_next_pair)
-                    pos += 1  # Move past the merged token to avoid overlapping merges
+                    pos = i + 1  # Move past the position we just examined to avoid rescanning
                 except ValueError:
                     break  # No more occurrences of the first token
             # The merged pair no longer occurs in this sequence, so we can set its count to zero for this sequence
