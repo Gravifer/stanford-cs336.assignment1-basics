@@ -44,23 +44,38 @@ class ChunkedProgressBar:
         self._stop_event.set()
         self._thread.join()
         # Drain any messages that arrived after the last render loop iteration
-        while not self._queue.empty():
-            chunk_idx, bytes_processed = self._queue.get()
+        from queue import Empty
+
+        while True:
+            try:
+                chunk_idx, bytes_processed = self._queue.get(block=False)
+            except Empty:
+                break
             self._progress[chunk_idx] = bytes_processed
         self._render_frame()  # Final flush
         self._stream.write("\n")
         self._stream.flush()
 
     def _render_loop(self) -> None:
+        from queue import Empty
+
         # Throttle updates to ~10Hz to prevent IPC contention and Jupyter output lag
         while not self._stop_event.wait(0.1):
-            while not self._queue.empty():
-                chunk_idx, bytes_processed = self._queue.get()
+            while True:
+                try:
+                    chunk_idx, bytes_processed = self._queue.get(block=False)
+                except Empty:
+                    break
                 self._progress[chunk_idx] = bytes_processed
             self._render_frame()
         # Drain remaining messages before exiting, so stop() sees a consistent state
-        while not self._queue.empty():
-            chunk_idx, bytes_processed = self._queue.get()
+        from queue import Empty
+
+        while True:
+            try:
+                chunk_idx, bytes_processed = self._queue.get(block=False)
+            except Empty:
+                break
             self._progress[chunk_idx] = bytes_processed
 
     def _render_frame(self) -> None:
