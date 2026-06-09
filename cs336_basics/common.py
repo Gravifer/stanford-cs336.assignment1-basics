@@ -1,4 +1,5 @@
 import os
+import sys
 import threading
 
 import psutil
@@ -42,37 +43,44 @@ def prettyprint_vocab(vocab: dict[int, bytes], cols: int = 10, col_width: int = 
 class PeakMemoryMonitor:
     """Polls RSS of the current process + all children at 0.5s intervals."""
 
-    def __init__(self):
+    def __init__(self, verbose: bool = False):
         self._proc = psutil.Process(os.getpid())
         self._peak_mb = 0.0
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._poll, daemon=True)
+        self._inuse = False
+        self._verbose = verbose
 
     def _rss_mb(self) -> float:
         try:
-            total = self._proc.memory_info().rss
+            total: float = self._proc.memory_info().rss
             for child in self._proc.children(recursive=True):
                 try:
                     total += child.memory_info().rss
-                except psutil.NoSuchProcess:
-                    pass
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    if self._verbose:
+                        sys.stderr.write(f"Warning: failed to get memory info for child process {child.pid}\n")
             return total / 1024**2
         except psutil.NoSuchProcess:
             return 0.0
 
     def _poll(self):
         while not self._stop.wait(0.5):
-            self._peak_mb = max(self._peak_mb, self._rss_mb())
+            self._peak_mb: float = max(self._peak_mb, self._rss_mb())
 
-    def __enter__(self):
-        self._peak_mb = self._rss_mb()  # baseline
+    def __enter__(self):  # TODO: add an assertion-based sanity test forbidding double-entry
+        if self._inuse:
+            raise RuntimeError("PeakMemoryMonitor is not reentrant")
+        self._inuse = True
+        self._peak_mb: float = self._rss_mb()  # baseline
         self._thread.start()
         return self
 
     def __exit__(self, *_):
         self._stop.set()
         self._thread.join()
-        self._peak_mb = max(self._peak_mb, self._rss_mb())
+        self._peak_mb: float = max(self._peak_mb, self._rss_mb())
+        self._inuse = False
 
     @property
     def peak_mb(self) -> float:
