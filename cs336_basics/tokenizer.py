@@ -127,7 +127,7 @@ def train_bpe(
                     representing that <token1> was merged with <token2>.
                     Sorted by order of creation.
     """
-    if len(special_tokens) > 0:
+    if len(special_tokens) < 1:
         raise ValueError('special_tokens should at least contain b"<|endoftext|>"')
     special_tokens: list[bytes] = [
         token.encode() if isinstance(token, str) else token for token in special_tokens
