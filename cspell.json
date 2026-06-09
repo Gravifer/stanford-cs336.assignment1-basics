@@ -8,6 +8,7 @@
         "codepoint",
         "digram",
         "endoftext",
+        "inuse",
         "nonblocking",
         "pretoken",
         "pretokenization",
