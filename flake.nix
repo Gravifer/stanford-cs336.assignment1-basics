@@ -58,13 +58,13 @@
               zlib
               glib
               ncurses
-            ])}:$LD_LIBRARY_PATH"
+            ])}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
             # 3. WSL2 GPU Passthrough:
             # WSL2 mounts the Windows NVIDIA drivers directly to this path. 
             # This is strictly required for `torch` and `cuda-bindings` to detect the GPU in WSL.
             if [ -d "/usr/lib/wsl/lib" ]; then
-              export LD_LIBRARY_PATH="/usr/lib/wsl/lib:$LD_LIBRARY_PATH"
+              export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             fi
           '';
         };
