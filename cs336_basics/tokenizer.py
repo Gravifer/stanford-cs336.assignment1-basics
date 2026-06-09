@@ -71,6 +71,7 @@ def _pretokenize_chunk(
         chunk_data: bytes = f.read(end - start)
     pretokens: Counter[str] = Counter()
     bytes_processed = 0
+    bytes_increment = 0
     update_threshold = 1024 * 1024 * 5  # Report every 5MB to minimize lock contention
     # Iterating eagerly allows us to update the progress bar,
     # replacing the generator comprehension
@@ -79,10 +80,10 @@ def _pretokenize_chunk(
         matches = pattern.finditer(doc)
         pretokens.update(match.group() for match in matches)
 
-        bytes_processed += len(doc_bytes)
-        if bytes_processed >= update_threshold and (progress_queue is not None and worker_idx is not None):
+        bytes_increment += len(doc_bytes)
+        if bytes_increment >= update_threshold and (progress_queue is not None and worker_idx is not None):
             progress_queue.put((worker_idx, bytes_processed))
-            bytes_processed = 0
+            bytes_increment = 0
 
     # Final sync for this chunk
     if progress_queue is not None and worker_idx is not None:
