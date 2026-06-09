@@ -1,6 +1,7 @@
 import os
 import sys
 import threading
+from typing import TextIO
 
 import psutil
 
@@ -14,7 +15,9 @@ def token_to_readable(token_bytes: bytes) -> str:
     return "".join(b2u[b] for b in token_bytes)
 
 
-def prettyprint_vocab(vocab: dict[int, bytes], cols: int = 10, col_width: int = 12, skip_bytes: bool = True) -> None:
+def prettyprint_vocab(
+    vocab: dict[int, bytes], cols: int = 10, col_width: int = 12, skip_bytes: bool = True, *, file: TextIO = sys.stdout
+) -> None:
     """Pretty-print the vocabulary table.
 
     Args:
@@ -68,7 +71,7 @@ class PeakMemoryMonitor:
         while not self._stop.wait(0.5):
             self._peak_mb: float = max(self._peak_mb, self._rss_mb())
 
-    def __enter__(self):  # TODO: add an assertion-based sanity test forbidding double-entry
+    def __enter__(self):
         if self._inuse:
             raise RuntimeError("PeakMemoryMonitor is not reentrant")
         self._inuse = True
