@@ -10,6 +10,10 @@ from cs336_basics.tokenizer import train_bpe
 # TODO: enforce memory limit in MB
 MEMORY_LIMIT_MB = 16000
 
+if __name__ != "__main__":
+    print("This script should not be imported")
+    quit(-1)
+
 f = "data/owt_train.txt"
 ru0 = resource.getrusage(resource.RUSAGE_SELF)
 t0 = time.perf_counter()
@@ -26,7 +30,7 @@ print(f"Peak RAM (main + workers): {mem.peak_mb:.0f} MB")
 prettyprint_vocab(vocab, cols=10, col_width=13)
 out_vocab = "vocab.json"
 out_merges = "merges.pkl"
-with open(out_vocab, "w") as f:
+with open(out_vocab, "w", encoding="utf-8") as f:
     json.dump({str(k): v.decode("utf-8", errors="replace") for k, v in vocab.items()}, f, ensure_ascii=False, indent=2)
 with open(out_merges, "wb") as f:
     pickle.dump(merges, f)
