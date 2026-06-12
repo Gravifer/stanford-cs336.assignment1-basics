@@ -14,7 +14,7 @@ f = "data/owt_train.txt"
 ru0 = resource.getrusage(resource.RUSAGE_SELF)
 t0 = time.perf_counter()
 with PeakMemoryMonitor() as mem:
-    vocab, merges = train_bpe(f, 32000, ["<|endoftext|>"], multiprocessing=4)
+    vocab, merges = train_bpe(f, 32000, ["<|endoftext|>"], multiprocessing=16)
 
 wall_time = time.perf_counter() - t0
 ru1 = resource.getrusage(resource.RUSAGE_SELF)
