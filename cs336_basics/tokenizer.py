@@ -375,9 +375,8 @@ class BPETokenizer(TextTokenizer):
         *,
         report_progress: bool = True,
     ):
-        with open(vocab_filepath, encoding="utf-8") as f:
-            vocab = json.load(f)  # ! we should let any exception propagate
-            vocab: dict[int, bytes] = {int(k): v.encode("utf-8") for k, v in vocab.items()}
+        with open(vocab_filepath, "rb") as f:
+            vocab = pickle.load(f)  # ! we should let any exception propagate
             if report_progress:
                 print(f"Loaded vocab from {vocab_filepath}, size: {len(vocab)}")
         with open(merges_filepath, "rb") as f:
@@ -413,46 +412,58 @@ class BPETokenizer(TextTokenizer):
                 b"|".join(map(re.escape, list(disallowed_special))),
                 text.encode(),
             ):
-                print(f"DEBUG: disallowed tokens: {disallowed_special}")
+                # print(f"DEBUG: disallowed tokens: {disallowed_special}")
                 raise ValueError(
                     f"Input text at {match.start()}-{match.end()} contains disallowed special token {match.group()!r}"
                 )
         # we need to incorporate the allowed_special tokens into the pretokenization pattern, ensuring they take precedence over the default pattern
-        pattern = re.compile(
-            ("(" + "|".join(map(re.escape, sorted(allowed_special))) + ")|" if allowed_special else "")
-            + self.pretokenization_pattern(pretokenization).pattern
+        # print(f"DEBUG: allowed_special tokens: {allowed_special}")
+        specials: re.Pattern[str] = re.compile(
+            "(" + "|".join(map(re.escape, sorted(allowed_special))) + ")" if allowed_special else r"(.+)"
         )
-        matches = pattern.finditer(text)
+        pattern = self.pretokenization_pattern(pretokenization)
         out: list[int] = []
-        for match in matches:
-            pretoken: str = match.group()
-            print(f"DEBUG: pretoken {pretoken!r} from {match.start()}-{match.end()}")
-            if pretoken in self._user_defined_special_tokens:
-                out.append(self._user_defined_special_tokens[pretoken])
+        fragments: list[str] = specials.split(text)
+        for fragment in fragments:
+            if fragment == "":
                 continue
-            pretoken: bytes = pretoken.encode()
-            if pretoken in self._assumed_special_tokens:
-                out.append(self._assumed_special_tokens[pretoken])
+            # print(f"DEBUG: fragment {fragment!r}")
+            if fragment in self._user_defined_special_tokens:
+                out.append(self._user_defined_special_tokens[fragment])
                 continue
-            tokens = [bytes([b]) for b in pretoken]  # start with byte-level tokens
-            # we should follow the order of our merges, rather than trying to find a longest prefix
-            for merge in self._merges:
-                i = 0
-                while i < len(tokens) - 1:
-                    if (tokens[i], tokens[i + 1]) == merge:
-                        tokens[i : i + 2] = [tokens[i] + tokens[i + 1]]  # merge the pair
+            elif fragment.encode() in self._assumed_special_tokens:
+                out.append(self._assumed_special_tokens[fragment.encode()])
+                continue
+            matches = pattern.finditer(fragment)
+            for match in matches:
+                pretoken: str = match.group()
+                # print(f"DEBUG: pretoken {pretoken!r} from {match.start()}-{match.end()}")
+                if pretoken in self._user_defined_special_tokens:
+                    out.append(self._user_defined_special_tokens[pretoken])
+                    continue
+                pretoken: bytes = pretoken.encode()
+                if pretoken in self._assumed_special_tokens:
+                    out.append(self._assumed_special_tokens[pretoken])
+                    continue
+                tokens = [bytes([b]) for b in pretoken]  # start with byte-level tokens
+                # we should follow the order of our merges, rather than trying to find a longest prefix
+                for merge in self._merges:
+                    i = 0
+                    while i < len(tokens) - 1:
+                        if (tokens[i], tokens[i + 1]) == merge:
+                            tokens[i : i + 2] = [tokens[i] + tokens[i + 1]]  # merge the pair
+                        else:
+                            i += 1
+                for token in tokens:
+                    for id, tok in self._vocab.items():
+                        if tok == token:
+                            out.append(id)
+                            break
                     else:
-                        i += 1
-            for token in tokens:
-                for id, tok in self._vocab.items():
-                    if tok == token:
-                        out.append(id)
-                        break
-                else:
-                    print(f"DEBUG: {self._vocab}")
-                    raise ValueError(
-                        f"Pretoken {pretoken!r} contains byte sequence {token!r} that cannot be encoded with the current vocabulary"
-                    )
+                        # print(f"DEBUG: {self._vocab}")
+                        raise ValueError(
+                            f"Pretoken {pretoken!r} contains byte sequence {token!r} that cannot be encoded with the current vocabulary"
+                        )
         return out
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
