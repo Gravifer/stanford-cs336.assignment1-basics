@@ -398,8 +398,8 @@ class BPETokenizer(TextTokenizer):
         text: str,
         *,
         pretokenization: re.Pattern[str] | bool = True,
-        allowed_special: Literal["all"] | Set[str] = set(),
-        disallowed_special: Literal["all"] | Collection[str] = "all",
+        allowed_special: Literal["all"] | Set[str] = "all",
+        disallowed_special: Literal["all"] | Collection[str] = set(),
     ) -> list[int]:
         #
         if allowed_special == "all":  # even then we don't allow ones that are not supplied to __init__
@@ -426,6 +426,7 @@ class BPETokenizer(TextTokenizer):
         out: list[int] = []
         for match in matches:
             pretoken: str = match.group()
+            print(f"DEBUG: pretoken {pretoken!r} from {match.start()}-{match.end()}")
             if pretoken in self._user_defined_special_tokens:
                 out.append(self._user_defined_special_tokens[pretoken])
                 continue
@@ -442,23 +443,16 @@ class BPETokenizer(TextTokenizer):
                         tokens[i : i + 2] = [tokens[i] + tokens[i + 1]]  # merge the pair
                     else:
                         i += 1
-            out.extend(next(id for id, token in self._vocab.items() if token == tok) for tok in tokens)
-            # # we need to find the longest prefix of token_bytes that is in the vocab, then the longest prefix of the remainder, etc.
-            # i: int = 0
-            # while i < len(pretoken):
-            #     for j in range(len(pretoken), i, -1):
-            #         chunk = pretoken[i:j]
-            #         if chunk in self._vocab.values():
-            #             for id, tok in self._vocab.items():
-            #                 if tok == chunk:
-            #                     out.append(id)
-            #                     break
-            #             i = j
-            #             break
-            #     else:
-            #         raise ValueError(
-            #             f"Token {pretoken!r} contains byte sequence {pretoken[i:j]!r} that cannot be encoded with the current vocabulary"
-            #         )
+            for token in tokens:
+                for id, tok in self._vocab.items():
+                    if tok == token:
+                        out.append(id)
+                        break
+                else:
+                    print(f"DEBUG: {self._vocab}")
+                    raise ValueError(
+                        f"Pretoken {pretoken!r} contains byte sequence {token!r} that cannot be encoded with the current vocabulary"
+                    )
         return out
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:

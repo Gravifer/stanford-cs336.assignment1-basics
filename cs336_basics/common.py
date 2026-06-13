@@ -28,18 +28,18 @@ def prettyprint_vocab(
     """
     id_width = 6
     sep = " │ "
-    print(f"{'id':>{id_width}}", end=sep, file)
+    print(f"{'id':>{id_width}}", end=sep, file=file)
     for j in range(cols):
-        print(f"{j:>{col_width}}", end=sep, file)
+        print(f"{j:>{col_width}}", end=sep, file=file)
     print(file=file)
     print("─" * (id_width + len(sep) + (col_width + len(sep)) * cols), file=file)
     start = cols * (256 // cols) if skip_bytes else 0
     for i in range(start, len(vocab), cols):
-        print(f"{i:>{id_width}}", end=sep, file)
+        print(f"{i:>{id_width}}", end=sep, file=file)
         for j in range(cols):
             idx = i + j
             if idx < len(vocab):
-                print(f"{token_to_readable(vocab[idx]):>{col_width}}", end=sep, file)
+                print(f"{token_to_readable(vocab[idx]):>{col_width}}", end=sep, file=file)
         print(file=file)
 
 
