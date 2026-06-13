@@ -1,8 +1,13 @@
 #! /usr/bin/env python3
+import functools
 import heapq
+import json
 import multiprocessing as mp
 import os
+import pickle
+from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
+from collections.abc import Collection, Iterable, Iterator, Set
 from queue import Queue
 from typing import Literal, LiteralString, NamedTuple
 
@@ -12,7 +17,7 @@ from tqdm import tqdm
 from .chunk_progress_monitor import ChunkedProgressBar
 from .pretokenization_example import find_chunk_boundaries
 
-__all__: list[str] = ["train_bpe"]
+__all__: list[str] = ["train_bpe", "BPETokenizer", "Tokenizer"]
 
 _PAT: LiteralString = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""  # see <https://github.com/openai/tiktoken/pull/234/change>
 _pattern: re.Pattern[str] = re.compile(_PAT)
@@ -135,7 +140,9 @@ def train_bpe(
     sep: re.Pattern[bytes] = re.compile(b"|".join(map(re.escape, special_tokens)))
 
     pattern: re.Pattern[str] = (
-        _pattern if pretokenization is True else pretokenization or re.compile(r".*")
+        _pattern
+        if pretokenization is True
+        else pretokenization or re.compile(r".*")  # TODO: reuse the pretokenization_pattern method from BPETokenizer
     )  # if pretokenization is False, the pre-token is the entire document
 
     num_processes = os.cpu_count() or multiprocessing or 1  # if os.cpu_count() is None, fall back to no capping
@@ -302,6 +309,180 @@ def train_bpe(
 
     return vocab, merges
 
+
+class TextTokenizer(ABC):
+    @abstractmethod
+    def encode(self, text: str) -> list[int]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def decode(self, ids: list[int]) -> str:
+        raise NotImplementedError
+
+
+class BPETokenizer(TextTokenizer):
+    __slots__ = ("_vocab", "_merges", "_assumed_special_tokens", "_user_defined_special_tokens")
+
+    def __init__(
+        self,
+        vocab: dict[int, bytes],
+        merges: list[tuple[bytes, bytes]],
+        special_tokens: list[str] | None = None,  # the user is not allowed to specify byte sequences invalid as utf-8
+        *,
+        report_progress: bool = True,
+    ):
+        self._vocab = vocab
+        self._merges = merges
+        special_tokens: list[str] = special_tokens or []
+        assert all(tok for tok in special_tokens)
+
+        nul_id = next((id for id, token in vocab.items() if token == b"\x00"), -1)
+        self._assumed_special_tokens: dict[bytes, int] = {vocab[id]: id for id in range(nul_id)}
+        self._user_defined_special_tokens: dict[str, int] = dict()
+
+        # append the user-defined special tokens to the vocab, ensuring no conflicts with existing tokens
+        vocab_initial_size = len(vocab)
+        vocab_initial_highest_id = max(vocab.keys())
+        next_id = vocab_initial_highest_id + 1
+        for token in special_tokens:
+            token_bytes: bytes = token.encode()
+            if token_bytes in vocab.values():  # check if the token already exists in the vocab
+                for existing_id, existing_token in vocab.items():  # ? this may be inefficient
+                    if token_bytes == existing_token:
+                        self._user_defined_special_tokens[token] = existing_id
+                        break
+                continue
+            # ? what if it is a substring of an existing token?
+            vocab[next_id] = token_bytes
+            self._user_defined_special_tokens[token] = next_id
+            next_id += 1
+        if report_progress and next_id > vocab_initial_highest_id + 1:
+            print(
+                f"{next_id - vocab_initial_highest_id} additional special tokens appended at [{vocab_initial_highest_id + 1}:{next_id}]; "
+                f"size {vocab_initial_size} → {len(vocab)}"
+            )
+
+    @classmethod
+    def from_files(
+        cls,
+        vocab_filepath: str | os.PathLike,
+        merges_filepath: str | os.PathLike,
+        special_tokens: list[str] | None = None,
+        *,
+        report_progress: bool = True,
+    ):
+        with open(vocab_filepath, encoding="utf-8") as f:
+            vocab = json.load(f)  # ! we should let any exception propagate
+            vocab: dict[int, bytes] = {int(k): v.encode("utf-8") for k, v in vocab.items()}
+            if report_progress:
+                print(f"Loaded vocab from {vocab_filepath}, size: {len(vocab)}")
+        with open(merges_filepath, "rb") as f:
+            merges = pickle.load(f)
+            if report_progress:
+                print(f"Loaded merges from {merges_filepath}, size: {len(merges)}")
+        return cls(vocab, merges, special_tokens, report_progress=report_progress)
+
+    @staticmethod
+    @functools.lru_cache(maxsize=128)
+    def pretokenization_pattern(enable: LiteralString | re.Pattern[str] | bool = True) -> re.Pattern[str]:
+        """Returns the regex pattern used for pre-tokenization if enabled,
+        otherwise returns a pattern that treats the entire document as a single token."""
+        return _pattern if enable is True else re.compile(enable) or re.compile(r".*")
+
+    def encode(
+        self,
+        text: str,
+        *,
+        pretokenization: re.Pattern[str] | bool = True,
+        allowed_special: Literal["all"] | Set[str] = set(),
+        disallowed_special: Literal["all"] | Collection[str] = "all",
+    ) -> list[int]:
+        #
+        if allowed_special == "all":  # even then we don't allow ones that are not supplied to __init__
+            allowed_special: set[str] = set(self._user_defined_special_tokens.keys())
+        if disallowed_special == "all":
+            disallowed_special: set[bytes] = set(t.encode() for t in self._user_defined_special_tokens.keys()) | set(
+                self._assumed_special_tokens.keys()
+            ) - set(t.encode() for t in allowed_special)
+        if disallowed_special:
+            if match := re.search(
+                b"|".join(map(re.escape, list(disallowed_special))),
+                text.encode(),
+            ):
+                print(f"DEBUG: disallowed tokens: {disallowed_special}")
+                raise ValueError(
+                    f"Input text at {match.start()}-{match.end()} contains disallowed special token {match.group()!r}"
+                )
+        # we need to incorporate the allowed_special tokens into the pretokenization pattern, ensuring they take precedence over the default pattern
+        pattern = re.compile(
+            ("(" + "|".join(map(re.escape, sorted(allowed_special))) + ")|" if allowed_special else "")
+            + self.pretokenization_pattern(pretokenization).pattern
+        )
+        matches = pattern.finditer(text)
+        out: list[int] = []
+        for match in matches:
+            pretoken: str = match.group()
+            if pretoken in self._user_defined_special_tokens:
+                out.append(self._user_defined_special_tokens[pretoken])
+                continue
+            pretoken: bytes = pretoken.encode()
+            if pretoken in self._assumed_special_tokens:
+                out.append(self._assumed_special_tokens[pretoken])
+                continue
+            tokens = [bytes([b]) for b in pretoken]  # start with byte-level tokens
+            # we should follow the order of our merges, rather than trying to find a longest prefix
+            for merge in self._merges:
+                i = 0
+                while i < len(tokens) - 1:
+                    if (tokens[i], tokens[i + 1]) == merge:
+                        tokens[i : i + 2] = [tokens[i] + tokens[i + 1]]  # merge the pair
+                    else:
+                        i += 1
+            out.extend(next(id for id, token in self._vocab.items() if token == tok) for tok in tokens)
+            # # we need to find the longest prefix of token_bytes that is in the vocab, then the longest prefix of the remainder, etc.
+            # i: int = 0
+            # while i < len(pretoken):
+            #     for j in range(len(pretoken), i, -1):
+            #         chunk = pretoken[i:j]
+            #         if chunk in self._vocab.values():
+            #             for id, tok in self._vocab.items():
+            #                 if tok == chunk:
+            #                     out.append(id)
+            #                     break
+            #             i = j
+            #             break
+            #     else:
+            #         raise ValueError(
+            #             f"Token {pretoken!r} contains byte sequence {pretoken[i:j]!r} that cannot be encoded with the current vocabulary"
+            #         )
+        return out
+
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+        # call self.encode() on each
+        for item in iterable:
+            yield from self.encode(item)
+
+    def decode(self, ids: list[int], errors: str = "replace") -> str:
+        """
+        look up each ID's corresponding entries in the vocabulary (a byte sequence),
+        concatenate them together, and then decode the bytes to a Unicode string.
+
+        Note that user input IDs are not guaranteed to map to valid Unicode strings;
+        in that case, use the 'replace' error handler to automatically replace malformed data with the replacement marker.
+        """
+        for id in ids:
+            if id not in self._vocab:
+                # ? should we raise an error, or fallback to U+FFFD?
+                raise ValueError(f"ID {id} not found in vocabulary")
+        byte_seq = b"".join(self._vocab[id] for id in ids)
+        return byte_seq.decode("utf-8", errors=errors)
+
+
+Tokenizer: type = BPETokenizer
 
 if __name__ == "__main__":
     import argparse
