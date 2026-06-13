@@ -417,17 +417,21 @@ class BPETokenizer(TextTokenizer):
                     f"Input text at {match.start()}-{match.end()} contains disallowed special token {match.group()!r}"
                 )
         # we need to incorporate the allowed_special tokens into the pretokenization pattern, ensuring they take precedence over the default pattern
-        # print(f"DEBUG: allowed_special tokens: {allowed_special}")
+        print(f"DEBUG: allowed_special tokens: {allowed_special}")
+        # ! SPEC: the tests require that if one allowed_special is a substring of another, the longer one should take precedence;
+        # ! we ensure this by sorting by length in descending order before joining into the regex pattern
         specials: re.Pattern[str] = re.compile(
-            "(" + "|".join(map(re.escape, sorted(allowed_special))) + ")" if allowed_special else r"(.+)"
+            "(" + "|".join(map(re.escape, sorted(allowed_special, key=str.__len__, reverse=True))) + ")"
+            if allowed_special
+            else r"(.+)"
         )
         pattern = self.pretokenization_pattern(pretokenization)
         out: list[int] = []
-        fragments: list[str] = specials.split(text)
-        for fragment in fragments:
+        fragments: list[str] = [fragment for fragment in specials.split(text) if fragment != ""]
+        for fragment in (p := tqdm(fragments)):
             if fragment == "":
                 continue
-            # print(f"DEBUG: fragment {fragment!r}")
+            p.set_postfix_str(f"{fragment[:8]!r}...")
             if fragment in self._user_defined_special_tokens:
                 out.append(self._user_defined_special_tokens[fragment])
                 continue
@@ -469,6 +473,7 @@ class BPETokenizer(TextTokenizer):
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
         # call self.encode() on each
         for item in iterable:
+            print(f"DEBUG: encoding item {item!r} from iterable")
             yield from self.encode(item)
 
     def decode(self, ids: list[int], errors: str = "replace") -> str:
