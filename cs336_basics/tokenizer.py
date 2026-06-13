@@ -325,7 +325,14 @@ class TextTokenizer(ABC):
 
 
 class BPETokenizer(TextTokenizer):
-    __slots__ = ("_vocab", "_merges", "_assumed_special_tokens", "_user_defined_special_tokens")
+    __slots__ = (
+        "_vocab",
+        "_vocab_inv",
+        "_merges",
+        "_merge_rank",
+        "_assumed_special_tokens",
+        "_user_defined_special_tokens",
+    )
 
     def __init__(
         self,
@@ -360,11 +367,24 @@ class BPETokenizer(TextTokenizer):
             vocab[next_id] = token_bytes
             self._user_defined_special_tokens[token] = next_id
             next_id += 1
+
         if report_progress and next_id > vocab_initial_highest_id + 1:
             print(
                 f"{next_id - vocab_initial_highest_id} additional special tokens appended at [{vocab_initial_highest_id + 1}:{next_id}]; "
                 f"size {vocab_initial_size} → {len(vocab)}"
             )
+
+        # O(1) bytes→id lookup instead of linear scan
+        self._vocab_inv: dict[bytes, int] = {v: k for k, v in self._vocab.items()}
+        # O(1) merge priority lookup
+        self._merge_rank: dict[tuple[bytes, bytes], int] = {pair: rank for rank, pair in enumerate(self._merges)}
+        # per-instance pretoken cache
+        self._pretoken_cache: dict[bytes | str, tuple[int, ...]] = {}
+        for special_token, id in self._user_defined_special_tokens.items():
+            self._pretoken_cache[special_token] = (id,)
+            self._pretoken_cache[special_token.encode()] = (id,)
+        for special_token, id in self._assumed_special_tokens.items():
+            self._pretoken_cache[special_token] = (id,)
 
     @classmethod
     def from_files(
@@ -391,6 +411,56 @@ class BPETokenizer(TextTokenizer):
         """Returns the regex pattern used for pre-tokenization if enabled,
         otherwise returns a pattern that treats the entire document as a single token."""
         return _pattern if enable is True else re.compile(enable) or re.compile(r".*")
+
+    @functools.lru_cache(maxsize=128)
+    def _encode_pretoken(self, pretoken: str) -> tuple[int, ...]:
+        """Encode a single pretoken (as bytes) into a sequence of token IDs, using the vocabulary and merges."""
+        if pretoken in self._pretoken_cache:
+            return self._pretoken_cache[pretoken]
+
+        if pretoken in self._user_defined_special_tokens:
+            token_ids: tuple[int] = (self._user_defined_special_tokens[pretoken],)
+            self._pretoken_cache[pretoken] = token_ids
+            return token_ids
+
+        pretoken: bytes = pretoken.encode()
+
+        if pretoken in self._assumed_special_tokens:
+            token_ids: tuple[int] = (self._assumed_special_tokens[pretoken],)
+            self._pretoken_cache[pretoken] = token_ids
+            return token_ids
+        tokens: list[bytes] = [bytes([b]) for b in pretoken]  # start with byte-level tokens
+
+        while len(tokens) > 1:  # keep merging, until we have a single token or run out of rules
+            best_rank, best_i = None, -1
+            for i in range(len(tokens) - 1):
+                rank = self._merge_rank.get((tokens[i], tokens[i + 1]))
+                if rank is not None and (best_rank is None or rank < best_rank):
+                    best_rank, best_i = rank, i
+            if best_i == -1:
+                break
+            tokens[best_i] = tokens[best_i] + tokens[best_i + 1]
+            del tokens[best_i + 1]
+
+        # token_ids: list[int] = []
+        # for token in tokens:
+        #     if token in self._vocab_inv:
+        #         token_ids.append(self._vocab_inv[token])
+        #     else:
+        #         # print(f"DEBUG: {self._vocab}")
+        #         raise ValueError(
+        #             f"Pretoken {pretoken!r} contains byte sequence {token!r} that cannot be encoded with the current vocabulary"
+        #         )
+        # token_ids: tuple[int, ...] = tuple(token_ids)
+
+        try:
+            token_ids: tuple[int, ...] = tuple(self._vocab_inv[token] for token in tokens)
+        except KeyError as e:
+            raise ValueError(
+                f"Pretoken {pretoken!r} contains byte sequence {e.args[0]!r} that cannot be encoded with the current vocabulary"
+            )
+        self._pretoken_cache[pretoken] = token_ids
+        return token_ids
 
     def encode(
         self,
@@ -447,32 +517,7 @@ class BPETokenizer(TextTokenizer):
             for match in matches:
                 pretoken: str = match.group()
                 # print(f"DEBUG: pretoken {pretoken!r} from {match.start()}-{match.end()}")
-                if pretoken in self._user_defined_special_tokens:
-                    out.append(self._user_defined_special_tokens[pretoken])
-                    continue
-                pretoken: bytes = pretoken.encode()
-                if pretoken in self._assumed_special_tokens:
-                    out.append(self._assumed_special_tokens[pretoken])
-                    continue
-                tokens = [bytes([b]) for b in pretoken]  # start with byte-level tokens
-                # we should follow the order of our merges, rather than trying to find a longest prefix
-                for merge in self._merges:
-                    i = 0
-                    while i < len(tokens) - 1:
-                        if (tokens[i], tokens[i + 1]) == merge:
-                            tokens[i : i + 2] = [tokens[i] + tokens[i + 1]]  # merge the pair
-                        else:
-                            i += 1
-                for token in tokens:
-                    for id, tok in self._vocab.items():
-                        if tok == token:
-                            out.append(id)
-                            break
-                    else:
-                        # print(f"DEBUG: {self._vocab}")
-                        raise ValueError(
-                            f"Pretoken {pretoken!r} contains byte sequence {token!r} that cannot be encoded with the current vocabulary"
-                        )
+                out.extend(self._encode_pretoken(pretoken))
         return out
 
     def encode_iterable(self, iterable: Iterable[str], *, report_progress: bool = True) -> Iterator[int]:
