@@ -325,15 +325,6 @@ class TextTokenizer(ABC):
 
 
 class BPETokenizer(TextTokenizer):
-    __slots__ = (
-        "_vocab",
-        "_vocab_inv",
-        "_merges",
-        "_merge_rank",
-        "_assumed_special_tokens",
-        "_user_defined_special_tokens",
-    )
-
     def __init__(
         self,
         vocab: dict[int, bytes],
@@ -377,7 +368,11 @@ class BPETokenizer(TextTokenizer):
         # O(1) bytes→id lookup instead of linear scan
         self._vocab_inv: dict[bytes, int] = {v: k for k, v in self._vocab.items()}
         # O(1) merge priority lookup
-        self._merge_rank: dict[tuple[bytes, bytes], int] = {pair: rank for rank, pair in enumerate(self._merges)}
+        try:
+            self._merge_rank: dict[tuple[bytes, bytes], int] = {pair: rank for rank, pair in enumerate(self._merges)}
+        except TypeError as e:
+            print(f"DEBUG: merges: {self._merges}")
+            raise e
         # per-instance pretoken cache
         self._pretoken_cache: dict[bytes | str, tuple[int, ...]] = {}
         for special_token, id in self._user_defined_special_tokens.items():
@@ -506,7 +501,7 @@ class BPETokenizer(TextTokenizer):
         for fragment in (p := tqdm(fragments, disable=not report_progress)):
             if fragment == "":
                 continue
-            p.set_postfix_str(f"{fragment[:8]!r}...")
+            p.set_postfix_str(f"{fragment[:8]!r:<8}{'...' if len(fragment) > 8 else '   '}")
             if fragment in self._user_defined_special_tokens:
                 out.append(self._user_defined_special_tokens[fragment])
                 continue
@@ -524,9 +519,9 @@ class BPETokenizer(TextTokenizer):
         # call self.encode() on each
         if report_progress:
             print()
-        for item in (p := tqdm(iterable, disable=not report_progress)):
-            p.set_postfix_str(f"{item[:8]!r}...")
-            yield from self.encode(item, report_progress=False)
+        for chunk in (p := tqdm(iterable, disable=not report_progress)):
+            p.set_postfix_str(f"{chunk[:8]!r:<8}{'...' if len(chunk) > 8 else '   '}")
+            yield from self.encode(chunk, report_progress=False)
 
     def decode(self, ids: list[int], errors: str = "replace") -> str:
         """
