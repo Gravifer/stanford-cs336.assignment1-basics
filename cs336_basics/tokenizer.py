@@ -399,6 +399,7 @@ class BPETokenizer(TextTokenizer):
         pretokenization: re.Pattern[str] | bool = True,
         allowed_special: Literal["all"] | Set[str] = "all",
         disallowed_special: Literal["all"] | Collection[str] = set(),
+        report_progress: bool = True,
     ) -> list[int]:
         #
         if allowed_special == "all":  # even then we don't allow ones that are not supplied to __init__
@@ -417,7 +418,7 @@ class BPETokenizer(TextTokenizer):
                     f"Input text at {match.start()}-{match.end()} contains disallowed special token {match.group()!r}"
                 )
         # we need to incorporate the allowed_special tokens into the pretokenization pattern, ensuring they take precedence over the default pattern
-        print(f"DEBUG: allowed_special tokens: {allowed_special}")
+        # print(f"DEBUG: allowed_special tokens: {allowed_special}")
         # ! SPEC: the tests require that if one allowed_special is a substring of another, the longer one should take precedence;
         # ! we ensure this by sorting by length in descending order before joining into the regex pattern
         specials: re.Pattern[str] = re.compile(
@@ -428,7 +429,11 @@ class BPETokenizer(TextTokenizer):
         pattern = self.pretokenization_pattern(pretokenization)
         out: list[int] = []
         fragments: list[str] = [fragment for fragment in specials.split(text) if fragment != ""]
-        for fragment in (p := tqdm(fragments)):
+        # short_frags = [(idx, f) for idx, f in enumerate(fragments) if len(f) <= 15]
+        # print(f"DEBUG: short fragments (<=15 chars): {short_frags[:10]}...")
+        if report_progress:
+            print()
+        for fragment in (p := tqdm(fragments, disable=not report_progress)):
             if fragment == "":
                 continue
             p.set_postfix_str(f"{fragment[:8]!r}...")
@@ -470,11 +475,13 @@ class BPETokenizer(TextTokenizer):
                         )
         return out
 
-    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+    def encode_iterable(self, iterable: Iterable[str], *, report_progress: bool = True) -> Iterator[int]:
         # call self.encode() on each
-        for item in iterable:
-            print(f"DEBUG: encoding item {item!r} from iterable")
-            yield from self.encode(item)
+        if report_progress:
+            print()
+        for item in (p := tqdm(iterable, disable=not report_progress)):
+            p.set_postfix_str(f"{item[:8]!r}...")
+            yield from self.encode(item, report_progress=False)
 
     def decode(self, ids: list[int], errors: str = "replace") -> str:
         """
