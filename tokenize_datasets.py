@@ -94,6 +94,8 @@ def parallel_tokenize_pipeline(
     """
     if num_workers is None:
         num_workers = mp.cpu_count()
+    else:
+        num_workers = max(1, min(num_workers, mp.cpu_count()))  # Ensure at least one worker
 
     filename_base = os.path.basename(file_path)
     print(f"Analyzing file boundaries for {num_workers} processes across {filename_base}...")
@@ -181,7 +183,7 @@ if __name__ == "__main__":
                 vocab_path=vocab_p,
                 merges_path=merges_p,
                 split_token_bytes=b"\n",
-                num_workers=None,
+                num_workers=32,
                 report_progress=True,
             )
 
