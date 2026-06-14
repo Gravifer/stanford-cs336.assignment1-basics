@@ -408,7 +408,7 @@ class BPETokenizer(TextTokenizer):
     def pretokenization_pattern(enable: LiteralString | re.Pattern[str] | bool = True) -> re.Pattern[str]:
         """Returns the regex pattern used for pre-tokenization if enabled,
         otherwise returns a pattern that treats the entire document as a single token."""
-        return _pattern if enable is True else re.compile(enable) or re.compile(r".*")
+        return _pattern if enable is True else re.compile(enable or r".*")
 
     @functools.lru_cache(maxsize=4096)
     def _encode_pretoken(self, pretoken: str) -> tuple[int, ...]:
@@ -458,7 +458,7 @@ class BPETokenizer(TextTokenizer):
         disallowed_special: Literal["all"] | Collection[str] = set(),
         report_progress: bool = True,
     ) -> list[int]:
-        #
+        # TODO: address <https://github.com/Gravifer/stanford-cs336.assignment1-basics/pull/4#discussion_r3409233519>
         if allowed_special == "all":  # even then we don't allow ones that are not supplied to __init__
             allowed_special: set[str] = set(self._user_defined_special_tokens.keys())
         if disallowed_special == "all":
