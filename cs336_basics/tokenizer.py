@@ -514,12 +514,17 @@ class BPETokenizer(TextTokenizer):
         # call self.encode() on each
         if report_progress:
             print()
+        estimate_left = estimate_total
         for chunk in (p := tqdm(iterable, disable=not report_progress, total=estimate_total)):
-            if estimate_total is not None:
-                p.update(len(chunk))
-            # p.set_postfix_str(f"{chunk[:8]!r:<8}{'...' if len(chunk) > 8 else '     '}")
-            # instead, we show the number of lines in the chunk
-            p.set_postfix_str(f"{len(chunk.splitlines())} lines")
+            if estimate_total is not None and estimate_left is not None:
+                lc = len(chunk)  # we don't want to encode it all just for the progress bar update
+                p.update(min(lc, estimate_left))
+                if estimate_left > lc:
+                    estimate_left -= lc
+                else:
+                    estimate_left = 0
+            p.set_postfix_str(f"{chunk[:8]!r:<8}{'...' if len(chunk) > 8 else '     '}")
+            # p.set_postfix_str(f"{len(chunk.splitlines())} lines")  # instead, we show the number of lines in the chunk
             yield from self.encode(chunk, report_progress=False)
         p.close()
 

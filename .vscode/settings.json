@@ -22,12 +22,14 @@
     "**/.git": false,
     "**/.svn": true,
     "**/.hg": true,
+    "**/cspell.json": true,
     "**/.DS_Store": true,
     "**/Thumbs.db": true,
     "**/__pycache__": true,
     "**/.pytest_cache": true,
   },
   "explorerExclude.backup": {
+
 
   }
 }
