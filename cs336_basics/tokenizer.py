@@ -515,11 +515,15 @@ class BPETokenizer(TextTokenizer):
                 out.extend(self._encode_pretoken(pretoken))
         return out
 
-    def encode_iterable(self, iterable: Iterable[str], *, report_progress: bool = True) -> Iterator[int]:
+    def encode_iterable(
+        self, iterable: Iterable[str], *, report_progress: bool = True, estimate_total: float | None = None
+    ) -> Iterator[int]:
         # call self.encode() on each
         if report_progress:
             print()
-        for chunk in (p := tqdm(iterable, disable=not report_progress)):
+        for chunk in (p := tqdm(iterable, disable=not report_progress, total=estimate_total)):
+            if estimate_total is not None:
+                p.update(len(chunk))
             p.set_postfix_str(f"{chunk[:8]!r:<8}{'...' if len(chunk) > 8 else '   '}")
             yield from self.encode(chunk, report_progress=False)
 
