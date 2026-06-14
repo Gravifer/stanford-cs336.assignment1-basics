@@ -5,6 +5,7 @@ import random
 
 import numpy as np
 
+from cs336_basics.common import batched_line_feed
 from cs336_basics.tokenizer import BPETokenizer
 
 vocabs: list[dict[int, bytes]] = []
@@ -41,7 +42,8 @@ encoders = [BPETokenizer(vocab, merges_, special_tokens=["<|endoftext|>"]) for v
 data_dir = "data/"
 for encoder, files, name in zip(
     encoders,
-    [["TinyStoriesV2-GPT4-valid.txt", "TinyStoriesV2-GPT4-train.txt"], ["owt_valid.txt", "owt_train.txt"]],
+    [[], ["owt_train.txt"]],
+    # [["TinyStoriesV2-GPT4-valid.txt", "TinyStoriesV2-GPT4-train.txt"], ["owt_valid.txt", "owt_train.txt"]],
     ["tinystories", "owt"],
 ):
     for file in files:
@@ -51,7 +53,9 @@ for encoder, files, name in zip(
             # get file size
             file_size: int = os.path.getsize(filepath)
             # use iterator encoding
-            encoded: list[int] = list(encoder.encode_iterable(f, estimate_total=file_size))
+            encoded: list[int] = list(
+                encoder.encode_iterable(batched_line_feed(f), estimate_total=file_size)
+            )
             # text = f.read()
         # fragments = text.split("(<|endoftext|>)")
 

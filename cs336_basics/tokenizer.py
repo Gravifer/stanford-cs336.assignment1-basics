@@ -501,7 +501,7 @@ class BPETokenizer(TextTokenizer):
         for fragment in (p := tqdm(fragments, disable=not report_progress)):
             if fragment == "":
                 continue
-            p.set_postfix_str(f"{fragment[:8]!r:<8}{'...' if len(fragment) > 8 else '   '}")
+            p.set_postfix_str(f"{fragment[:8]!r:<8}{'...' if len(fragment) > 8 else '     '}")
             if fragment in self._user_defined_special_tokens:
                 out.append(self._user_defined_special_tokens[fragment])
                 continue
@@ -513,6 +513,7 @@ class BPETokenizer(TextTokenizer):
                 pretoken: str = match.group()
                 # print(f"DEBUG: pretoken {pretoken!r} from {match.start()}-{match.end()}")
                 out.extend(self._encode_pretoken(pretoken))
+        p.close()
         return out
 
     def encode_iterable(
@@ -524,8 +525,11 @@ class BPETokenizer(TextTokenizer):
         for chunk in (p := tqdm(iterable, disable=not report_progress, total=estimate_total)):
             if estimate_total is not None:
                 p.update(len(chunk))
-            p.set_postfix_str(f"{chunk[:8]!r:<8}{'...' if len(chunk) > 8 else '   '}")
+            # p.set_postfix_str(f"{chunk[:8]!r:<8}{'...' if len(chunk) > 8 else '     '}")
+            # instead, we show the number of lines in the chunk
+            p.set_postfix_str(f"{len(chunk.splitlines())} lines")
             yield from self.encode(chunk, report_progress=False)
+        p.close()
 
     def decode(self, ids: list[int], errors: str = "replace") -> str:
         """

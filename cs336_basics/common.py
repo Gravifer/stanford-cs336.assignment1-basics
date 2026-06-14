@@ -1,6 +1,7 @@
 import os
 import sys
 import threading
+from collections.abc import Iterable, Iterator
 from typing import TextIO
 
 import psutil
@@ -88,3 +89,26 @@ class PeakMemoryMonitor:
     @property
     def peak_mb(self) -> float:
         return self._peak_mb
+
+
+def batched_line_feed(iterable_lines: Iterable[str], chunk_size_chars: int = 128 * 1024) -> Iterator[str]:
+    """Buffers an active line iterable (like an open file) into larger strings
+
+    that split cleanly and strictly on newline boundaries.
+    """
+    buffer: list[str] = []
+    current_size = 0
+
+    for line in iterable_lines:
+        buffer.append(line)
+        current_size += len(line)
+
+        # Flush the gathered lines once we pass our amortized block size threshold
+        if current_size >= chunk_size_chars:
+            yield "".join(buffer)
+            buffer.clear()
+            current_size = 0
+
+    # Flush remaining trailing lines at EOF
+    if buffer:
+        yield "".join(buffer)
