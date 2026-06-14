@@ -391,11 +391,14 @@ class BPETokenizer(TextTokenizer):
         report_progress: bool = True,
     ):
         with open(vocab_filepath, "rb") as f:
-            vocab = pickle.load(f)  # ! we should let any exception propagate
+            vocab: dict[int, bytes] = pickle.load(f)  # ! we should let any exception propagate
+            # assert isinstance(vocab, dict) and all(isinstance(k, int) and isinstance(v, bytes) for k, v in vocab.items()), (
+            #     f"Vocab file {vocab_filepath} does not contain a dict[int, bytes]; got {type(vocab)} with items of types {set((type(k), type(v)) for k, v in vocab.items())}"
+            # ) # ? is there a better way to validate at run-time?
             if report_progress:
                 print(f"Loaded vocab from {vocab_filepath}, size: {len(vocab)}")
         with open(merges_filepath, "rb") as f:
-            merges = pickle.load(f)
+            merges: list[tuple[bytes, bytes]] = pickle.load(f)
             if report_progress:
                 print(f"Loaded merges from {merges_filepath}, size: {len(merges)}")
         return cls(vocab, merges, special_tokens, report_progress=report_progress)
@@ -407,7 +410,7 @@ class BPETokenizer(TextTokenizer):
         otherwise returns a pattern that treats the entire document as a single token."""
         return _pattern if enable is True else re.compile(enable) or re.compile(r".*")
 
-    @functools.lru_cache(maxsize=128)
+    @functools.lru_cache(maxsize=4096)
     def _encode_pretoken(self, pretoken: str) -> tuple[int, ...]:
         """Encode a single pretoken (as bytes) into a sequence of token IDs, using the vocabulary and merges."""
         if pretoken in self._pretoken_cache:
@@ -436,17 +439,6 @@ class BPETokenizer(TextTokenizer):
                 break
             tokens[best_i] = tokens[best_i] + tokens[best_i + 1]
             del tokens[best_i + 1]
-
-        # token_ids: list[int] = []
-        # for token in tokens:
-        #     if token in self._vocab_inv:
-        #         token_ids.append(self._vocab_inv[token])
-        #     else:
-        #         # print(f"DEBUG: {self._vocab}")
-        #         raise ValueError(
-        #             f"Pretoken {pretoken!r} contains byte sequence {token!r} that cannot be encoded with the current vocabulary"
-        #         )
-        # token_ids: tuple[int, ...] = tuple(token_ids)
 
         try:
             token_ids: tuple[int, ...] = tuple(self._vocab_inv[token] for token in tokens)
