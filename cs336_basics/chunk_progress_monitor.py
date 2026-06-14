@@ -3,7 +3,7 @@
 import shutil
 import sys
 import threading
-from queue import Queue
+from queue import Empty, Queue
 from typing import TextIO
 
 __all__: list[str] = ["ChunkedProgressBar"]
@@ -44,7 +44,6 @@ class ChunkedProgressBar:
         self._stop_event.set()
         self._thread.join()
         # Drain any messages that arrived after the last render loop iteration
-        from queue import Empty
 
         while True:
             try:
@@ -57,8 +56,6 @@ class ChunkedProgressBar:
         self._stream.flush()
 
     def _render_loop(self) -> None:
-        from queue import Empty
-
         # Throttle updates to ~10Hz to prevent IPC contention and Jupyter output lag
         while not self._stop_event.wait(0.1):
             while True:
@@ -69,7 +66,6 @@ class ChunkedProgressBar:
                 self._progress[chunk_idx] = bytes_processed
             self._render_frame()
         # Drain remaining messages before exiting, so stop() sees a consistent state
-        from queue import Empty
 
         while True:
             try:

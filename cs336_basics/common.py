@@ -1,6 +1,7 @@
 import os
 import sys
 import threading
+from collections.abc import Iterable, Iterator
 from typing import TextIO
 
 import psutil
@@ -28,18 +29,18 @@ def prettyprint_vocab(
     """
     id_width = 6
     sep = " │ "
-    print(f"{'id':>{id_width}}", end=sep, file)
+    print(f"{'id':>{id_width}}", end=sep, file=file)
     for j in range(cols):
-        print(f"{j:>{col_width}}", end=sep, file)
+        print(f"{j:>{col_width}}", end=sep, file=file)
     print(file=file)
     print("─" * (id_width + len(sep) + (col_width + len(sep)) * cols), file=file)
     start = cols * (256 // cols) if skip_bytes else 0
     for i in range(start, len(vocab), cols):
-        print(f"{i:>{id_width}}", end=sep, file)
+        print(f"{i:>{id_width}}", end=sep, file=file)
         for j in range(cols):
             idx = i + j
             if idx < len(vocab):
-                print(f"{token_to_readable(vocab[idx]):>{col_width}}", end=sep, file)
+                print(f"{token_to_readable(vocab[idx]):>{col_width}}", end=sep, file=file)
         print(file=file)
 
 
@@ -88,3 +89,26 @@ class PeakMemoryMonitor:
     @property
     def peak_mb(self) -> float:
         return self._peak_mb
+
+
+def batched_line_feed(iterable_lines: Iterable[str], chunk_size_chars: int = 128 * 1024) -> Iterator[str]:
+    """Buffers an active line iterable (like an open file) into larger strings
+
+    that split cleanly and strictly on newline boundaries.
+    """
+    buffer: list[str] = []
+    current_size = 0
+
+    for line in iterable_lines:
+        buffer.append(line)
+        current_size += len(line)
+
+        # Flush the gathered lines once we pass our amortized block size threshold
+        if current_size >= chunk_size_chars:
+            yield "".join(buffer)
+            buffer.clear()
+            current_size = 0
+
+    # Flush remaining trailing lines at EOF
+    if buffer:
+        yield "".join(buffer)

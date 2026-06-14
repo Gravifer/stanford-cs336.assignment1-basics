@@ -18,7 +18,8 @@
         "seqid",
         "seqno",
         "tinystories",
-        "tokid"
+        "tokid",
+        "vocabs"
     ],
     "ignoreWords": [],
     "import": []

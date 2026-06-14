@@ -17,5 +17,19 @@
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true,
   "workbench.editor.defaultBinaryEditor": "hexEditor.hexedit",
-  "workbench.editor.pinnedTabSizing": "shrink"
+  "workbench.editor.pinnedTabSizing": "shrink",
+  "files.exclude": {
+    "**/.git": false,
+    "**/.svn": true,
+    "**/.hg": true,
+    "**/cspell.json": true,
+    "**/.DS_Store": true,
+    "**/Thumbs.db": true,
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+  },
+  "explorerExclude.backup": {
+
+
+  }
 }
