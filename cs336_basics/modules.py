@@ -6,6 +6,7 @@ import einx._src.namedtensor.stage1 as einx_stage1
 import torch
 from einx._src.adapter.einx_from_namedtensor import Invocation as EinxInvocation
 from einx._src.adapter.einx_from_namedtensor import _parse_op as parse_einx_op
+from einx._src.frontend.errors import SemanticError as EinxSemanticError
 from jaxtyping import Float, Int, Shaped
 from torch import dtype, nn
 
@@ -152,7 +153,7 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         unbracketed inputs, the second expression describes ``weights`` and selects
         the normalized axes, e.g. ``"a b c d e, b d -> a b c d e"``. A bracketed,
         targeted-preserving description such as
-        ``"a [b] c [d] e, [d b] -> e [d b] c a"`` may rearrange the output.
+        ``"a [b] c [d] e, [d b] -> e [b d] c a"`` may rearrange the mapped axes.
         """
 
         parsed_desc = einx_stage1.parse_op(desc)
@@ -193,22 +194,43 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
             parameters = kwargs
         elif targeted_preserving:
             # In this form brackets describe RMSNorm's true elementary signature:
-            # a normalized vector (and optionally its weights) maps to a vector.
+            # targeted axes (and optionally their weights) map to the same axes.
             tensors = (input,) if input_count == 1 else (input, weights)
             invocation = EinxInvocation(desc, name="rms_norm_einx", tensors=tensors, kwargs=kwargs)
 
-            def vector_signature(op):
+            def targeted_signature(op):
                 inputs = ", ".join(str(expr) for expr in op.children[0].children)
                 return f"{inputs} -> {op.children[0].children[0]}"
 
             exprs_in, exprs_out = parse_einx_op(
                 desc,
-                el_op=vector_signature,
+                el_op=targeted_signature,
                 invocation=invocation,
                 implicit_output=0,
             )
             expr_in = exprs_in[0]
             (expr_out,) = exprs_out
+
+            targeted_axes_in = [
+                expr.name
+                for expr in expr_in.nodes()
+                if isinstance(expr, einx_stage1.Axis) and einx_stage1.is_in_brackets(expr)
+            ]
+            targeted_axes_out = [
+                expr.name
+                for expr in expr_out.nodes()
+                if isinstance(expr, einx_stage1.Axis) and einx_stage1.is_in_brackets(expr)
+            ]
+            if targeted_axes_in != targeted_axes_out:
+                targeted_axes = set(targeted_axes_in).union(targeted_axes_out)
+                raise EinxSemanticError(
+                    invocation=invocation,
+                    pos=invocation.indicator.get_pos_for_axisnames(exprs_in + exprs_out, targeted_axes),
+                    message=(
+                        "All axes marked with brackets must appear in the same order in the primary input and output "
+                        "expressions.\n%EXPR%"
+                    ),
+                )
 
             input_desc = str(einx_stage1.remove(expr_in, einx_stage1.Brackets, keep_children=True))
             output_desc = str(einx_stage1.remove(expr_out, einx_stage1.Brackets, keep_children=True))
