@@ -31,5 +31,8 @@
   "explorerExclude.backup": {
 
 
-  }
+  },
+  "conventionalCommits.scopes": [
+    "init"
+  ]
 }
