@@ -34,5 +34,8 @@
   },
   "conventionalCommits.scopes": [
     "init"
-  ]
+  ],
+  "files.readonlyInclude": {
+    ".venv/**": true
+  }
 }

@@ -51,15 +51,30 @@ class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`t
     num_embeddings: int
     embedding_dim: int
     embeddings: torch.Tensor
+    freeze: bool
 
     def __init__(
-        self, num_embeddings: int, embedding_dim: int, device: torch.device | None = None, dtype: dtype | None = None
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        _weight: torch.Tensor | None = None,
+        _freeze: bool = False,
+        device: torch.device | None = None,
+        dtype: dtype | None = None,
     ):
         super().__init__()
         self.num_embeddings = num_embeddings  # vocab_size
         self.embedding_dim = embedding_dim  # d_model
-        self.embeddings = nn.Parameter(torch.empty((num_embeddings, embedding_dim), device=device, dtype=dtype))
-        self.reset_parameters()
+        if _weight is None:
+            self.embeddings = nn.Parameter(
+                torch.empty((num_embeddings, embedding_dim), device=device, dtype=dtype),
+                requires_grad=not _freeze,
+            )
+            self.reset_parameters()
+        else:
+            if list(_weight.shape) != [num_embeddings, embedding_dim]:
+                raise AssertionError("Shape of weight does not match num_embeddings and embedding_dim")
+            self.embeddings = nn.Parameter(_weight, requires_grad=not _freeze)
 
     def reset_parameters(self) -> None:
         """
@@ -74,3 +89,31 @@ class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`t
             self.embeddings,
             token_ids,
         )
+
+    def extra_repr(self) -> str:
+        return f"num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim}"
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        embeddings,
+        freeze=True,
+    ):
+        r"""Create Embedding instance from given 2-dimensional FloatTensor.
+
+        Args:
+            embeddings (Tensor): FloatTensor containing weights for the Embedding.
+                First dimension is being passed to Embedding as ``num_embeddings``, second as ``embedding_dim``.
+            freeze (bool, optional): If ``True``, the tensor does not get updated in the learning process.
+                Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``.
+        """
+        if embeddings.dim() != 2:
+            raise AssertionError("Embeddings parameter is expected to be 2-dimensional")
+        rows, cols = embeddings.shape
+        embedding = cls(
+            num_embeddings=rows,
+            embedding_dim=cols,
+            _weight=embeddings,
+            _freeze=freeze,
+        )
+        return embedding
