@@ -32,7 +32,7 @@ def run_linear(
     from cs336_basics.modules import Linear
 
     l = Linear(d_in, d_out)  # noqa: E741
-    l.weight.data = weights
+    l.load_state_dict({"weight": weights})
 
     return l.forward(in_features)
 

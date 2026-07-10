@@ -1,3 +1,5 @@
+from typing import Never
+
 import einx
 import torch
 from torch import dtype, nn
@@ -5,16 +7,15 @@ from torch import dtype, nn
 from .initializer import starter_trunc_normal_for_embedding_, starter_trunc_normal_for_linear_  # noqa: F401
 
 
-class Linear(nn.Module):
+class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
     __constants__ = ["in_features", "out_features"]
     in_features: int
     out_features: int
     weight: torch.Tensor
 
-    # @property
-    # def bias(self) -> None:
-    #     return None
-    #     # raise AttributeError("This module has no bias.")
+    @property
+    def bias(self) -> Never:
+        raise AttributeError("This module has no bias.")
 
     def __init__(
         self, in_features: int, out_features: int, device: torch.device | None = None, dtype: dtype | None = None
