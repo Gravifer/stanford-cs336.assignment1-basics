@@ -145,31 +145,82 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         eps: float = 1e-5,
         **kwargs,
     ) -> Float[torch.Tensor, "*in_dims"]:
-        """Functional interface to RMSNorm using an einx reduction description.
+        """Functional interface to RMSNorm using an einx description.
 
-        Bracketed axes in ``desc`` are normalized, exactly as they would be reduced by
-        ``einx.mean``. If ``weights`` is provided, its axes are the bracketed axes in
-        their order of appearance. For example, ``"batch... [d]"`` expects a weight
-        of shape ``(d,)``, while ``"batch [h w]"`` expects shape ``(h, w)``.
+        With one input expression, bracketed axes are normalized and ``weights`` uses
+        those axes in their order of appearance, e.g. ``"batch... [d]"``. With two
+        input expressions, the second expression describes ``weights`` and its axes
+        are normalized, e.g. ``"a b c d e, b d -> a b c d e"``.
         """
 
-        # Reuse einx's reduction parser instead of trying to interpret its grammar
-        # with regular expressions. In particular, this handles ellipses, flattened
-        # axes, explicit outputs, and the implicit brackets in descriptions such as
-        # ``"a b -> a"``.
-        invocation = EinxInvocation(desc, name="rms_norm_einx", tensors=(input,), kwargs=kwargs)
-        exprs_in, exprs_out = parse_einx_op(
-            desc,
-            el_op=lambda op: f"{op.children[0].children[0]} ->",
-            invocation=invocation,
-            implicit_output="bijective",
-            mark_reduced_axes=True,
-        )
-        (expr_in,) = exprs_in
-        (expr_out,) = exprs_out
+        parsed_desc = einx_stage1.parse_op(desc)
+        input_count = len(parsed_desc.children[0].children)
+        if input_count == 2 and weights is None:
+            raise ValueError("An einx description with two input expressions requires weights.")
+        if input_count not in (1, 2):
+            raise ValueError(f"RMSNorm expects one or two input expressions, but found {input_count}.")
 
-        input_desc = str(einx_stage1.remove(expr_in, einx_stage1.Brackets, keep_children=True))
-        weight_desc = " ".join(str(expr.inner) for expr in expr_in.nodes() if isinstance(expr, einx_stage1.Brackets))
+        if input_count == 1:
+            # Unary reduction syntax is convenient sugar: brackets (or an explicit
+            # reduction output) identify the normalized axes, and the weight layout
+            # is inferred from those axes.
+            invocation = EinxInvocation(desc, name="rms_norm_einx", tensors=(input,), kwargs=kwargs)
+            exprs_in, exprs_out = parse_einx_op(
+                desc,
+                el_op=lambda op: f"{op.children[0].children[0]} ->",
+                invocation=invocation,
+                implicit_output="bijective",
+                mark_reduced_axes=True,
+            )
+            (expr_in,) = exprs_in
+            (expr_reduced,) = exprs_out
+
+            input_desc = str(einx_stage1.remove(expr_in, einx_stage1.Brackets, keep_children=True))
+            weight_desc = " ".join(
+                str(expr.inner) for expr in expr_in.nodes() if isinstance(expr, einx_stage1.Brackets)
+            )
+            mean_desc = desc
+            affine_desc = f"{input_desc}, {weight_desc} -> {input_desc}"
+            parameters = kwargs
+        else:
+            # Binary syntax follows einx's elementwise API. The second expression
+            # both describes the weight tensor and selects the normalized axes.
+            assert weights is not None
+            invocation = EinxInvocation(desc, name="rms_norm_einx", tensors=(input, weights), kwargs=kwargs)
+
+            def elementwise_signature(op):
+                inputs = ", ".join("" for _ in op.children[0].children)
+                return f"{inputs} ->"
+
+            exprs_in, exprs_out = parse_einx_op(
+                desc,
+                el_op=elementwise_signature,
+                invocation=invocation,
+                implicit_output="bijective",
+            )
+            expr_in, expr_weights = exprs_in
+            (_expr_out,) = exprs_out
+
+            normalized_axis_names = {expr.name for expr in expr_weights.nodes() if isinstance(expr, einx_stage1.Axis)}
+            expr_with_reduction = einx_stage1.map(
+                expr_in,
+                lambda expr: (
+                    einx_stage1.Brackets.create(expr.__deepcopy__())
+                    if isinstance(expr, einx_stage1.Axis) and expr.name in normalized_axis_names
+                    else None
+                ),
+                include_children=False,
+            )
+
+            input_desc = str(expr_in)
+            expr_reduced = einx_stage1.remove(expr_with_reduction, einx_stage1.Brackets, keep_children=False)
+            mean_desc = str(expr_with_reduction)
+            affine_desc = desc
+
+            # Tensor shapes disambiguate named ellipses in the binary form. Preserve
+            # that information when the derived unary reduction is evaluated.
+            parameters = dict(kwargs)
+            parameters.update(einx.solve_axes(f"{expr_in}, {expr_weights}", input, weights, **kwargs))
 
         in_dtype = input.dtype
         weight_dtype = weights.dtype if weights is not None else in_dtype
@@ -178,14 +229,12 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
             op_dtype = torch.float32
         input = input.to(op_dtype)
 
-        rms: Float[torch.Tensor, "*mapped"] = (einx.mean(desc, input.abs() ** 2, **kwargs) + eps) ** 0.5
+        rms: Float[torch.Tensor, "*mapped"] = (einx.mean(mean_desc, input.abs() ** 2, **parameters) + eps) ** 0.5
         normed: Float[torch.Tensor, "*in_dims"] = einx.divide(
-            f"{input_desc}, {expr_out} -> {input_desc}", input, rms, **kwargs
+            f"{input_desc}, {expr_reduced} -> {input_desc}", input, rms, **parameters
         )
         if weights is not None:
-            normed = einx.multiply(
-                f"{input_desc}, {weight_desc} -> {input_desc}", normed, weights.to(op_dtype), **kwargs
-            )
+            normed = einx.multiply(affine_desc, normed, weights.to(op_dtype), **parameters)
         return normed
 
 
