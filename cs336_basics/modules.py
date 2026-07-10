@@ -149,8 +149,10 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
 
         With one input expression, bracketed axes are normalized and ``weights`` uses
         those axes in their order of appearance, e.g. ``"batch... [d]"``. With two
-        input expressions, the second expression describes ``weights`` and its axes
-        are normalized, e.g. ``"a b c d e, b d -> a b c d e"``.
+        unbracketed inputs, the second expression describes ``weights`` and selects
+        the normalized axes, e.g. ``"a b c d e, b d -> a b c d e"``. A bracketed,
+        targeted-preserving description such as
+        ``"a [b] c [d] e, [d b] -> e [d b] c a"`` may rearrange the output.
         """
 
         parsed_desc = einx_stage1.parse_op(desc)
@@ -160,7 +162,14 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         if input_count not in (1, 2):
             raise ValueError(f"RMSNorm expects one or two input expressions, but found {input_count}.")
 
-        if input_count == 1:
+        has_brackets = any(isinstance(expr, einx_stage1.Brackets) for expr in parsed_desc.nodes())
+        has_targeted_output = len(parsed_desc.children) == 2 and any(
+            isinstance(expr, einx_stage1.Brackets) for expr in parsed_desc.children[1].nodes()
+        )
+        targeted_preserving = (input_count == 2 and has_brackets) or (input_count == 1 and has_targeted_output)
+        rearrange_desc = None
+
+        if input_count == 1 and not targeted_preserving:
             # Unary reduction syntax is convenient sugar: brackets (or an explicit
             # reduction output) identify the normalized axes, and the weight layout
             # is inferred from those axes.
@@ -182,6 +191,44 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
             mean_desc = desc
             affine_desc = f"{input_desc}, {weight_desc} -> {input_desc}"
             parameters = kwargs
+        elif targeted_preserving:
+            # In this form brackets describe RMSNorm's true elementary signature:
+            # a normalized vector (and optionally its weights) maps to a vector.
+            tensors = (input,) if input_count == 1 else (input, weights)
+            invocation = EinxInvocation(desc, name="rms_norm_einx", tensors=tensors, kwargs=kwargs)
+
+            def vector_signature(op):
+                inputs = ", ".join(str(expr) for expr in op.children[0].children)
+                return f"{inputs} -> {op.children[0].children[0]}"
+
+            exprs_in, exprs_out = parse_einx_op(
+                desc,
+                el_op=vector_signature,
+                invocation=invocation,
+                implicit_output=0,
+            )
+            expr_in = exprs_in[0]
+            (expr_out,) = exprs_out
+
+            input_desc = str(einx_stage1.remove(expr_in, einx_stage1.Brackets, keep_children=True))
+            output_desc = str(einx_stage1.remove(expr_out, einx_stage1.Brackets, keep_children=True))
+            expr_reduced = einx_stage1.remove(expr_in, einx_stage1.Brackets, keep_children=False)
+            mean_desc = str(expr_in)
+
+            if input_count == 2:
+                assert weights is not None
+                expr_weights = exprs_in[1]
+                weight_desc = str(einx_stage1.remove(expr_weights, einx_stage1.Brackets, keep_children=True))
+                affine_desc = f"{input_desc}, {weight_desc} -> {output_desc}"
+                parameters = dict(kwargs)
+                parameters.update(einx.solve_axes(f"{input_desc}, {weight_desc}", input, weights, **kwargs))
+            else:
+                weight_desc = " ".join(
+                    str(expr.inner) for expr in expr_in.nodes() if isinstance(expr, einx_stage1.Brackets)
+                )
+                affine_desc = f"{input_desc}, {weight_desc} -> {output_desc}"
+                rearrange_desc = f"{input_desc} -> {output_desc}"
+                parameters = kwargs
         else:
             # Binary syntax follows einx's elementwise API. The second expression
             # both describes the weight tensor and selects the normalized axes.
@@ -235,6 +282,8 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         )
         if weights is not None:
             normed = einx.multiply(affine_desc, normed, weights.to(op_dtype), **parameters)
+        elif rearrange_desc is not None:
+            normed = einx.id(rearrange_desc, normed, **parameters)
         return normed
 
 
