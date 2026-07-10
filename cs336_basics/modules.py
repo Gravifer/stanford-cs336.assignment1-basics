@@ -2,16 +2,16 @@ import warnings
 from typing import Never
 
 import einx
-import regex
+import einx._src.namedtensor.stage1 as einx_stage1
 import torch
+from einx._src.adapter.einx_from_namedtensor import Invocation as EinxInvocation
+from einx._src.adapter.einx_from_namedtensor import _parse_op as parse_einx_op
 from jaxtyping import Float, Int, Shaped
 from torch import dtype, nn
 
 from cs336_basics import initializer as init
 
 type ModelVec = Float[torch.Tensor, "{self.d_model}"]  # ruff takes issue with this # noqa: F821
-
-BRACKETED: regex.Pattern[str] = regex.compile(r"(?P<bracket>\[(?:[^\[\]]++|(?&bracket))*\])")
 
 
 class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
@@ -140,17 +140,53 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
     def rms_norm_einx(  # einx flavored
         cls,
         desc: str,
-        input: Float[torch.Tensor, "*mapped {*dims}"],
-        weights: Float[torch.Tensor, "{*dims}"] | None = None,  # noqa: F821
+        input: Float[torch.Tensor, "*in_dims"],
+        weights: Float[torch.Tensor, "*shape"] | None = None,
         eps: float = 1e-5,
         **kwargs,
-    ) -> Float[torch.Tensor, "*mapped {*dims}"]:
-        """Functional interface to RMSNorm
+    ) -> Float[torch.Tensor, "*in_dims"]:
+        """Functional interface to RMSNorm using an einx reduction description.
 
-        desc is a einx description string of the operation.
+        Bracketed axes in ``desc`` are normalized, exactly as they would be reduced by
+        ``einx.mean``. If ``weights`` is provided, its axes are the bracketed axes in
+        their order of appearance. For example, ``"batch... [d]"`` expects a weight
+        of shape ``(d,)``, while ``"batch [h w]"`` expects shape ``(h, w)``.
         """
-        # TODO: redo this completely
-        pass
+
+        # Reuse einx's reduction parser instead of trying to interpret its grammar
+        # with regular expressions. In particular, this handles ellipses, flattened
+        # axes, explicit outputs, and the implicit brackets in descriptions such as
+        # ``"a b -> a"``.
+        invocation = EinxInvocation(desc, name="rms_norm_einx", tensors=(input,), kwargs=kwargs)
+        exprs_in, exprs_out = parse_einx_op(
+            desc,
+            el_op=lambda op: f"{op.children[0].children[0]} ->",
+            invocation=invocation,
+            implicit_output="bijective",
+            mark_reduced_axes=True,
+        )
+        (expr_in,) = exprs_in
+        (expr_out,) = exprs_out
+
+        input_desc = str(einx_stage1.remove(expr_in, einx_stage1.Brackets, keep_children=True))
+        weight_desc = " ".join(str(expr.inner) for expr in expr_in.nodes() if isinstance(expr, einx_stage1.Brackets))
+
+        in_dtype = input.dtype
+        weight_dtype = weights.dtype if weights is not None else in_dtype
+        op_dtype = torch.promote_types(in_dtype, weight_dtype)
+        if op_dtype not in (torch.float32, torch.float64, torch.complex64, torch.complex128):
+            op_dtype = torch.float32
+        input = input.to(op_dtype)
+
+        rms: Float[torch.Tensor, "*mapped"] = (einx.mean(desc, input.abs() ** 2, **kwargs) + eps) ** 0.5
+        normed: Float[torch.Tensor, "*in_dims"] = einx.divide(
+            f"{input_desc}, {expr_out} -> {input_desc}", input, rms, **kwargs
+        )
+        if weights is not None:
+            normed = einx.multiply(
+                f"{input_desc}, {weight_desc} -> {input_desc}", normed, weights.to(op_dtype), **kwargs
+            )
+        return normed
 
 
 class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torch.nn.sparse`
