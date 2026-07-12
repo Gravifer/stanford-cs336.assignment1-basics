@@ -86,14 +86,18 @@ def run_swiglu(
     Returns:
         Float[Tensor, "... d_model"]: Output embeddings of the same shape as the input embeddings.
     """
+    from cs336_basics.nn.modules import SwiGLU
+
+    swiglu = SwiGLU(d_model, d_ff)
     # Example:
     # If your state dict keys match, you can use `load_state_dict()`
     # swiglu.load_state_dict(weights)
+    swiglu.load_state_dict({"gate_weight": w1_weight, "value_weight": w3_weight, "out_weight": w2_weight})
     # You can also manually assign the weights
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    return swiglu.forward(in_features)
 
 
 def run_scaled_dot_product_attention(
