@@ -8,9 +8,12 @@ from einx._src.adapter.einx_from_namedtensor import _parse_op as parse_einx_op
 from einx._src.frontend.errors import SemanticError as EinxSemanticError
 from jaxtyping import Float, Int, Shaped
 from torch import dtype, nn
+from typing_extensions import deprecated  # ? ruff doesn't see that python 3.13 have deprecated in warnings already
 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
+
+# from .feed_forward import SwiGLU  # ! would be circular
 
 type ModelVec = Float[torch.Tensor, "{self.d_model}"]  # ruff takes issue with this # noqa: F821
 
@@ -327,48 +330,6 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         return normed
 
 
-class SwiGLU(nn.Module):
-    """SwiGLU feed-forward layer.
-
-    Given a value tensor :math:`𝑥`,
-    compute the output as follows:
-
-    .. math::
-        FFN(𝑥) = SwiGLU(𝑥,𝑊_1,𝑊_2,𝑊_3) = 𝑊_2(SiLU(𝑊_1 𝑥)⊙𝑊_3 𝑥)
-
-    where :math:`SiLU` is the Sigmoid Linear Unit activation function.
-    """
-
-    __constants__ = ["d_ff", "d_model"]
-    d_ff: int
-    d_model: int
-    in_weight: Float[torch.Tensor, "2*{self.d_ff} {self.d_model}"]
-    out_weight: Float[torch.Tensor, "{self.d_model} {self.d_ff}"]
-
-    def __init__(
-        self,
-        d_model: int,
-        d_ff: int | None = None,
-        device: torch.device | None = None,
-        dtype: dtype | None = None,
-    ):
-        super().__init__()
-        # if no d_ff supplied use 8/3 * d_model rounded to the nearest multiple of 64
-        d_ff = d_ff or (int(8 * d_model / 3.0) >> 6) << 6
-        self.d_ff = d_ff
-        self.d_model = d_model
-        self.in_weight = nn.Parameter(torch.empty((2 * d_ff, d_model), device=device, dtype=dtype))
-        self.out_weight = nn.Parameter(torch.empty((d_model, d_ff), device=device, dtype=dtype))
-
-    def forward(
-        self, x: Float[torch.Tensor, "*mapped {self.d_model}"]
-    ) -> Float[torch.Tensor, "*mapped {self.d_model}"]:
-        """Apply the SwiGLU transformation to the input."""
-        vg = F.linear(x, self.in_weight)
-        value, gate = einx.id("mapped... (v + g) -> mapped... v, mapped... g", vg, v=self.d_ff, g=self.d_ff)
-        return F.linear(F.swiglu(value, gate), self.out_weight)
-
-
 class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
     __constants__ = ["in_features", "out_features"]
     in_features: int
@@ -397,11 +358,27 @@ class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
         init.starter_trunc_normal_for_linear_(self.weight, self.in_features, self.out_features)
 
     def forward(
-        self, x: Float[torch.Tensor, "... {self.in_features}"]
-    ) -> Float[torch.Tensor, "... {self.out_features}"]:
+        self, x: Float[torch.Tensor, "*mapped {self.in_features}"]
+    ) -> Float[torch.Tensor, "*mapped {self.out_features}"]:
         """Apply the linear transformation to the input."""
         # return torch.nn.functional.linear(x, self.weight)
         return F.linear(x, self.weight)
 
     def extra_repr(self) -> str:
         return f"in_features={self.in_features}, out_features={self.out_features}, NO bias"
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return self.weight.shape
+
+    @property
+    def dtype(self) -> dtype:
+        return self.weight.dtype
+
+
+@deprecated("we won't have a SiLU module; without the in-place option, not using the functional version is moot.")
+class SiLU(nn.Module):
+    def __init__(self, inplace: bool = False) -> Never:
+        raise NotImplementedError(
+            "we won't have a SiLU module; without the in-place option, not using the functional version is moot."
+        )

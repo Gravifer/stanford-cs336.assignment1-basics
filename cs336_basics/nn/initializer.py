@@ -6,8 +6,8 @@ from torch.nn.init import trunc_normal_
 
 def starter_trunc_normal_for_linear_(
     tensor: torch.Tensor,
-    in_features: int,
-    out_features: int,
+    d_in: int,
+    d_out: int,
     *,
     generator: torch.Generator | None = None,
 ) -> torch.Tensor:
@@ -21,8 +21,8 @@ def starter_trunc_normal_for_linear_(
 
     Args:
         tensor (torch.Tensor): The tensor to be filled.
-        in_features (int): The number of input features.
-        out_features (int): The number of output features.
+        d_in (int): The number of input features.
+        d_out (int): The number of output features.
         generator (torch.Generator): an RNG to sample from (default: None)
 
     Returns:
@@ -31,7 +31,7 @@ def starter_trunc_normal_for_linear_(
     if 0 in tensor.shape:
         warnings.warn("Initializing zero-element tensors is a no-op", stacklevel=2)
         return tensor
-    std: float = (2.0 / (in_features + out_features)) ** 0.5
+    std: float = (2.0 / (d_in + d_out)) ** 0.5
     trunc_normal_(tensor, 0.0, std, -3 * std, 3 * std, generator)
     return tensor
 
