@@ -21,6 +21,7 @@
         "seqid",
         "seqno",
         "silu",
+        "swiglu",
         "tinystories",
         "tokid",
         "vocabs"

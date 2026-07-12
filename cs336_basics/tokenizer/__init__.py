@@ -14,8 +14,8 @@ from typing import Literal, LiteralString, NamedTuple
 import regex as re
 from tqdm import tqdm
 
-from .chunk_progress_monitor import ChunkedProgressBar
-from .pretokenization_example import find_chunk_boundaries
+from ..chunk_progress_monitor import ChunkedProgressBar
+from ..pretokenization_example import find_chunk_boundaries
 
 __all__: list[str] = ["train_bpe", "BPETokenizer", "Tokenizer"]
 

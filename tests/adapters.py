@@ -29,7 +29,7 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
 
-    from cs336_basics.modules import Linear
+    from cs336_basics.nn.modules import Linear
 
     l = Linear(d_in, d_out)  # noqa: E741
     l.load_state_dict({"weight": weights})
@@ -56,7 +56,7 @@ def run_embedding(
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
 
-    from cs336_basics.modules import Embedding
+    from cs336_basics.nn.modules import Embedding
 
     e = Embedding(vocab_size, d_model)
     e.load_state_dict({"weight": weights})
@@ -388,7 +388,7 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    from cs336_basics.modules import RMSNorm
+    from cs336_basics.nn.modules import RMSNorm
 
     rmsnorm = RMSNorm(d_model, eps)
     rmsnorm.load_state_dict({"weight": weights})
@@ -607,4 +607,4 @@ def run_train_bpe(
     """
     from cs336_basics.tokenizer import train_bpe
 
-    return train_bpe(input_path, vocab_size, special_tokens, **kwargs)
+    return train_bpe(input_path, vocab_size, special_tokens, **kwargs)  # ty:ignore[invalid-argument-type]

@@ -9,8 +9,8 @@ from einx._src.frontend.errors import SemanticError as EinxSemanticError
 from jaxtyping import Float, Int, Shaped
 from torch import dtype, nn
 
-from cs336_basics import functional as F
-from cs336_basics import initializer as init
+from cs336_basics.nn import functional as F
+from cs336_basics.nn import initializer as init
 
 type ModelVec = Float[torch.Tensor, "{self.d_model}"]  # ruff takes issue with this # noqa: F821
 
@@ -95,7 +95,7 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
     .. math::
         RMSNorm(𝑎ᵢ) = 𝑎ᵢ / RMS(𝑎) * 𝑔ᵢ
 
-    where :math:`RMS(𝑎) = √(1/𝑑_{model} * Σᵢ 𝑎ᵢ² + eps)`,
+    where :math:`RMS(𝑎) = √(1/𝑑_model * Σᵢ 𝑎ᵢ² + eps)`,
     :math:`𝑔 ∈ ℝ^{𝑑_model}` is a learnable *gain* vector,
     and :math:`eps` is a hyperparameter that is often fixed at `1e-5`.
     """
@@ -325,6 +325,50 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         elif rearrange_desc is not None:
             normed = einx.id(rearrange_desc, normed, **parameters)
         return normed
+
+
+class SwiGLU(nn.Module):
+    """SwiGLU feed-forward layer.
+
+    Given a value tensor :math:`𝑥`,
+    compute the output as follows:
+
+    .. math::
+        FFN(𝑥) = SwiGLU(𝑥,𝑊_1,𝑊_2,𝑊_3) = 𝑊_2(SiLU(𝑊_1 𝑥)⊙𝑊_3 𝑥)
+
+    where :math:`SiLU` is the Sigmoid Linear Unit activation function.
+    """
+
+    __constants__ = ["d_ff", "d_model"]
+    d_ff: int
+    d_model: int
+    value_weight: Float[torch.Tensor, "{self.d_ff} {self.d_model}"]
+    gate_weight: Float[torch.Tensor, "{self.d_ff} {self.d_model}"]
+    out_weight: Float[torch.Tensor, "{self.d_model} {self.d_ff}"]
+
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int | None = None,
+        device: torch.device | None = None,
+        dtype: dtype | None = None,
+    ):
+        super().__init__()
+        # if no d_ff supplied use 8/3 * d_model rounded to the nearest multiple of 64
+        d_ff = d_ff or (int(8 * d_model / 3.0) >> 6) << 6
+        self.d_ff = d_ff
+        self.d_model = d_model
+        self.value_weight = nn.Parameter(torch.empty((d_ff, d_model), device=device, dtype=dtype))
+        self.gate_weight = nn.Parameter(torch.empty((d_ff, d_model), device=device, dtype=dtype))
+        self.out_weight = nn.Parameter(torch.empty((d_model, d_ff), device=device, dtype=dtype))
+
+    def forward(
+        self, x: Float[torch.Tensor, "*mapped {self.d_model}"]
+    ) -> Float[torch.Tensor, "*mapped {self.d_model}"]:
+        """Apply the SwiGLU transformation to the input."""
+        value = F.linear(x, self.value_weight)
+        gate = F.linear(x, self.gate_weight)
+        return F.linear(F.swiglu(value, gate), self.out_weight)
 
 
 class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias

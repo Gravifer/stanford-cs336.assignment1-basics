@@ -4,25 +4,20 @@ from typing import Literal
 import einx
 import torch
 from jaxtyping import Float, Int
-from torch.nn.functional import sigmoid
+from torch import sigmoid
 
 
 def glu(
-    input: Float[torch.Tensor, "*mapped {*dims}"],
-) -> Float[torch.Tensor, "*mapped {*dims}"]:
+    value: Float[torch.Tensor, "*shape"],
+    gate: Float[torch.Tensor, "*shape"],
+) -> Float[torch.Tensor, "*shape"]:
     """Gated linear unit.
 
-    Args:
-        input: Input tensor of shape (*mapped, *dims).
-
-    Returns:
-        Output tensor of shape (*mapped, *dims).
+    Note that we expect unpacked input; with packed input, pass views.
     """
-    if input.shape[-1] % 2 != 0:
-        raise ValueError("The last dimension of the input must be even for GLU.")
-    split_size = input.shape[-1] // 2
-    a, b = torch.split(input, split_size, dim=-1)
-    return a * sigmoid(b)
+    if value.shape != gate.shape:
+        raise ValueError("Value and gate tensors must have the same shape for GLU.")
+    return value * sigmoid(gate)
 
 
 def gelu(
@@ -59,25 +54,27 @@ def linear(
     Returns:
         Output tensor of shape (..., out_features).
     """
-    return einx.dot("... d_in, d_out d_in->... d_out", input, weight)
+    return einx.dot("... d_in, d_out d_in -> ... d_out", input, weight)
 
 
 def silu(
-    input: Float[torch.Tensor, "*mapped {*dims}"],
-) -> Float[torch.Tensor, "*mapped {*dims}"]:
-    """SiLU activation function.
+    input: Float[torch.Tensor, "*shape"],
+) -> Float[torch.Tensor, "*shape"]:
+    """SiLU activation function."""
+    return input * sigmoid(input)
 
-    Args:
-        input: Input tensor of shape (*mapped, *dims).
 
-    Returns:
-        Output tensor of shape (*mapped, *dims).
+def swiglu(
+    value: Float[torch.Tensor, "*shape"],
+    gate: Float[torch.Tensor, "*shape"],
+) -> Float[torch.Tensor, "*shape"]:
+    """Swish GLU.
+
+    Note that we expect unpacked input; with packed input, pass views.
     """
-    return einx.multiply(
-        "*mapped {*dims}, *mapped {*dims} -> *mapped {*dims}",
-        input,
-        sigmoid(input),
-    )
+    if value.shape != gate.shape:
+        raise ValueError("Value and gate tensors must have the same shape for SwiGLU.")
+    return value * silu(gate)
 
 
 def embedding(
