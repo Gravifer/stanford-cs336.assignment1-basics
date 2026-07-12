@@ -1,4 +1,3 @@
-import warnings
 from typing import Never
 
 import einx
@@ -10,47 +9,81 @@ from einx._src.frontend.errors import SemanticError as EinxSemanticError
 from jaxtyping import Float, Int, Shaped
 from torch import dtype, nn
 
+from cs336_basics import functional as F
 from cs336_basics import initializer as init
 
 type ModelVec = Float[torch.Tensor, "{self.d_model}"]  # ruff takes issue with this # noqa: F821
 
 
-class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
-    __constants__ = ["in_features", "out_features"]
-    in_features: int
-    out_features: int
-    weight: Float[torch.Tensor, "{self.out_features} {self.in_features}"]
-
-    @property
-    def bias(self) -> Never:
-        raise AttributeError("This module has no bias.")
+class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torch.nn.sparse`
+    __constants__ = ["num_embeddings", "embedding_dim"]
+    num_embeddings: int  # vocab_size
+    embedding_dim: int  # d_model
+    weight: Float[torch.Tensor, "{self.num_embeddings} {self.embedding_dim}"]  # matrix of embeddings
+    freeze: bool
 
     def __init__(
-        self, in_features: int, out_features: int, device: torch.device | None = None, dtype: dtype | None = None
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        _weight: Float[torch.Tensor, "{self.num_embeddings} {self.embedding_dim}"] | None = None,
+        _freeze: bool = False,
+        device: torch.device | None = None,
+        dtype: dtype | None = None,
     ):
-        # factory_kwargs = {"device": device, "dtype": dtype} # ! in modern days a typing pain
         super().__init__()
-        self.in_features = in_features  # d_in
-        self.out_features = out_features  # d_out
-        self.weight = nn.Parameter(torch.empty((out_features, in_features), device=device, dtype=dtype))
-        self.register_parameter("bias", None)
-        self.reset_parameters()  # Object of type `Tensor` is not callable  ty:(call-non-callable)
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        if _weight is None:
+            self.weight = nn.Parameter(
+                torch.empty((num_embeddings, embedding_dim), device=device, dtype=dtype),
+                requires_grad=not _freeze,
+            )
+            self.reset_parameters()
+        else:
+            if list(_weight.shape) != [num_embeddings, embedding_dim]:
+                raise AssertionError("Shape of weight does not match num_embeddings and embedding_dim")
+            self.weight = nn.Parameter(_weight, requires_grad=not _freeze)
 
     def reset_parameters(self) -> None:
         """
         Resets parameters based on their initialization used in ``__init__``.
         """
-        init.starter_trunc_normal_for_linear_(self.weight, self.in_features, self.out_features)
+        init.starter_trunc_normal_for_embedding_(self.weight)
 
     def forward(
-        self, x: Float[torch.Tensor, "... {self.in_features}"]
-    ) -> Float[torch.Tensor, "... {self.out_features}"]:
-        """Apply the linear transformation to the input."""
-        # return torch.nn.functional.linear(x, self.weight, self.bias)
-        return einx.dot("... d_in, d_out d_in->... d_out", x, self.weight)
+        self, token_ids: Int[torch.Tensor, "*batch sequence_length"]
+    ) -> Float[torch.Tensor, "*batch sequence_length {self.embedding_dim}"]:
+        """Apply the embedding transformation to the input."""
+        return F.embedding(token_ids, self.weight)
 
     def extra_repr(self) -> str:
-        return f"in_features={self.in_features}, out_features={self.out_features}, NO bias"
+        return f"num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim}"
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        embeddings,
+        freeze=True,
+    ):
+        r"""Create Embedding instance from given 2-dimensional FloatTensor.
+
+        Args:
+            embeddings (Tensor): FloatTensor containing weights for the Embedding.
+                First dimension is being passed to Embedding as ``num_embeddings``, second as ``embedding_dim``.
+            freeze (bool, optional): If ``True``, the tensor does not get updated in the learning process.
+                Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``.
+        """
+        if embeddings.dim() != 2:
+            raise AssertionError("Embeddings parameter is expected to be 2-dimensional")
+        rows, cols = embeddings.shape
+        embedding = cls(
+            num_embeddings=rows,
+            embedding_dim=cols,
+            _weight=embeddings,
+            _freeze=freeze,
+        )
+        return embedding
 
 
 class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer normalization
@@ -102,55 +135,40 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         in_dtype = x.dtype
         return self.rms_norm(x, (self.d_model,), self.weight, self.eps).to(in_dtype)
 
-    @classmethod
+    @staticmethod
     def rms_norm(  # torch flavored
-        cls,
         input: Float[torch.Tensor, "*mapped {*dims}"],
         dims: tuple[int, ...],
-        weights: Float[torch.Tensor, "{*dims}"] | None = None,  # noqa: F821
+        weight: Float[torch.Tensor, "{*dims}"] | None = None,  # noqa: F821
         eps: float = 1e-5,
     ) -> Float[torch.Tensor, "*mapped {*dims}"]:
         """Functional interface to RMSNorm
+        Root Mean Square Layer Normalization.
 
-        dims is a tuple representing the normalized shape (last ones of the dimensions).
+        Args:
+            input: Input tensor of shape (*mapped, *dims).
+            dims: Dimensions to normalize over.
+            weight: Optional weight tensor of shape (*dims).
+            eps: Small value to avoid division by zero.
+
+        Returns:
+            Normalized tensor of shape (*mapped, *dims).
         """
-        if dims == ():
-            warnings.warn("RMSNorm with empty normalized shape is a no-op", stacklevel=2)
-            return input
-        in_dtype = input.dtype
-        weight_dtype = weights.dtype if weights is not None else in_dtype
-        op_dtype = torch.promote_types(in_dtype, weight_dtype)
-        if op_dtype not in (torch.float32, torch.float64, torch.complex64, torch.complex128):
-            op_dtype = torch.float32  # up-cast to float32 for numerical stability
-        input = input.to(op_dtype)
-        dim_map: dict[str, int] = {f"n{i}": d for i, d in enumerate(dims)}
-        _normed: str = " ".join(d for d in dim_map.keys())
-        rms: Float[torch.Tensor, "*mapped"] = (
-            einx.mean(f"mapped... [{_normed}]", input.abs() ** 2, **dim_map) + eps
-        ) ** 0.5
-        normed: Float[torch.Tensor, "*mapped {*dims}"] = einx.divide(
-            f"mapped... {_normed}, mapped... -> mapped... {_normed}", input, rms, **dim_map
-        )
-        if weights is not None:
-            normed: Float[torch.Tensor, "*mapped {*dims}"] = einx.multiply(
-                f"mapped... {_normed}, {_normed} -> mapped... {_normed}", normed, weights, **dim_map
-            )
-        return normed
+        return F.rms_norm(input, dims, weight, eps)
 
-    @classmethod
+    @staticmethod
     def rms_norm_einx(  # einx flavored
-        cls,
         desc: str,
         input: Float[torch.Tensor, "*in_dims"],
-        weights: Float[torch.Tensor, "*shape"] | None = None,
+        weight: Float[torch.Tensor, "*shape"] | None = None,
         eps: float = 1e-5,
         **kwargs,
     ) -> Float[torch.Tensor, "*in_dims"]:
         """Functional interface to RMSNorm using an einx description.
 
-        With one input expression, bracketed axes are normalized and ``weights`` uses
+        With one input expression, bracketed axes are normalized and ``weight`` uses
         those axes in their order of appearance, e.g. ``"batch... [d]"``. With two
-        unbracketed inputs, the second expression describes ``weights`` and selects
+        unbracketed inputs, the second expression describes ``weight`` and selects
         the normalized axes, e.g. ``"a b c d e, b d -> a b c d e"``. A bracketed,
         targeted-preserving description such as
         ``"a [b] c [d] e, [d b] -> e [b d] c a"`` may rearrange the mapped axes.
@@ -158,10 +176,10 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
 
         parsed_desc = einx_stage1.parse_op(desc)
         input_count = len(parsed_desc.children[0].children)
-        if input_count == 2 and weights is None:
-            raise ValueError("An einx description with two input expressions requires weights.")
+        if input_count == 2 and weight is None:
+            raise EinxSemanticError("An einx description with two input expressions requires weight.")
         if input_count not in (1, 2):
-            raise ValueError(f"RMSNorm expects one or two input expressions, but found {input_count}.")
+            raise EinxSemanticError(f"RMSNorm expects one or two input expressions, but found {input_count}.")
 
         has_brackets = any(isinstance(expr, einx_stage1.Brackets) for expr in parsed_desc.nodes())
         has_targeted_output = len(parsed_desc.children) == 2 and any(
@@ -195,7 +213,7 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         elif targeted_preserving:
             # In this form brackets describe RMSNorm's true elementary signature:
             # targeted axes (and optionally their weights) map to the same axes.
-            tensors = (input,) if input_count == 1 else (input, weights)
+            tensors = (input,) if input_count == 1 else (input, weight)
             invocation = EinxInvocation(desc, name="rms_norm_einx", tensors=tensors, kwargs=kwargs)
 
             def targeted_signature(op):
@@ -238,12 +256,12 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
             mean_desc = str(expr_in)
 
             if input_count == 2:
-                assert weights is not None
+                assert weight is not None
                 expr_weights = exprs_in[1]
                 weight_desc = str(einx_stage1.remove(expr_weights, einx_stage1.Brackets, keep_children=True))
                 affine_desc = f"{input_desc}, {weight_desc} -> {output_desc}"
                 parameters = dict(kwargs)
-                parameters.update(einx.solve_axes(f"{input_desc}, {weight_desc}", input, weights, **kwargs))
+                parameters.update(einx.solve_axes(f"{input_desc}, {weight_desc}", input, weight, **kwargs))
             else:
                 weight_desc = " ".join(
                     str(expr.inner) for expr in expr_in.nodes() if isinstance(expr, einx_stage1.Brackets)
@@ -254,8 +272,8 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         else:
             # Binary syntax follows einx's elementwise API. The second expression
             # both describes the weight tensor and selects the normalized axes.
-            assert weights is not None
-            invocation = EinxInvocation(desc, name="rms_norm_einx", tensors=(input, weights), kwargs=kwargs)
+            assert weight is not None
+            invocation = EinxInvocation(desc, name="rms_norm_einx", tensors=(input, weight), kwargs=kwargs)
 
             def elementwise_signature(op):
                 inputs = ", ".join("" for _ in op.children[0].children)
@@ -289,10 +307,10 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
             # Tensor shapes disambiguate named ellipses in the binary form. Preserve
             # that information when the derived unary reduction is evaluated.
             parameters = dict(kwargs)
-            parameters.update(einx.solve_axes(f"{expr_in}, {expr_weights}", input, weights, **kwargs))
+            parameters.update(einx.solve_axes(f"{expr_in}, {expr_weights}", input, weight, **kwargs))
 
         in_dtype = input.dtype
-        weight_dtype = weights.dtype if weights is not None else in_dtype
+        weight_dtype = weight.dtype if weight is not None else in_dtype
         op_dtype = torch.promote_types(in_dtype, weight_dtype)
         if op_dtype not in (torch.float32, torch.float64, torch.complex64, torch.complex128):
             op_dtype = torch.float32
@@ -302,83 +320,46 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         normed: Float[torch.Tensor, "*in_dims"] = einx.divide(
             f"{input_desc}, {expr_reduced} -> {input_desc}", input, rms, **parameters
         )
-        if weights is not None:
-            normed = einx.multiply(affine_desc, normed, weights.to(op_dtype), **parameters)
+        if weight is not None:
+            normed = einx.multiply(affine_desc, normed, weight.to(op_dtype), **parameters)
         elif rearrange_desc is not None:
             normed = einx.id(rearrange_desc, normed, **parameters)
         return normed
 
 
-class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torch.nn.sparse`
-    __constants__ = ["num_embeddings", "embedding_dim"]
-    num_embeddings: int  # vocab_size
-    embedding_dim: int  # d_model
-    weight: Float[torch.Tensor, "{self.num_embeddings} {self.embedding_dim}"]  # matrix of embeddings
-    freeze: bool
+class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
+    __constants__ = ["in_features", "out_features"]
+    in_features: int
+    out_features: int
+    weight: Float[torch.Tensor, "{self.out_features} {self.in_features}"]
+
+    @property
+    def bias(self) -> Never:
+        raise AttributeError("This module has no bias.")
 
     def __init__(
-        self,
-        num_embeddings: int,
-        embedding_dim: int,
-        _weight: Float[torch.Tensor, "{self.num_embeddings} {self.embedding_dim}"] | None = None,
-        _freeze: bool = False,
-        device: torch.device | None = None,
-        dtype: dtype | None = None,
+        self, in_features: int, out_features: int, device: torch.device | None = None, dtype: dtype | None = None
     ):
+        # factory_kwargs = {"device": device, "dtype": dtype} # ! in modern days a typing pain
         super().__init__()
-        self.num_embeddings = num_embeddings
-        self.embedding_dim = embedding_dim
-        if _weight is None:
-            self.weight = nn.Parameter(
-                torch.empty((num_embeddings, embedding_dim), device=device, dtype=dtype),
-                requires_grad=not _freeze,
-            )
-            self.reset_parameters()
-        else:
-            if list(_weight.shape) != [num_embeddings, embedding_dim]:
-                raise AssertionError("Shape of weight does not match num_embeddings and embedding_dim")
-            self.weight = nn.Parameter(_weight, requires_grad=not _freeze)
+        self.in_features = in_features  # d_in
+        self.out_features = out_features  # d_out
+        self.weight = nn.Parameter(torch.empty((out_features, in_features), device=device, dtype=dtype))
+        self.register_parameter("bias", None)
+        self.reset_parameters()  # Object of type `Tensor` is not callable  ty:(call-non-callable)
 
     def reset_parameters(self) -> None:
         """
         Resets parameters based on their initialization used in ``__init__``.
         """
-        init.starter_trunc_normal_for_embedding_(self.weight)
+        init.starter_trunc_normal_for_linear_(self.weight, self.in_features, self.out_features)
 
     def forward(
-        self, token_ids: Int[torch.Tensor, "*batch sequence_length"]
-    ) -> Float[torch.Tensor, "*batch sequence_length {self.embedding_dim}"]:
-        """Apply the embedding transformation to the input."""
-        return einx.get_at(
-            "[vocab_size] d_model, batch... sequence_length -> batch... sequence_length d_model",
-            self.weight,
-            token_ids,
-        )
+        self, x: Float[torch.Tensor, "... {self.in_features}"]
+    ) -> Float[torch.Tensor, "... {self.out_features}"]:
+        """Apply the linear transformation to the input."""
+        # return torch.nn.functional.linear(x, self.weight)
+        return F.linear(x, self.weight)
 
     def extra_repr(self) -> str:
-        return f"num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim}"
-
-    @classmethod
-    def from_pretrained(
-        cls,
-        embeddings,
-        freeze=True,
-    ):
-        r"""Create Embedding instance from given 2-dimensional FloatTensor.
-
-        Args:
-            embeddings (Tensor): FloatTensor containing weights for the Embedding.
-                First dimension is being passed to Embedding as ``num_embeddings``, second as ``embedding_dim``.
-            freeze (bool, optional): If ``True``, the tensor does not get updated in the learning process.
-                Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``.
-        """
-        if embeddings.dim() != 2:
-            raise AssertionError("Embeddings parameter is expected to be 2-dimensional")
-        rows, cols = embeddings.shape
-        embedding = cls(
-            num_embeddings=rows,
-            embedding_dim=cols,
-            _weight=embeddings,
-            _freeze=freeze,
-        )
-        return embedding
+        return f"in_features={self.in_features}, out_features={self.out_features}, NO bias"

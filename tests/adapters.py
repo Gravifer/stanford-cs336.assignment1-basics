@@ -59,7 +59,7 @@ def run_embedding(
     from cs336_basics.modules import Embedding
 
     e = Embedding(vocab_size, d_model)
-    e.load_state_dict({"embeddings": weights})
+    e.load_state_dict({"weight": weights})
 
     return e.forward(token_ids)
 

@@ -11,6 +11,7 @@
         "elementwise",
         "endoftext",
         "inuse",
+        "jaxtyping",
         "nonblocking",
         "pretoken",
         "pretokenization",
@@ -19,6 +20,7 @@
         "scrun",
         "seqid",
         "seqno",
+        "silu",
         "tinystories",
         "tokid",
         "vocabs"
