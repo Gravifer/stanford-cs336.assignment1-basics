@@ -342,8 +342,7 @@ class SwiGLU(nn.Module):
     __constants__ = ["d_ff", "d_model"]
     d_ff: int
     d_model: int
-    value_weight: Float[torch.Tensor, "{self.d_ff} {self.d_model}"]
-    gate_weight: Float[torch.Tensor, "{self.d_ff} {self.d_model}"]
+    in_weight: Float[torch.Tensor, "2*{self.d_ff} {self.d_model}"]
     out_weight: Float[torch.Tensor, "{self.d_model} {self.d_ff}"]
 
     def __init__(
@@ -358,16 +357,15 @@ class SwiGLU(nn.Module):
         d_ff = d_ff or (int(8 * d_model / 3.0) >> 6) << 6
         self.d_ff = d_ff
         self.d_model = d_model
-        self.value_weight = nn.Parameter(torch.empty((d_ff, d_model), device=device, dtype=dtype))
-        self.gate_weight = nn.Parameter(torch.empty((d_ff, d_model), device=device, dtype=dtype))
+        self.in_weight = nn.Parameter(torch.empty((2 * d_ff, d_model), device=device, dtype=dtype))
         self.out_weight = nn.Parameter(torch.empty((d_model, d_ff), device=device, dtype=dtype))
 
     def forward(
         self, x: Float[torch.Tensor, "*mapped {self.d_model}"]
     ) -> Float[torch.Tensor, "*mapped {self.d_model}"]:
         """Apply the SwiGLU transformation to the input."""
-        value = F.linear(x, self.value_weight)
-        gate = F.linear(x, self.gate_weight)
+        vg = F.linear(x, self.in_weight)
+        value, gate = einx.id("mapped... (v + g) -> mapped... v, mapped... g", vg, v=self.d_ff, g=self.d_ff)
         return F.linear(F.swiglu(value, gate), self.out_weight)
 
 

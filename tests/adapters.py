@@ -86,13 +86,17 @@ def run_swiglu(
     Returns:
         Float[Tensor, "... d_model"]: Output embeddings of the same shape as the input embeddings.
     """
+    import einx
+
     from cs336_basics.nn.modules import SwiGLU
 
     swiglu = SwiGLU(d_model, d_ff)
+
+    in_weight = einx.id("v d_model, g d_model -> (v + g) d_model", w3_weight, w1_weight, v=d_ff, g=d_ff)
     # Example:
     # If your state dict keys match, you can use `load_state_dict()`
     # swiglu.load_state_dict(weights)
-    swiglu.load_state_dict({"gate_weight": w1_weight, "value_weight": w3_weight, "out_weight": w2_weight})
+    swiglu.load_state_dict({"in_weight": in_weight, "out_weight": w2_weight})
     # You can also manually assign the weights
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
