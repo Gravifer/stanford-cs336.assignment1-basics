@@ -77,14 +77,11 @@ class RotaryPositionalEmbedding(nn.Module):
     @jaxtyped(typechecker=beartype)
     def forward(
         self,
-        x: Shaped[KeyVec, "*mapped seq_len"],
-        token_positions: Int[
-            torch.Tensor, "*mapped seq_len"
-        ]  # otherwise, the same positions are broadcast for all x[*mapped]
-        | Int[torch.Tensor, "seq_len"],  # noqa: F821
+        x: Shaped[KeyVec, "*map_batch seq_len"],
+        token_positions: Int[torch.Tensor, "*batch seq_len"],
         *,
         broadcast_positions: bool = True,  # if False, second case of token_positions is not allowed
-    ) -> Shaped[KeyVec, "*mapped seq_len"]:
+    ) -> Shaped[KeyVec, "*map_batch seq_len"]:
         """
         Apply RoPE to the input tensor `𝑥` based on token positions.
 
@@ -99,22 +96,35 @@ class RotaryPositionalEmbedding(nn.Module):
         Returns:
             Tensor of shape (batch_size, seq_len, d_k) with RoPE applied
         """
+        map_batch: tuple[int, ...] = tuple(x.shape[:-2])
+
         # Ensure token_positions is of the same device as x
         token_positions = token_positions.to(x.device)
 
-        # print the shapes
-        print(f"x.shape = {x.shape}")
-        print(f"token_positions.shape = {token_positions.shape} ({token_positions!r})")
         if broadcast_positions:
-            # | "*mapped seq_len" -> check shapes are consistent; toggle broadcast off
-            # | "seq_len" -> check shapes are consistent
             if token_positions.shape == x.shape[:-1]:
                 broadcast_positions = False
-            elif token_positions.shape != x.shape[-2:-1]:
+                mapped: tuple[int, ...] = tuple()
+                batch: tuple[int, ...] = map_batch
+            elif token_positions.ndim >= x.ndim or token_positions.shape != x.shape[token_positions.ndim - x.ndim : -1]:
                 raise ValueError(
                     f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
                 )
-        print(f"broadcast_positions = {broadcast_positions}")
+            else:  # *batch is a valid suffix of *map_batch, so we can broadcast
+                mapped: tuple[int, ...] = tuple(x.shape[: token_positions.ndim - x.ndim])
+                batch: tuple[int, ...] = tuple(token_positions.shape[:-1])
+        elif token_positions.ndim != x.ndim - 1 or token_positions.shape == x.shape[:-2]:
+            raise ValueError(
+                f"token_positions shape {token_positions.shape} does not match with x shape {x.shape}; is broadcasting needed?"
+            )
+        shape_dict: dict[str, tuple[int, ...] | int] = {
+            "map_batch": map_batch,
+            "mapped": mapped,
+            "batch": batch,
+            "d_pair": self.d_pair,
+            "col": 2,
+            "row": 2,
+        }
 
         # # Compute the rotation angles for the given token positions
         # angles = self.freqs[token_positions]
@@ -122,57 +132,36 @@ class RotaryPositionalEmbedding(nn.Module):
         # # Compute the sine and cosine components (cached)
         # sin_angles = torch.sin(angles)
         # cos_angles = torch.cos(angles)
-        if broadcast_positions:
-            rot = einx.get_at(
-                "[max_seq_len] d_pair col row, seq_len -> seq_len d_pair col row",
-                self.rot,
-                token_positions,
-                d_pair=self.d_pair,
-                col=2,
-                row=2,
-            )
-        else:
-            rot = einx.get_at(
-                "[max_seq_len] d_pair col row, mapped... seq_len -> mapped... seq_len d_pair col row",
-                self.rot,
-                token_positions,
-                d_pair=self.d_pair,
-                col=2,
-                row=2,
-            )
-        print(f"rot.shape = {rot.shape}")
+        rot = einx.get_at(
+            "[max_seq_len] d_pair col row, batch... seq_len -> batch... seq_len d_pair col row",
+            self.rot,
+            token_positions,
+            **shape_dict,
+        )
 
         # # Split x into even and odd parts
         # x_even = x[..., 0::2]
         # x_odd = x[..., 1::2]
-        x_split = einx.id("mapped... seq_len (d_pair p) -> mapped... seq_len d_pair p", x, d_pair=self.d_pair, p=2)
+        x_split = einx.id(
+            "mapped... batch... seq_len (d_pair p) -> mapped... batch... seq_len d_pair p", x, **shape_dict
+        )
 
         # # Apply the rotation
         # x_rotated_even = x_even * cos_angles - x_odd * sin_angles
         # x_rotated_odd = x_even * sin_angles + x_odd * cos_angles
-        if broadcast_positions:
-            x_split_rotated = einx.dot(
-                "mapped... seq_len d_pair [row], seq_len d_pair col [row] -> mapped... seq_len d_pair col",
-                x_split,
-                rot,
-                d_pair=self.d_pair,
-                col=2,
-                row=2,
-            )
-        else:
-            x_split_rotated = einx.dot(
-                "mapped... seq_len d_pair [row], mapped... seq_len d_pair col [row] -> mapped... seq_len d_pair col",
-                x_split,
-                rot,
-                d_pair=self.d_pair,
-                col=2,
-                row=2,
-            )
+        x_split_rotated = einx.dot(
+            "mapped... batch... seq_len d_pair [row], batch... seq_len d_pair col [row] -> mapped... batch... seq_len d_pair col",
+            x_split,
+            rot,
+            **shape_dict,
+        )
 
         # # Interleave the rotated even and odd parts back together
         # x_rotated = torch.stack((x_rotated_even, x_rotated_odd), dim=-1).reshape_as(x)
         x_rotated = einx.id(
-            "mapped... seq_len d_pair p -> mapped... seq_len (d_pair p)", x_split_rotated, d_pair=self.d_pair, p=2
+            "mapped... batch... seq_len d_pair p -> mapped... batch... seq_len (d_pair p)",
+            x_split_rotated,
+            **shape_dict,
         )
 
         return x_rotated
