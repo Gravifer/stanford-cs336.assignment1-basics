@@ -10,7 +10,9 @@
         "einx",
         "elementwise",
         "endoftext",
+        "freqs",
         "inuse",
+        "jaxtyped",
         "jaxtyping",
         "nonblocking",
         "pretoken",
@@ -24,6 +26,7 @@
         "swiglu",
         "tinystories",
         "tokid",
+        "trigs",
         "vocabs"
     ],
     "ignoreWords": [],
