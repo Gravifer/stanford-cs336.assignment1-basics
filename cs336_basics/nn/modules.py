@@ -131,7 +131,7 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         Resets parameters based on their initialization used in ``__init__``.
         """
         if self.elementwise_affine:
-            assert self.weight is not None
+            assert self.weight is not None, "RMSNorm.weight is required when elementwise_affine=True"
             nn.init.ones_(self.weight)
 
     def forward(self, x: Shaped[ModelVec, "*batch sequence_length"]) -> Shaped[ModelVec, "*batch sequence_length"]:
@@ -140,11 +140,11 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
 
     @staticmethod
     def rms_norm(  # torch flavored
-        input: Float[torch.Tensor, "*shape"],
+        input: Float[torch.Tensor, "*batch_shape"],
         dims: tuple[int, ...],
-        weight: Float[torch.Tensor, "*weight_shape"] | None = None,
+        weight: Float[torch.Tensor, "*shape"] | None = None,
         eps: float = 1e-5,
-    ) -> Float[torch.Tensor, "*shape"]:
+    ) -> Float[torch.Tensor, "*batch_shape"]:
         """Functional interface to RMSNorm
         Root Mean Square Layer Normalization.
 

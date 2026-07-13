@@ -1,3 +1,5 @@
+import warnings
+
 import einops
 import einx
 import torch
@@ -115,6 +117,11 @@ class RotaryPositionalEmbedding(nn.Module):
         else:  # *batch === *map_batch
             mapped: tuple[int, ...] = tuple()
             batch: tuple[int, ...] = map_batch
+
+        if x.numel() == 0 and token_positions.numel() == 0:
+            warnings.warn("Applying RoPE to empty tensors is a no-op", stacklevel=2)
+            return x
+
         shape_dict: dict[str, tuple[int, ...] | int] = {
             "map_batch": map_batch,
             "mapped": mapped,

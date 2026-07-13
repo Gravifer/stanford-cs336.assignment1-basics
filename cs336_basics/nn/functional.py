@@ -98,11 +98,11 @@ def embedding(
 
 
 def rms_norm(  # torch flavored
-    input: Float[torch.Tensor, "*shape"],
+    input: Float[torch.Tensor, "*batch_shape"],
     dims: tuple[int, ...],
-    weight: Float[torch.Tensor, "*weight_shape"] | None = None,
+    weight: Float[torch.Tensor, "*shape"] | None = None,
     eps: float = 1e-5,
-) -> Float[torch.Tensor, "*shape"]:
+) -> Float[torch.Tensor, "*batch_shape"]:
     r"""Apply Root Mean Square Layer Normalization.
 
     See :class:`~modules.RMSNorm` for details.
@@ -126,13 +126,13 @@ def rms_norm(  # torch flavored
     ) ** 0.5
     # # Normalize the input
     # normalized_input = input / rms
-    normed: Float[torch.Tensor, "*shape"] = einx.divide(
+    normed: Float[torch.Tensor, "*batch_shape"] = einx.divide(
         f"mapped... {_normed}, mapped... -> mapped... {_normed}", input, rms, **dim_map
     )
     # # Apply weights if provided
     if weight is not None:
         # normalized_input = normalized_input * weights
-        normed: Float[torch.Tensor, "*shape"] = einx.multiply(
+        normed: Float[torch.Tensor, "*batch_shape"] = einx.multiply(
             f"mapped... {_normed}, {_normed} -> mapped... {_normed}", normed, weight, **dim_map
         )
     return normed

@@ -151,3 +151,21 @@ def test_rope_rejects_scalar_positions() -> None:
 
     with pytest.raises((ValueError, TypeCheckError)):
         rope(torch.randn(2, 4, 8), torch.tensor(0))
+
+
+def test_rope_warns_and_returns_empty_input() -> None:
+    rope = RotaryPositionalEmbedding(10_000.0, 8, 16)
+    x = torch.empty(2, 0, 8)
+
+    with pytest.warns(UserWarning, match="empty tensors is a no-op"):
+        output = rope(x, torch.empty(0, dtype=torch.int64))
+
+    assert output is x
+
+
+def test_rope_validates_shapes_before_empty_noop() -> None:
+    rope = RotaryPositionalEmbedding(10_000.0, 8, 16)
+    x = torch.empty(0, 2, 8)
+
+    with pytest.raises((ValueError, TypeCheckError)):
+        rope(x, torch.empty(0, dtype=torch.int64))
