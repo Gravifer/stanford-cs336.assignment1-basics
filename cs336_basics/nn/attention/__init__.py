@@ -122,7 +122,7 @@ class RotaryPositionalEmbedding(nn.Module):
             warnings.warn("Applying RoPE to empty tensors is a no-op", stacklevel=2)
             return x
 
-        shape_dict: dict[str, tuple[int, ...] | int] = {
+        axes_map: dict[str, tuple[int, ...] | int] = {
             "map_batch": map_batch,
             "mapped": mapped,
             "batch": batch,
@@ -141,7 +141,7 @@ class RotaryPositionalEmbedding(nn.Module):
             "[max_seq_len] d_pair col row, batch... seq_len -> batch... seq_len d_pair col row",
             self.rot,
             token_positions,
-            **shape_dict,
+            **axes_map,
         )
 
         in_dtype = x.dtype
@@ -156,7 +156,7 @@ class RotaryPositionalEmbedding(nn.Module):
         x_split = einx.id(
             "mapped... batch... seq_len (d_pair p) -> mapped... batch... seq_len d_pair p",
             x.to(op_dtype),
-            **shape_dict,
+            **axes_map,
         )
 
         # # Apply the rotation
@@ -166,7 +166,7 @@ class RotaryPositionalEmbedding(nn.Module):
             "mapped... batch... seq_len d_pair [row], batch... seq_len d_pair col [row] -> mapped... batch... seq_len d_pair col",
             x_split,
             rot,
-            **shape_dict,
+            **axes_map,
         )
 
         # # Interleave the rotated even and odd parts back together
@@ -174,7 +174,7 @@ class RotaryPositionalEmbedding(nn.Module):
         x_rotated = einx.id(
             "mapped... batch... seq_len d_pair p -> mapped... batch... seq_len (d_pair p)",
             x_split_rotated,
-            **shape_dict,
+            **axes_map,
         )
 
         return x_rotated.to(in_dtype)

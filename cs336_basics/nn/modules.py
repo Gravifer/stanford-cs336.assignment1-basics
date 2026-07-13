@@ -212,7 +212,7 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
             )
             mean_desc = desc
             affine_desc = f"{input_desc}, {weight_desc} -> {input_desc}"
-            parameters = kwargs
+            axes_map = kwargs
         elif targeted_preserving:
             # In this form brackets describe RMSNorm's true elementary signature:
             # targeted axes (and optionally their weights) map to the same axes.
@@ -263,15 +263,15 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
                 expr_weights = exprs_in[1]
                 weight_desc = str(einx_stage1.remove(expr_weights, einx_stage1.Brackets, keep_children=True))
                 affine_desc = f"{input_desc}, {weight_desc} -> {output_desc}"
-                parameters = dict(kwargs)
-                parameters.update(einx.solve_axes(f"{input_desc}, {weight_desc}", input, weight, **kwargs))
+                axes_map = dict(kwargs)
+                axes_map.update(einx.solve_axes(f"{input_desc}, {weight_desc}", input, weight, **kwargs))
             else:
                 weight_desc = " ".join(
                     str(expr.inner) for expr in expr_in.nodes() if isinstance(expr, einx_stage1.Brackets)
                 )
                 affine_desc = f"{input_desc}, {weight_desc} -> {output_desc}"
                 rearrange_desc = f"{input_desc} -> {output_desc}"
-                parameters = kwargs
+                axes_map = kwargs
         else:
             # Binary syntax follows einx's elementwise API. The second expression
             # both describes the weight tensor and selects the normalized axes.
@@ -309,8 +309,8 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
 
             # Tensor shapes disambiguate named ellipses in the binary form. Preserve
             # that information when the derived unary reduction is evaluated.
-            parameters = dict(kwargs)
-            parameters.update(einx.solve_axes(f"{expr_in}, {expr_weights}", input, weight, **kwargs))
+            axes_map = dict(kwargs)
+            axes_map.update(einx.solve_axes(f"{expr_in}, {expr_weights}", input, weight, **kwargs))
 
         in_dtype = input.dtype
         weight_dtype = weight.dtype if weight is not None else in_dtype
@@ -319,14 +319,14 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
             op_dtype = torch.float32
         input = input.to(op_dtype)
 
-        rms: Float[torch.Tensor, "*mapped"] = (einx.mean(mean_desc, input.abs() ** 2, **parameters) + eps) ** 0.5
+        rms: Float[torch.Tensor, "*mapped"] = (einx.mean(mean_desc, input.abs() ** 2, **axes_map) + eps) ** 0.5
         normed: Float[torch.Tensor, "*in_dims"] = einx.divide(
-            f"{input_desc}, {expr_reduced} -> {input_desc}", input, rms, **parameters
+            f"{input_desc}, {expr_reduced} -> {input_desc}", input, rms, **axes_map
         )
         if weight is not None:
-            normed = einx.multiply(affine_desc, normed, weight.to(op_dtype), **parameters)
+            normed = einx.multiply(affine_desc, normed, weight.to(op_dtype), **axes_map)
         elif rearrange_desc is not None:
-            normed = einx.id(rearrange_desc, normed, **parameters)
+            normed = einx.id(rearrange_desc, normed, **axes_map)
         return normed
 
 

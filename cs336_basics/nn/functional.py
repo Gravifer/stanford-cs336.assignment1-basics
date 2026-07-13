@@ -116,23 +116,23 @@ def rms_norm(  # torch flavored
     if op_dtype not in (torch.float32, torch.float64, torch.complex64, torch.complex128):
         op_dtype = torch.float32  # up-cast to float32 for numerical stability
     input = input.to(op_dtype)
-    dim_map: dict[str, int] = {f"n{i}": d for i, d in enumerate(dims)}
-    _normed: str = " ".join(d for d in dim_map.keys())
+    axes_map: dict[str, int] = {f"n{i}": d for i, d in enumerate(dims)}
+    _normed: str = " ".join(axes_map)
     # # Compute the root mean square
     # mean_square = torch.mean(input**2, dim=dims, keepdim=True)
     # rms = torch.sqrt(mean_square + eps)
     rms: Float[torch.Tensor, "*mapped"] = (
-        einx.mean(f"mapped... [{_normed}]", input.abs() ** 2, **dim_map) + eps
+        einx.mean(f"mapped... [{_normed}]", input.abs() ** 2, **axes_map) + eps
     ) ** 0.5
     # # Normalize the input
     # normalized_input = input / rms
     normed: Float[torch.Tensor, "*batch_shape"] = einx.divide(
-        f"mapped... {_normed}, mapped... -> mapped... {_normed}", input, rms, **dim_map
+        f"mapped... {_normed}, mapped... -> mapped... {_normed}", input, rms, **axes_map
     )
     # # Apply weights if provided
     if weight is not None:
         # normalized_input = normalized_input * weights
         normed: Float[torch.Tensor, "*batch_shape"] = einx.multiply(
-            f"mapped... {_normed}, {_normed} -> mapped... {_normed}", normed, weight, **dim_map
+            f"mapped... {_normed}, {_normed} -> mapped... {_normed}", normed, weight, **axes_map
         )
     return normed
