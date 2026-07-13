@@ -1,16 +1,17 @@
 import warnings
 
 import torch
+from jaxtyping import Float
 from torch.nn.init import trunc_normal_
 
 
 def starter_trunc_normal_for_linear_(
-    tensor: torch.Tensor,
+    tensor: Float[torch.Tensor, "*shape"],
     d_in: int,
     d_out: int,
     *,
     generator: torch.Generator | None = None,
-) -> torch.Tensor:
+) -> Float[torch.Tensor, "*shape"]:
     """
     Fills the input `tensor` with values drawn from a truncated normal distribution:
 
@@ -37,10 +38,10 @@ def starter_trunc_normal_for_linear_(
 
 
 def starter_trunc_normal_for_embedding_(
-    tensor: torch.Tensor,
+    tensor: Float[torch.Tensor, "*shape"],
     *,
     generator: torch.Generator | None = None,
-) -> torch.Tensor:
+) -> Float[torch.Tensor, "*shape"]:
     """
     Fills the input `tensor` with values drawn from a truncated normal distribution:
 

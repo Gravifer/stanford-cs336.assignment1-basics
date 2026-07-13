@@ -21,9 +21,9 @@ def glu(
 
 
 def gelu(
-    input: Float[torch.Tensor, "*mapped {*dims}"],
+    input: Float[torch.Tensor, "*shape"],
     approximate: Literal["none", "tanh"] = "tanh",
-) -> Float[torch.Tensor, "*mapped {*dims}"]:
+) -> Float[torch.Tensor, "*shape"]:
     """GELU activation function.
 
     Args:
@@ -33,7 +33,7 @@ def gelu(
     Returns:
         Output tensor of shape (*mapped, *dims).
     """
-    if not approximate:
+    if approximate == "none":
         return 0.5 * input * (1 + torch.erf(input / (2**0.5)))
     elif approximate == "tanh":
         return 0.5 * input * (1 + torch.tanh(input * 0.7978845608 * (1 + 0.044715 * input * input)))
@@ -42,9 +42,9 @@ def gelu(
 
 
 def linear(
-    input: Float[torch.Tensor, "... in_features"],
+    input: Float[torch.Tensor, "*mapped in_features"],
     weight: Float[torch.Tensor, "out_features in_features"],
-) -> Float[torch.Tensor, "... out_features"]:
+) -> Float[torch.Tensor, "*mapped out_features"]:
     """Linear transformation without bias.
 
     Args:
@@ -54,7 +54,7 @@ def linear(
     Returns:
         Output tensor of shape (..., out_features).
     """
-    return einx.dot("... d_in, d_out d_in -> ... d_out", input, weight)
+    return einx.dot("mapped... d_in, d_out d_in -> mapped... d_out", input, weight)
 
 
 def silu(
@@ -98,11 +98,11 @@ def embedding(
 
 
 def rms_norm(  # torch flavored
-    input: Float[torch.Tensor, "*mapped {*dims}"],
+    input: Float[torch.Tensor, "*shape"],
     dims: tuple[int, ...],
-    weight: Float[torch.Tensor, "{*dims}"] | None = None,  # noqa: F821
+    weight: Float[torch.Tensor, "*weight_shape"] | None = None,
     eps: float = 1e-5,
-) -> Float[torch.Tensor, "*mapped {*dims}"]:
+) -> Float[torch.Tensor, "*shape"]:
     r"""Apply Root Mean Square Layer Normalization.
 
     See :class:`~modules.RMSNorm` for details.
@@ -126,13 +126,13 @@ def rms_norm(  # torch flavored
     ) ** 0.5
     # # Normalize the input
     # normalized_input = input / rms
-    normed: Float[torch.Tensor, "*mapped {*dims}"] = einx.divide(
+    normed: Float[torch.Tensor, "*shape"] = einx.divide(
         f"mapped... {_normed}, mapped... -> mapped... {_normed}", input, rms, **dim_map
     )
     # # Apply weights if provided
     if weight is not None:
         # normalized_input = normalized_input * weights
-        normed: Float[torch.Tensor, "*mapped {*dims}"] = einx.multiply(
+        normed: Float[torch.Tensor, "*shape"] = einx.multiply(
             f"mapped... {_normed}, {_normed} -> mapped... {_normed}", normed, weight, **dim_map
         )
     return normed

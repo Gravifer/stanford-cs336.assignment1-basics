@@ -1,4 +1,4 @@
-from typing import Never
+from typing import Never, NoReturn
 
 import einx
 import einx._src.namedtensor.stage1 as einx_stage1
@@ -23,13 +23,12 @@ class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`t
     num_embeddings: int  # vocab_size
     embedding_dim: int  # d_model
     weight: Float[torch.Tensor, "{self.num_embeddings} {self.embedding_dim}"]  # matrix of embeddings
-    freeze: bool
 
     def __init__(
         self,
         num_embeddings: int,
         embedding_dim: int,
-        _weight: Float[torch.Tensor, "{self.num_embeddings} {self.embedding_dim}"] | None = None,
+        _weight: Float[torch.Tensor, "{num_embeddings} {embedding_dim}"] | None = None,
         _freeze: bool = False,
         device: torch.device | None = None,
         dtype: dtype | None = None,
@@ -66,9 +65,9 @@ class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`t
     @classmethod
     def from_pretrained(
         cls,
-        embeddings,
-        freeze=True,
-    ):
+        embeddings: Float[torch.Tensor, "num_embeddings embedding_dim"],
+        freeze: bool = True,
+    ) -> "Embedding":  # noqa: UP037
         r"""Create Embedding instance from given 2-dimensional FloatTensor.
 
         Args:
@@ -106,7 +105,7 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
     __constants__ = ["d_model", "eps"]
     d_model: int
     eps: float
-    weight: ModelVec  # the `gᵢ`s # noqa: F821
+    weight: ModelVec | None  # the `gᵢ`s # noqa: F821
     elementwise_affine: bool
 
     def __init__(
@@ -132,6 +131,7 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         Resets parameters based on their initialization used in ``__init__``.
         """
         if self.elementwise_affine:
+            assert self.weight is not None
             nn.init.ones_(self.weight)
 
     def forward(self, x: Shaped[ModelVec, "*batch sequence_length"]) -> Shaped[ModelVec, "*batch sequence_length"]:
@@ -140,11 +140,11 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
 
     @staticmethod
     def rms_norm(  # torch flavored
-        input: Float[torch.Tensor, "*mapped {*dims}"],
+        input: Float[torch.Tensor, "*shape"],
         dims: tuple[int, ...],
-        weight: Float[torch.Tensor, "{*dims}"] | None = None,  # noqa: F821
+        weight: Float[torch.Tensor, "*weight_shape"] | None = None,
         eps: float = 1e-5,
-    ) -> Float[torch.Tensor, "*mapped {*dims}"]:
+    ) -> Float[torch.Tensor, "*shape"]:
         """Functional interface to RMSNorm
         Root Mean Square Layer Normalization.
 
@@ -335,10 +335,7 @@ class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
     in_features: int
     out_features: int
     weight: Float[torch.Tensor, "{self.out_features} {self.in_features}"]
-
-    @property
-    def bias(self) -> Never:
-        raise AttributeError("This module has no bias.")
+    bias: Never
 
     def __init__(
         self, in_features: int, out_features: int, device: torch.device | None = None, dtype: dtype | None = None
@@ -378,7 +375,7 @@ class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
 
 @deprecated("we won't have a SiLU module; without the in-place option, not using the functional version is moot.")
 class SiLU(nn.Module):
-    def __init__(self, inplace: bool = False) -> Never:
+    def __init__(self, inplace: bool = False) -> NoReturn:
         raise NotImplementedError(
             "we won't have a SiLU module; without the in-place option, not using the functional version is moot."
         )
