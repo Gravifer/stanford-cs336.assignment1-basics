@@ -5,8 +5,10 @@ from collections.abc import Callable
 from typing import Any
 
 import torch
+from jaxtyping import install_import_hook
 
-from cs336_basics.nn.attention import RotaryPositionalEmbedding
+with install_import_hook("cs336_basics.nn", "beartype.beartype"):
+    from cs336_basics.nn.attention import RotaryPositionalEmbedding
 
 
 def outcome(probe: Callable[[], Any]) -> str:

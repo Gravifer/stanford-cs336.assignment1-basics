@@ -45,13 +45,11 @@ assignment checkpoint tests.
 - `typing.NoReturn` is supported by both beartype and
   `jaxtyped(typechecker=beartype)`. It is a viable terminal-return annotation;
   `Never` is not in this runtime configuration.
-- `Linear.bias` is not terminal at runtime: accessing it returns `None` through
-  `nn.Module`'s registered-parameter lookup. Ty nevertheless infers `Never`,
-  and therefore considers all subsequent statements in the same scope
-  unreachable.
-- The package hook adds a second wrapper to the explicitly decorated
-  `RotaryPositionalEmbedding.forward`. A single explicit decorator has wrapper
-  depth 1; the attention import hook raises it to 2.
+- `Linear.bias` remains deliberately terminal to ty through a class-only
+  `Never` annotation, while runtime registered-parameter lookup returns `None`.
+  This preserves the static warning without exposing `Never` to beartype.
+- `RotaryPositionalEmbedding.forward` is no longer explicitly decorated. The
+  package hook supplies exactly one wrapper, while normal imports supply none.
 - `Embedding.__init__` works under the hook when `_weight` is `None`, but a
   supplied tensor fails type checking because `{self.num_embeddings}` and
   `{self.embedding_dim}` are evaluated before those attributes are assigned.
@@ -97,16 +95,15 @@ assignment checkpoint tests.
 - Both modes accept exact batches, unbatched positions broadcast over mapped
   axes, int32 positions, and negative positions.
 - Checked mode improves failures for wrong key width, wrong sequence length,
-  floating positions, and integer activations. Unchecked mode still fails later
-  through manual guards or einx/PyTorch.
-- Float16 and float64 activations satisfy the `Float` annotation but fail in
-  both modes because the cached rotation tensor is float32. Jaxtyping does not
-  express matching floating precision here.
+  and floating positions; unchecked mode fails later through manual guards or
+  einx/PyTorch. Integer activations are an annotation-only violation: checked
+  mode rejects them, while unchecked promoted computation can execute them.
+- Float16, bfloat16, float32, and float64 activations now use a promoted
+  operation dtype (at least float32) and return in the activation dtype.
 - Out-of-range position values reach einx/PyTorch in both modes, as expected for
   a shape/dtype checker.
-- Nonempty batch-suffix broadcasting, which the comments describe as valid, is
-  rejected by the manual shape logic in both modes. Treat this as a separate
-  implementation-policy decision rather than changing annotations to hide it.
+- Nonempty batch-suffix broadcasting now uses the corrected negative slice
+  `-token_positions.ndim - 1` and matches the documented einx layout.
 
 ## Project policy captured from discussion
 

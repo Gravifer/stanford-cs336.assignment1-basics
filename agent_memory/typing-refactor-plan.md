@@ -22,11 +22,9 @@
 
 ### `cs336_basics/nn/modules.py`
 
-1. Replace `Linear.bias -> Never` with the truthful no-bias state (`bias: None`)
-   while retaining `register_parameter("bias", None)`. Remove the property whose
-   `AttributeError` currently falls through to `nn.Module` and returns `None`.
-   This fixes both the beartype import failure and ty's false unreachable-code
-   inference.
+1. Preserve the deliberate static no-bias signal as a class-only `bias: Never`
+   annotation while retaining `register_parameter("bias", None)`. Remove the
+   property so beartype never attempts to decorate a `Never` return.
 2. Change the deliberately unusable `SiLU.__init__` terminal annotation from
    `Never` to `NoReturn`. The installed beartype supports `NoReturn` in return
    position. Keep the existing raised exception and deprecation behavior.
@@ -36,8 +34,8 @@
    arguments (`{num_embeddings} {embedding_dim}`), not attributes assigned only
    inside the body.
 5. Fully annotate `Embedding.from_pretrained`: floating 2-D tensor input,
-   `freeze: bool = True`, and `Self` return. This removes its current `Unknown`
-   result in ty.
+   `freeze: bool = True`, and a concrete quoted `"Embedding"` return. `Self`
+   is incompatible with the import hook's method-level beartype decoration.
 6. Make `RMSNorm.weight` optional to match the non-affine runtime state. Add an
    explicit internal narrowing assertion where `elementwise_affine` guarantees
    a parameter before initialization.
@@ -47,8 +45,8 @@
 - A strict import hook over `cs336_basics.nn` must import successfully without
   the probe-only skip-unsupported typechecker.
 - Ruff and ty must remain clean.
-- Static reveal spot checks should show `Linear.bias` as `None`,
-  `Embedding.from_pretrained` as `Embedding`/`Self`, and non-affine
+- Static reveal spot checks should show `Linear.bias` as `Never`,
+  `Embedding.from_pretrained` as `Embedding`, and non-affine
   `RMSNorm.weight` as optional.
 
 ## Phase 2: repair and strengthen tensor contracts
@@ -105,13 +103,9 @@
    unless an explicit public annotation materially improves readability. Both
    preserve the concrete constructor and instance type across modules; broad
    `type` currently turns consumers into `Any`.
-2. Review the three `load_state_dict` overrides as a separate, bounded change:
-   - first decide whether their intentional public contract is current `None`
-     or PyTorch-compatible `_IncompatibleKeys`;
-   - then annotate mapping values and the return truthfully;
-   - add direct tests for packed and unpacked input state dicts before changing
-     behavior.
-   Do not silently claim the PyTorch return contract while still discarding it.
+2. Return and annotate PyTorch's private `_IncompatibleKeys` from all three
+   `load_state_dict` overrides. Normalize supplied keys and let the parent load
+   report missing and unexpected keys coherently.
 
 ### Gate
 
@@ -168,20 +162,14 @@
    wrong key width, wrong sequence length, non-integer positions, and
    `broadcast_positions=False`.
 
-## Explicit parking lot: do not hide these in typing edits
+## Explicit parking lot
 
-1. **RoPE nonempty batch-suffix broadcasting:** comments say it is valid, but
-   both checked and unchecked implementations reject it. Decide separately
-   whether to repair the shape guard and add a behavioral regression test.
-2. **RoPE floating precision:** `Float` reasonably accepts float16/32/64, but
-   the float32 cached rotation currently makes float16/64 calls fail. This is a
-   buffer-dtype/operation policy decision, not expressible as the current shape
-   annotation.
-3. **Negative/out-of-range positions:** jaxtyping checks dtype/shape, not value
+1. **Negative/out-of-range positions:** jaxtyping checks dtype/shape, not value
    ranges. Decide whether project logic should reject them; do not add guards
    merely to duplicate type checking.
-4. **State-dict return compatibility:** resolve in Phase 3 with tests rather
-   than opportunistically during annotation cleanup.
+
+RoPE suffix broadcasting and promoted floating-point computation are resolved
+in this branch and covered by the separate typing suite.
 
 ## Final verification
 

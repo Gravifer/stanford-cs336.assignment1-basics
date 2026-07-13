@@ -131,7 +131,7 @@ def main() -> None:
     report("SwiGLU.forward / valid", lambda: swiglu(torch.zeros(2, 3, 4)))
     report("SwiGLU.forward / wrong final width", lambda: swiglu(torch.zeros(2, 3, 5)))
 
-    print("\n[already-decorated RoPE]")
+    print("\n[RoPE wrapper]")
     rope = RotaryPositionalEmbedding(theta=10_000.0, d_k=4, max_seq_len=8)
     report("forward wrapper depth", lambda: wrapper_depth(type(rope).forward))
     report(
