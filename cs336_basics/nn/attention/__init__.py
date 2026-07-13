@@ -113,10 +113,13 @@ class RotaryPositionalEmbedding(nn.Module):
             else:  # *batch is a valid suffix of *map_batch, so we can broadcast
                 mapped: tuple[int, ...] = tuple(x.shape[: token_positions.ndim - x.ndim])
                 batch: tuple[int, ...] = tuple(token_positions.shape[:-1])
-        elif token_positions.ndim != x.ndim - 1 or token_positions.shape == x.shape[:-2]:
+        elif token_positions.ndim != x.ndim - 1 or token_positions.shape != x.shape[:-1]:
             raise ValueError(
                 f"token_positions shape {token_positions.shape} does not match with x shape {x.shape}; is broadcasting needed?"
             )
+        else:  # *batch === *map_batch
+            mapped: tuple[int, ...] = tuple()
+            batch: tuple[int, ...] = map_batch
         shape_dict: dict[str, tuple[int, ...] | int] = {
             "map_batch": map_batch,
             "mapped": mapped,
