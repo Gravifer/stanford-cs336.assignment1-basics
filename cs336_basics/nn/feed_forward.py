@@ -5,6 +5,7 @@ import einx
 import torch
 from jaxtyping import Float, Shaped
 from torch import dtype, nn
+from torch.nn.modules.module import _IncompatibleKeys
 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
@@ -64,12 +65,14 @@ class SwiGLU_delegate(nn.Module):
     def extra_repr(self) -> str:
         return f"d_model={self.d_model}, d_ff={self.d_ff}"
 
-    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False) -> None:
+    def load_state_dict(
+        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
+    ) -> _IncompatibleKeys:
         """Load the state dict into the module.
 
         We need to load into the Linear members
         """
-        out_weight = state_dict.get("out_weight")
+        translated: dict[str, Any] = {}
         if "in_weight" in state_dict:
             if "value_weight" in state_dict or "gate_weight" in state_dict:
                 raise ValueError("state_dict contains both 'in_weight' and 'value_weight'/'gate_weight'; cannot load")
@@ -78,12 +81,19 @@ class SwiGLU_delegate(nn.Module):
             value_weight, gate_weight = einx.id(
                 "(v + g) d_model -> v d_model, g d_model", in_weight, v=self.d_ff, g=self.d_ff
             )
+            translated["value_linear.weight"] = value_weight
+            translated["gate_linear.weight"] = gate_weight
         else:
-            value_weight = state_dict.get("value_weight")
-            gate_weight = state_dict.get("gate_weight")
-        self.value_linear.load_state_dict({"weight": value_weight}, strict, assign)
-        self.gate_linear.load_state_dict({"weight": gate_weight}, strict, assign)
-        self.out_linear.load_state_dict({"weight": out_weight}, strict, assign)
+            if "value_weight" in state_dict:
+                translated["value_linear.weight"] = state_dict["value_weight"]
+            if "gate_weight" in state_dict:
+                translated["gate_linear.weight"] = state_dict["gate_weight"]
+        if "out_weight" in state_dict:
+            translated["out_linear.weight"] = state_dict["out_weight"]
+
+        known_keys = {"in_weight", "value_weight", "gate_weight", "out_weight"}
+        translated.update((key, value) for key, value in state_dict.items() if key not in known_keys)
+        return super().load_state_dict(translated, strict, assign)
 
 
 class SwiGLU_own_weights(nn.Module):
@@ -138,12 +148,14 @@ class SwiGLU_own_weights(nn.Module):
     def extra_repr(self) -> str:
         return f"d_model={self.d_model}, d_ff={self.d_ff}; weights owned"
 
-    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False) -> None:
+    def load_state_dict(
+        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
+    ) -> _IncompatibleKeys:
         """Load the state dict into the module.
 
         We need to load into the Linear members
         """
-        out_weight = state_dict.get("out_weight")
+        translated: dict[str, Any] = {}
         if "in_weight" in state_dict:
             if "value_weight" in state_dict or "gate_weight" in state_dict:
                 raise ValueError("state_dict contains both 'in_weight' and 'value_weight'/'gate_weight'; cannot load")
@@ -152,12 +164,19 @@ class SwiGLU_own_weights(nn.Module):
             value_weight, gate_weight = einx.id(
                 "(v + g) d_model -> v d_model, g d_model", in_weight, v=self.d_ff, g=self.d_ff
             )
+            translated["value_weight"] = value_weight
+            translated["gate_weight"] = gate_weight
         else:
-            value_weight = state_dict.get("value_weight")
-            gate_weight = state_dict.get("gate_weight")
-        super().load_state_dict(
-            {"value_weight": value_weight, "gate_weight": gate_weight, "out_weight": out_weight}, strict, assign
-        )
+            if "value_weight" in state_dict:
+                translated["value_weight"] = state_dict["value_weight"]
+            if "gate_weight" in state_dict:
+                translated["gate_weight"] = state_dict["gate_weight"]
+        if "out_weight" in state_dict:
+            translated["out_weight"] = state_dict["out_weight"]
+
+        known_keys = {"in_weight", "value_weight", "gate_weight", "out_weight"}
+        translated.update((key, value) for key, value in state_dict.items() if key not in known_keys)
+        return super().load_state_dict(translated, strict, assign)
 
 
 class SwiGLU_packed_input(nn.Module):
@@ -209,24 +228,33 @@ class SwiGLU_packed_input(nn.Module):
     def extra_repr(self) -> str:
         return f"d_model={self.d_model}, d_ff={self.d_ff}; value and gate weights packed"
 
-    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False) -> None:
+    def load_state_dict(
+        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
+    ) -> _IncompatibleKeys:
         """Load the state dict into the module.
 
         We need to pack the value and gate weights
         """
-        out_weight = state_dict.get("out_weight")
+        translated: dict[str, Any] = {}
         if "in_weight" not in state_dict:
-            value_weight = state_dict.get("value_weight")
-            gate_weight = state_dict.get("gate_weight")
-            # pack value_weight and gate_weight into in_weight; we'll let errors propagate, if any
-            in_weight = einx.id(
-                "v d_model, g d_model -> (v + g) d_model", value_weight, gate_weight, v=self.d_ff, g=self.d_ff
-            )
+            if "value_weight" in state_dict and "gate_weight" in state_dict:
+                translated["in_weight"] = einx.id(
+                    "v d_model, g d_model -> (v + g) d_model",
+                    state_dict["value_weight"],
+                    state_dict["gate_weight"],
+                    v=self.d_ff,
+                    g=self.d_ff,
+                )
         else:
             if "value_weight" in state_dict or "gate_weight" in state_dict:
                 raise ValueError("state_dict contains both 'in_weight' and 'value_weight'/'gate_weight'; cannot load")
-            in_weight = state_dict["in_weight"]
-        super().load_state_dict({"in_weight": in_weight, "out_weight": out_weight}, strict, assign)
+            translated["in_weight"] = state_dict["in_weight"]
+        if "out_weight" in state_dict:
+            translated["out_weight"] = state_dict["out_weight"]
+
+        known_keys = {"in_weight", "value_weight", "gate_weight", "out_weight"}
+        translated.update((key, value) for key, value in state_dict.items() if key not in known_keys)
+        return super().load_state_dict(translated, strict, assign)
 
 
-SwiGLU: type = SwiGLU_packed_input
+SwiGLU = SwiGLU_packed_input
