@@ -1,8 +1,7 @@
 import einops
 import einx
 import torch
-from beartype import beartype
-from jaxtyping import Float, Int, Shaped, jaxtyped
+from jaxtyping import Float, Int, Shaped
 from torch import nn
 
 
@@ -47,9 +46,7 @@ class RotaryPositionalEmbedding(nn.Module):
         self.max_seq_len = max_seq_len
 
         # Precompute the rotation angles for efficiency
-        inv_freq: self.HalfKey = 1.0 / (  # noqa: UP037
-            self.theta ** (torch.arange(0, d_k, 2, device=device) / d_k)
-        )
+        inv_freq: self.HalfKey = 1.0 / (self.theta ** (torch.arange(0, d_k, 2, device=device) / d_k))
         freqs: Shaped[self.HalfKey, "{self.max_seq_len}"] = einx.multiply(  # noqa: UP037
             "max_seq_len, d_pair -> max_seq_len d_pair",
             torch.arange(max_seq_len, device=device),
@@ -74,7 +71,6 @@ class RotaryPositionalEmbedding(nn.Module):
         )
         self.register_buffer("rot", rot, persistent=False)
 
-    @jaxtyped(typechecker=beartype)
     def forward(
         self,
         x: Shaped[KeyVec, "*map_batch seq_len"],
@@ -101,18 +97,17 @@ class RotaryPositionalEmbedding(nn.Module):
         # Ensure token_positions is of the same device as x
         token_positions = token_positions.to(x.device)
 
+        if token_positions.ndim == 0:
+            raise ValueError("token_positions must include a sequence dimension")
+
         if broadcast_positions:
-            if token_positions.shape == x.shape[:-1]:
-                broadcast_positions = False
-                mapped: tuple[int, ...] = tuple()
-                batch: tuple[int, ...] = map_batch
-            elif token_positions.ndim >= x.ndim or token_positions.shape != x.shape[token_positions.ndim - x.ndim : -1]:
+            suffix_start = -token_positions.ndim - 1
+            if token_positions.ndim >= x.ndim or token_positions.shape != x.shape[suffix_start:-1]:
                 raise ValueError(
                     f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
                 )
-            else:  # *batch is a valid suffix of *map_batch, so we can broadcast
-                mapped: tuple[int, ...] = tuple(x.shape[: token_positions.ndim - x.ndim])
-                batch: tuple[int, ...] = tuple(token_positions.shape[:-1])
+            mapped: tuple[int, ...] = tuple(x.shape[:suffix_start])
+            batch: tuple[int, ...] = tuple(token_positions.shape[:-1])
         elif token_positions.ndim != x.ndim - 1 or token_positions.shape != x.shape[:-1]:
             raise ValueError(
                 f"token_positions shape {token_positions.shape} does not match with x shape {x.shape}; is broadcasting needed?"
@@ -142,11 +137,19 @@ class RotaryPositionalEmbedding(nn.Module):
             **shape_dict,
         )
 
+        in_dtype = x.dtype
+        op_dtype = torch.promote_types(in_dtype, rot.dtype)
+        if op_dtype not in (torch.float32, torch.float64):
+            op_dtype = torch.float32
+        rot = rot.to(op_dtype)
+
         # # Split x into even and odd parts
         # x_even = x[..., 0::2]
         # x_odd = x[..., 1::2]
         x_split = einx.id(
-            "mapped... batch... seq_len (d_pair p) -> mapped... batch... seq_len d_pair p", x, **shape_dict
+            "mapped... batch... seq_len (d_pair p) -> mapped... batch... seq_len d_pair p",
+            x.to(op_dtype),
+            **shape_dict,
         )
 
         # # Apply the rotation
@@ -167,4 +170,4 @@ class RotaryPositionalEmbedding(nn.Module):
             **shape_dict,
         )
 
-        return x_rotated
+        return x_rotated.to(in_dtype)
