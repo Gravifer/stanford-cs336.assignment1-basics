@@ -56,29 +56,29 @@ def softmax(
     Use the trick of subtracting the maximum value in the 𝑖-th dimension
         from all elements of the 𝑖-th dimension to avoid numerical stability issues.
     """
-    type InputShaped   = Float[torch.Tensor, "*shape"]
-    type ReducedShaped = Float[torch.Tensor, "*reduced"]
-    # type KeptShaped  = Float[torch.Tensor, "*kept"]
-    # derive einx strings
-    dim: int = (dim if dim is not None else -1) % input.ndim
-    axes_map: dict[str, int] = {(f"n{i}"): d                        for i, d in enumerate(input.shape)}
-    _shape:    str = " ".join(   f"n{i}"                            for i    in range(input.ndim))
-    _targeted: str = " ".join(   f"n{i}" if i != dim else f"[n{i}]" for i    in range(input.ndim))
-    _kept:     str = " ".join(   f"n{i}" if i != dim else "()"      for i    in range(input.ndim))
-    _reduced:  str = " ".join(   f"n{i}"                            for i    in range(input.ndim) if i != dim)
+    type InputShaped = Float[torch.Tensor, "*shape"]
+    # type ReducedShaped = Float[torch.Tensor, "*reduced"]
+    type KeptShaped = Float[torch.Tensor, "*kept"]
+    # # derive einx strings
+    # dim: int = (dim if dim is not None else -1) % input.ndim
+    # axes_map: dict[str, int] = {(f"n{i}"): d                        for i, d in enumerate(input.shape)}
+    # _shape:    str = " ".join(   f"n{i}"                            for i    in range(input.ndim))
+    # _targeted: str = " ".join(   f"n{i}" if i != dim else f"[n{i}]" for i    in range(input.ndim))
+    # _kept:     str = " ".join(   f"n{i}" if i != dim else "()"      for i    in range(input.ndim))
+    # _reduced:  str = " ".join(   f"n{i}"                            for i    in range(input.ndim) if i != dim)
     # return einx.softmax(_shape, input, **axes_map) # * arguably cheating
-    # max_kept: KeptShaped = torch.max(input, dim=dim, keepdim=True).values
+    max_kept: KeptShaped = torch.max(input, dim=dim, keepdim=True).values
     # max_kept: KeptShaped = einx.max(f"{_targeted} -> {_kept}", input, **axes_map)
-    max_reduced: ReducedShaped = einx.max(f"{_targeted} -> {_reduced}", input, **axes_map)
-    # exp_input: InputShaped = torch.exp(input - max_kept)
+    # max_reduced: ReducedShaped = einx.max(f"{_targeted} -> {_reduced}", input, **axes_map)
+    exp_input: InputShaped = torch.exp(input - max_kept)
     # exp_input: InputShaped = einx.subtract(f"{_shape}, {_kept} -> {_shape}", input, max_kept, **axes_map).exp()
-    exp_input: InputShaped = einx.subtract(f"{_shape}, {_reduced} -> {_shape}", input, max_reduced, **axes_map).exp()
-    # sum_exp: KeptShaped = torch.sum(exp_input, dim=dim, keepdim=True)
+    # exp_input: InputShaped = einx.subtract(f"{_shape}, {_reduced} -> {_shape}", input, max_reduced, **axes_map).exp()
+    sum_exp: KeptShaped = torch.sum(exp_input, dim=dim, keepdim=True)
     # sum_exp: KeptShaped = einx.sum(f"{_targeted} -> {_kept}", exp_input, **axes_map)
-    sum_exp: ReducedShaped = einx.sum(f"{_targeted} -> {_reduced}", exp_input, **axes_map)
-    # return exp_input / sum_exp
+    # sum_exp: ReducedShaped = einx.sum(f"{_targeted} -> {_reduced}", exp_input, **axes_map)
+    return exp_input / sum_exp
     # return einx.divide(f"{_shape}, {_kept} -> {_shape}", exp_input, sum_exp, **axes_map)
-    return einx.divide(f"{_shape}, {_reduced} -> {_shape}", exp_input, sum_exp, **axes_map)
+    # return einx.divide(f"{_shape}, {_reduced} -> {_shape}", exp_input, sum_exp, **axes_map)
 
 
 def linear(
