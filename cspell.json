@@ -4,6 +4,7 @@
     "dictionaryDefinitions": [],
     "dictionaries": [],
     "words": [
+        "allclose",
         "cnts",
         "codepoint",
         "digram",
@@ -14,6 +15,7 @@
         "inuse",
         "jaxtyped",
         "jaxtyping",
+        "keepdim",
         "majorize",
         "nonblocking",
         "pretoken",
