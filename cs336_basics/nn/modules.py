@@ -138,6 +138,9 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         in_dtype = x.dtype
         return self.rms_norm(x, (self.d_model,), self.weight, self.eps).to(in_dtype)
 
+    def extra_repr(self) -> str:
+        return f"d_model={self.d_model}, eps={self.eps}, elementwise_affine={self.elementwise_affine}"
+
     @staticmethod
     def rms_norm(  # torch flavored
         input: Float[torch.Tensor, "*batch_shape"],
@@ -328,6 +331,44 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         elif rearrange_desc is not None:
             normed = einx.id(rearrange_desc, normed, **axes_map)
         return normed
+
+
+class SoftMax(nn.Module):  # mimicking :cls:`torch.nn.Softmax`
+    __constants__ = ["dim"]
+    dim: int  # we will canonicalize the dim to be an int; we cannot enforce a stronger constraint without breaking compatibility with :cls:`torch.nn.Softmax`
+
+    def __init__(self, dim: int | None = None) -> None:
+        super().__init__()
+        dim: int = dim if dim is not None else -1
+        if not isinstance(dim, int):
+            raise TypeError(f"dim must be an int, but got {type(dim).__name__}")
+        self.dim = dim
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        if not hasattr(self, "dim"):
+            self.dim = None
+
+    def forward(self, in_features: Float[torch.Tensor, "*batch shape"]) -> Float[torch.Tensor, "*batch shape"]:
+        """Apply the softmax transformation to the input."""
+        return F.softmax(in_features, dim=self.dim, _stacklevel=5)  # pytorch sets an extra high stacklevel for this
+
+    def extra_repr(self) -> str:
+        return f"dim={self.dim}"
+
+    @staticmethod
+    def softmax_torch(
+        in_features: Float[torch.Tensor, "*batch shape"], dim: int | None = None
+    ) -> Float[torch.Tensor, "*batch shape"]:
+        """Functional interface to SoftMax in torch flavor"""
+        return F.softmax(in_features, dim=dim)
+
+    @staticmethod
+    def softmax_einx(
+        desc: str, in_features: Float[torch.Tensor, "*in_dims"], **kwargs
+    ) -> Float[torch.Tensor, "*in_dims"]:
+        """Functional interface to SoftMax in einx flavor"""
+        return einx.softmax(desc, in_features, **kwargs)
 
 
 class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
