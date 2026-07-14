@@ -4,7 +4,7 @@ from typing import Literal
 import einx
 import torch
 from jaxtyping import Float, Int
-from torch import sigmoid
+from torch import sigmoid  # we're re-exporting it because the assignment explicitly allows it
 
 
 def glu(
@@ -39,6 +39,33 @@ def gelu(
         return 0.5 * input * (1 + torch.tanh(input * 0.7978845608 * (1 + 0.044715 * input * input)))
     else:
         raise NotImplementedError(f"Unknown approximate mode: {approximate}")
+
+
+def softmax(
+    input: Float[torch.Tensor, "*shape"],
+    dim: int | None = None,
+    _stacklevel: int = 3,
+    dtype: torch.dtype | None = None,
+) -> Float[torch.Tensor, "*shape"]:
+    """Softmax activation function.
+
+    Takes two parameters (so that the signature matches torch.nn.functional.softmax):
+        a tensor and a dimension 𝑖, and apply softmax to the 𝑖-th dimension of the input tensor.
+    The output tensor should have the same shape as the input tensor,
+        but its 𝑖-th dimension will now have a normalized probability distribution.
+    Use the trick of subtracting the maximum value in the 𝑖-th dimension
+        from all elements of the 𝑖-th dimension to avoid numerical stability issues.
+    """
+    type InputShaped = Float[torch.Tensor, "*shape"]
+    # derive einx strings
+    dim: int = (dim if dim is not None else -1) % input.ndim
+    axes_map: dict[str, int] = {(f"n{i}") if i != dim else f"[n{i}]": d for i, d in enumerate(input.shape)}
+    _shape: str = " ".join(axes_map)
+    return einx.softmax(_shape, input, **axes_map)
+    # max_val: InputShaped = torch.max(input, dim=dim, keepdim=True).values
+    # exp_input: InputShaped = torch.exp(input - max_val)
+    # sum_exp: InputShaped = torch.sum(exp_input, dim=dim, keepdim=True)
+    # return exp_input / sum_exp
 
 
 def linear(
