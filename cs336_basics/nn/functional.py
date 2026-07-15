@@ -3,7 +3,7 @@ from typing import Literal
 
 import einx
 import torch
-from jaxtyping import Float, Int
+from jaxtyping import Bool, Float, Int
 from torch import sigmoid  # we're re-exporting it because the assignment explicitly allows it
 
 
@@ -176,3 +176,51 @@ def rms_norm(  # torch flavored
             f"mapped... {_normed}, {_normed} -> mapped... {_normed}", normed, weight, **axes_map
         )
     return normed
+
+
+def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled_dot_product_attention`
+    query: Float[torch.Tensor, "*batch seq_len d_k"],
+    key: Float[torch.Tensor, "*batch seq_len d_k"],
+    value: Float[torch.Tensor, "*batch seq_len d_v"],
+    mask: Bool[torch.Tensor, "*slew seq_len seq_len"] | None = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    scale: float | None = None,
+    enable_gqa: bool = False,
+    *,
+    attn_mask: Bool[torch.Tensor, "*slew seq_len seq_len"] | None = None,
+) -> Float[torch.Tensor, "*batch seq_len d_v"]:
+    """Compute scaled dot-product attention.
+
+    handles keys and queries of shape (batch_size, ..., seq_len, d_k)
+    and values of shape (batch_size, ..., seq_len, d_v),
+    where ... represents any number of other batch-like dimensions (if provided).
+    Also support an optional user-provided boolean mask of shape (seq_len, seq_len);
+    can have additional dimensions, but have to be a suffix of the input batch shapes.
+    Args:
+        query: Query tensor of shape (*batch, seq_len, d_k).
+        key: Key tensor of shape (*batch, seq_len, d_k).
+        value: Value tensor of shape (*batch, seq_len, d_v).
+        mask: Optional mask tensor of shape (*slew, seq_len, seq_len). (the alias `attn_mask` is allowed)
+        dropout_p: Dropout probability.
+        is_causal: Whether to apply causal masking.
+        scale: Scaling factor for the attention scores; default to 1 / √d_k.
+        enable_gqa: Whether to enable grouped query attention.
+
+    Returns:
+        Output tensor of shape (*batch, seq_len, d_v).
+    """
+    if mask is not None and attn_mask is not None:
+        raise ValueError("Only one of `mask` or `attn_mask` should be provided.")
+    elif attn_mask is not None:
+        mask = attn_mask
+    assert query.shape[-1] == key.shape[-1], "Cannot determine d_k"
+    d_k: int = key.shape[-1]
+    scores: Float[torch.Tensor, "*batch seq_len d_k"] = einx.dot("... q [d_k], ... k [d_k] -> ... q k", query, key) * (
+        1 / d_k**0.5 if scale is None else scale
+    )
+    if mask is not None:
+        scores = scores.masked_fill(mask == 0, float("-inf"))
+    attn_weights = torch.softmax(scores, dim=-1)
+    output = einx.dot("... q k, ... k d_v -> ... q d_v", attn_weights, value)
+    return output
