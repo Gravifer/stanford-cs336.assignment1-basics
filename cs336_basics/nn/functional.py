@@ -214,6 +214,10 @@ def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled
         raise ValueError("Only one of `mask` or `attn_mask` should be provided.")
     elif attn_mask is not None:
         mask = attn_mask
+    if is_causal:
+        seq_len = query.shape[-2]
+        causal_mask = torch.ones((seq_len, seq_len), device=query.device, dtype=torch.bool).tril(diagonal=0)
+        mask = mask & causal_mask if mask is not None else causal_mask
     assert query.shape[-1] == key.shape[-1], "Cannot determine d_k"
     d_k: int = key.shape[-1]
     scores: Float[torch.Tensor, "*batch seq_len d_k"] = einx.dot("... q [d_k], ... k [d_k] -> ... q k", query, key) * (
