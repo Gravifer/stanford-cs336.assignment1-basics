@@ -6,6 +6,9 @@ import torch
 from jaxtyping import Float, Int, Shaped
 from torch import nn
 
+from cs336_basics.nn import functional as F
+
+from .._typing import MaskBias
 from ..modules import Linear
 
 
@@ -106,12 +109,21 @@ class RotaryPositionalEmbedding(nn.Module):
 
         if broadcast_positions:
             suffix_start = -token_positions.ndim - 1
-            if token_positions.ndim >= x.ndim or token_positions.shape != x.shape[suffix_start:-1]:
+            target_shape = x.shape[suffix_start:-1]
+            if token_positions.ndim >= x.ndim or len(token_positions.shape) != len(target_shape):
                 raise ValueError(
                     f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
                 )
+            if any(
+                position_dim not in (1, target_dim)
+                for position_dim, target_dim in zip(token_positions.shape, target_shape)
+            ):
+                raise ValueError(
+                    f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
+                )
+            token_positions = token_positions.expand(target_shape)
             mapped: tuple[int, ...] = tuple(x.shape[:suffix_start])
-            batch: tuple[int, ...] = tuple(token_positions.shape[:-1])
+            batch: tuple[int, ...] = tuple(target_shape[:-1])
         elif token_positions.ndim != x.ndim - 1 or token_positions.shape != x.shape[:-1]:
             raise ValueError(
                 f"token_positions shape {token_positions.shape} does not match with x shape {x.shape}; is broadcasting needed?"
@@ -182,70 +194,223 @@ class RotaryPositionalEmbedding(nn.Module):
         return x_rotated.to(in_dtype)
 
 
-class MultiheadSelfAttention(nn.Module):  # mimicking :cls:`torch.nn.MultiheadAttention`, but with RoPE and GQA support
-    """Multi-head self-attention with optional RoPE and GQA support"""
+class MultiheadAttention(nn.Module):
+    """Multi-head attention over tensors shaped ``(*batch, sequence, features)``.
+
+    ``kdim`` and ``vdim`` describe the raw key and value input widths. The
+    projected per-head widths are ``qk_head_dim`` and ``value_head_dim``.
+    Boolean masks follow :func:`cs336_basics.nn.functional.scaled_dot_product_attention`:
+    ``True`` permits attention and ``False`` masks it.
+    """
+
+    __constants__ = [
+        "embed_dim",
+        "num_heads",
+        "kdim",
+        "vdim",
+        "qk_head_dim",
+        "value_head_dim",
+        "dropout",
+    ]
+
+    type QueryVec = Float[torch.Tensor, "{self.embed_dim}"]  # noqa: F821
+    type KeyVec = Float[torch.Tensor, "{self.kdim}"]  # noqa: F821
+    type ValueVec = Float[torch.Tensor, "{self.vdim}"]  # noqa: F821
+    type OutputVec = Float[torch.Tensor, "{self.embed_dim}"]  # noqa: F821
+
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        dropout: float = 0.0,
+        *,
+        kdim: int | None = None,
+        vdim: int | None = None,
+        qk_head_dim: int | None = None,
+        value_head_dim: int | None = None,
+        rope: RotaryPositionalEmbedding | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        if embed_dim <= 0 or num_heads <= 0:
+            raise ValueError(
+                "embed_dim and num_heads must be greater than 0, "
+                f"got embed_dim={embed_dim} and num_heads={num_heads} instead"
+            )
+        if not 0.0 <= dropout <= 1.0:
+            raise ValueError(f"dropout must be between 0 and 1, got {dropout}")
+
+        kdim = embed_dim if kdim is None else kdim
+        vdim = embed_dim if vdim is None else vdim
+        if kdim <= 0 or vdim <= 0:
+            raise ValueError(f"kdim and vdim must be greater than 0, got kdim={kdim} and vdim={vdim}")
+
+        if qk_head_dim is None:
+            if embed_dim % num_heads != 0:
+                raise ValueError("embed_dim must be divisible by num_heads when qk_head_dim is omitted")
+            qk_head_dim = embed_dim // num_heads
+        if value_head_dim is None:
+            value_head_dim = qk_head_dim
+        if qk_head_dim <= 0 or value_head_dim <= 0:
+            raise ValueError(
+                "qk_head_dim and value_head_dim must be greater than 0, "
+                f"got qk_head_dim={qk_head_dim} and value_head_dim={value_head_dim}"
+            )
+        if rope is not None and rope.d_k != qk_head_dim:
+            raise ValueError(f"RoPE width {rope.d_k} does not match qk_head_dim {qk_head_dim}")
+
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.kdim = kdim
+        self.vdim = vdim
+        self.qk_head_dim = qk_head_dim
+        self.value_head_dim = value_head_dim
+        self.dropout = dropout
+        self.rope = rope
+
+        self.q_proj = Linear(embed_dim, num_heads * qk_head_dim, device=device, dtype=dtype)
+        self.k_proj = Linear(kdim, num_heads * qk_head_dim, device=device, dtype=dtype)
+        self.v_proj = Linear(vdim, num_heads * value_head_dim, device=device, dtype=dtype)
+        self.output_proj = Linear(num_heads * value_head_dim, embed_dim, device=device, dtype=dtype)
+
+    def reset_parameters(self) -> None:
+        """Reset all projection parameters."""
+        self.q_proj.reset_parameters()
+        self.k_proj.reset_parameters()
+        self.v_proj.reset_parameters()
+        self.output_proj.reset_parameters()
+
+    def _validate_inputs(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> None:
+        if query.shape[:-2] != key.shape[:-2] or key.shape[:-2] != value.shape[:-2]:
+            raise ValueError(
+                "query, key, and value must have identical batch shapes, "
+                f"got {query.shape[:-2]}, {key.shape[:-2]}, and {value.shape[:-2]}"
+            )
+        if key.shape[-2] != value.shape[-2]:
+            raise ValueError(f"key and value sequence lengths must match, got {key.shape[-2]} and {value.shape[-2]}")
+        expected_widths = (self.embed_dim, self.kdim, self.vdim)
+        actual_widths = (query.shape[-1], key.shape[-1], value.shape[-1])
+        if actual_widths != expected_widths:
+            raise ValueError(f"expected query/key/value widths {expected_widths}, got {actual_widths}")
+
+    def forward(
+        self,
+        query: Shaped[QueryVec, "*batch query_len"],
+        key: Shaped[KeyVec, "*batch key_len"],
+        value: Shaped[ValueVec, "*batch key_len"],
+        mask: MaskBias[torch.Tensor, "*slew query_len key_len"] | None = None,  # ty: ignore[invalid-syntax-in-forward-annotation]
+        *,
+        is_causal: bool = False,
+        query_positions: Int[torch.Tensor, "*query_position_batch query_len"] | None = None,
+        key_positions: Int[torch.Tensor, "*key_position_batch key_len"] | None = None,
+    ) -> Shaped[OutputVec, "*batch query_len"]:
+        """Project Q/K/V, apply optional RoPE, attend, and project the result."""
+        self._validate_inputs(query, key, value)
+
+        projected_q = self.q_proj(query)
+        projected_k = self.k_proj(key)
+        projected_v = self.v_proj(value)
+
+        # Heads follow the ordinary batch axes so RoPE can treat them as its position-broadcast suffix.
+        q = einx.id(
+            "batch... query (head d_k) -> batch... head query d_k",
+            projected_q,
+            head=self.num_heads,
+            d_k=self.qk_head_dim,
+        )
+        k = einx.id(
+            "batch... key (head d_k) -> batch... head key d_k",
+            projected_k,
+            head=self.num_heads,
+            d_k=self.qk_head_dim,
+        )
+        v = einx.id(
+            "batch... key (head d_v) -> batch... head key d_v",
+            projected_v,
+            head=self.num_heads,
+            d_v=self.value_head_dim,
+        )
+
+        if self.rope is not None:
+            if query_positions is None:
+                query_positions = torch.arange(query.shape[-2], device=query.device)
+            if key_positions is None:
+                key_positions = torch.arange(key.shape[-2], device=key.device)
+            q = self.rope(q, query_positions)
+            k = self.rope(k, key_positions)
+
+        attended = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            mask,
+            dropout_p=self.dropout if self.training else 0.0,
+            is_causal=is_causal,
+            scale=self.qk_head_dim**-0.5,
+        )
+        joined = einx.id(
+            "batch... head query d_v -> batch... query (head d_v)",
+            attended,
+            head=self.num_heads,
+            d_v=self.value_head_dim,
+        )
+        return self.output_proj(joined)
+
+    def extra_repr(self) -> str:
+        return (
+            f"embed_dim={self.embed_dim}, num_heads={self.num_heads}, "
+            f"kdim={self.kdim}, vdim={self.vdim}, qk_head_dim={self.qk_head_dim}, "
+            f"value_head_dim={self.value_head_dim}, dropout={self.dropout}, rope={self.rope is not None}"
+        )
+
+
+class MultiheadSelfAttention(MultiheadAttention):
+    """Causal-by-default self-attention specialization of :class:`MultiheadAttention`."""
+
+    type ModelVec = Float[torch.Tensor, "{self.d_model}"]  # noqa: F821
 
     def __init__(
         self,
         d_model: int,
         num_heads: int,
         dropout: float = 0.0,
-        bias: bool = True,
-        add_bias_kv: bool = False,
-        add_zero_attn: bool = False,
-        d_k: int | None = None,
-        d_v: int | None = None,
-        use_rope: bool = False,
-        rope_theta: float = 10000.0,
-        max_seq_len: int = 512,
-        enable_gqa: bool = False,
-        batch_first: bool = False,
+        *,
+        qk_head_dim: int | None = None,
+        value_head_dim: int | None = None,
+        rope: RotaryPositionalEmbedding | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-        *,  # for compatibility with torch.nn.MultiheadAttention
-        embed_dim: int | None = None,
-        kdim: int | None = None,
-        vdim: int | None = None,
-    ):
-        # region
-        if d_model is not None and embed_dim is not None:
-            if d_model != embed_dim:
-                raise ValueError("conflicting parameters d_model and embed_dim; supply one instead of both")
-        elif embed_dim is not None:
-            d_model: int = embed_dim
-        if d_k is not None and kdim is not None:
-            if d_k != kdim:
-                raise ValueError("conflicting parameters d_k and kdim; supply one instead of both")
-        elif kdim is not None:
-            d_k: int = kdim
-        if d_v is not None and vdim is not None:
-            if d_v != vdim:
-                raise ValueError("conflicting parameters d_v and vdim; supply one instead of both")
-        elif vdim is not None:
-            d_v: int = vdim
-        # endregion
-        if d_model <= 0 or num_heads <= 0:
-            raise ValueError(
-                f"d_model and num_heads must be greater than 0, got d_model={d_model} and num_heads={num_heads} instead"
-            )
-        if d_model % num_heads != 0:
-            raise ValueError("d_model must be divisible by num_heads")
-        super().__init__()
+    ) -> None:
+        super().__init__(
+            embed_dim=d_model,
+            num_heads=num_heads,
+            dropout=dropout,
+            kdim=d_model,
+            vdim=d_model,
+            qk_head_dim=qk_head_dim,
+            value_head_dim=value_head_dim,
+            rope=rope,
+            device=device,
+            dtype=dtype,
+        )
         self.d_model = d_model
-        self.num_heads = num_heads
-        self.head_dim = d_model // num_heads
-        self.d_k = d_k if d_k is not None else self.head_dim
-        self.d_v = d_v if d_v is not None else self.head_dim
-        self._qkv_same_embed_dim = self.d_k == d_model and self.d_v == d_model
 
-        self.dropout = dropout
-        self.batch_first = batch_first
-        self.d_k = d_model // num_heads
-        self.use_rope = use_rope
-        self.enable_gqa = enable_gqa
-
-        self.qkv_proj = Linear(d_model, 3 * d_model)
-        self.out_proj = Linear(d_model, d_model)
-
-        if use_rope:
-            self.rope = RotaryPositionalEmbedding(theta=rope_theta, d_k=self.d_k, max_seq_len=max_seq_len, device="cpu")
+    def forward(  # ty: ignore[invalid-method-override]
+        self,
+        x: Shaped[ModelVec, "*batch sequence"],
+        mask: MaskBias[torch.Tensor, "*slew sequence sequence"] | None = None,  # ty: ignore[invalid-syntax-in-forward-annotation]
+        *,
+        token_positions: Int[torch.Tensor, "*position_batch sequence"] | None = None,
+        is_causal: bool = True,
+    ) -> Shaped[ModelVec, "*batch sequence"]:
+        """Apply self-attention with shared Q/K/V inputs and positions."""
+        return super().forward(
+            x,
+            x,
+            x,
+            mask,
+            is_causal=is_causal,
+            query_positions=token_positions,
+            key_positions=token_positions,
+        )

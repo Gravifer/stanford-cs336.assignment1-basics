@@ -181,34 +181,31 @@ def rms_norm(  # torch flavored
 
 
 def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled_dot_product_attention`
-    query: Float[torch.Tensor, "*batch seq_len d_k"],
-    key: Float[torch.Tensor, "*batch seq_len d_k"],
-    value: Float[torch.Tensor, "*batch seq_len d_v"],
-    mask: MaskBias[torch.Tensor, "*slew seq_len seq_len"] | None = None,  # ty:ignore[invalid-syntax-in-forward-annotation]
+    query: Float[torch.Tensor, "*batch query_len d_k"],
+    key: Float[torch.Tensor, "*batch key_len d_k"],
+    value: Float[torch.Tensor, "*batch key_len d_v"],
+    mask: MaskBias[torch.Tensor, "*slew query_len key_len"] | None = None,  # ty:ignore[invalid-syntax-in-forward-annotation]
     dropout_p: float = 0.0,
     is_causal: bool | Literal["torch"] | Literal["compose"] | Literal["noclone"] = False,
     scale: float | None = None,
     enable_gqa: bool = False,
     *,
-    attn_mask: MaskBias[torch.Tensor, "*slew seq_len seq_len"] | None = None,  # ty:ignore[invalid-syntax-in-forward-annotation]
-    attn_bias: Float[torch.Tensor, "*slew seq_len seq_len"] | None = None,
-) -> Float[torch.Tensor, "*batch seq_len d_v"]:
+    attn_mask: MaskBias[torch.Tensor, "*slew query_len key_len"] | None = None,  # ty:ignore[invalid-syntax-in-forward-annotation]
+    attn_bias: Float[torch.Tensor, "*slew query_len key_len"] | None = None,
+) -> Float[torch.Tensor, "*batch query_len d_v"]:
     """Compute scaled dot-product attention.
 
-    Handles keys and queries of shape (batch_size, ..., seq_len, d_k)
-    and values of shape (batch_size, ..., seq_len, d_v),
+    Handles queries of shape ``(*batch, query_len, d_k)``, keys of shape
+    ``(*batch, key_len, d_k)``, and values of shape ``(*batch, key_len, d_v)``,
     where ... represents any number of other batch-like dimensions (if provided).
     Also support an optional user-provided boolean mask of shape (seq_len, seq_len);
     can have additional dimensions, but have to be a suffix of the input batch shapes.
 
-    Note that for the purpose of the course,
-    we are enforcing the lookup to be square, i.e., query.shape[-2] == key.shape[-2] == value.shape[-2].
-
     Args:
-        query: Query tensor of shape (*batch, seq_len, d_k).
-        key: Key tensor of shape (*batch, seq_len, d_k).
-        value: Value tensor of shape (*batch, seq_len, d_v).
-        mask: Optional mask tensor of shape (*slew, seq_len, seq_len). (the alias `attn_mask` is allowed)
+        query: Query tensor of shape (*batch, query_len, d_k).
+        key: Key tensor of shape (*batch, key_len, d_k).
+        value: Value tensor of shape (*batch, key_len, d_v).
+        mask: Optional mask tensor of shape (*slew, query_len, key_len). (the alias `attn_mask` is allowed)
             The alternatives `attn_mask` and `attn_bias` (this one can only be float, not boolean) are also accepted
             to mimic the torch counterpart, but only one of the three should be provided.
             if numeric rather than boolean, it will be treated as additive mask.
@@ -220,22 +217,22 @@ def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled
         enable_gqa: Whether to enable grouped query attention.
 
     Returns:
-        Output tensor of shape (*batch, seq_len, d_v).
+        Output tensor of shape (*batch, query_len, d_v).
     """
     assert query.shape[-1] == key.shape[-1], (
         f"Cannot determine d_k; queries are {query.shape[-1]}-D while keys are {key.shape[-1]}-D."
     )
     seq_q, seq_k, d_k = query.shape[-2], key.shape[-2], key.shape[-1]
 
-    type _Mask = Bool[torch.Tensor, "*slew seq_len seq_len"]
-    type _Bias = Float[torch.Tensor, "*slew seq_len seq_len"]
-    type _MaskBias = MaskBias[torch.Tensor, "*slew seq_len seq_len"]  # ty:ignore[invalid-syntax-in-forward-annotation]
+    type _Mask = Bool[torch.Tensor, "*slew query_len key_len"]
+    type _Bias = Float[torch.Tensor, "*slew query_len key_len"]
+    type _MaskBias = MaskBias[torch.Tensor, "*slew query_len key_len"]  # ty:ignore[invalid-syntax-in-forward-annotation]
     if sum(x is None for x in (mask, attn_mask, attn_bias)) < 2:
         raise ValueError("Only one of `mask` `attn_mask` `attn_bias` should be provided.")
     attn_bias: _MaskBias | None = attn_bias if attn_bias is not None else mask if mask is not None else attn_mask
     if is_causal == "torch":
         assert attn_bias is None, "torch's sdpa does not accept a mask with is_causal on; compose the mask yourself"
-    elif is_causal == "no_clone":
+    elif is_causal == "noclone":
         assert attn_bias is None or attn_bias.dtype == torch.bool, (
             f"{attn_bias.dtype} mask will need to be cloned to apply causal masking"
         )
@@ -244,7 +241,9 @@ def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled
             f"Mask shape must be compatible with query and key; expected ({seq_q}, {seq_k}), got {attn_bias.shape[-2:]}."
         )
 
-    scores: Float[torch.Tensor, "*batch seq_len d_k"] = einx.dot("... q [d_k], ... k [d_k] -> ... q k", query, key) * (
+    scores: Float[torch.Tensor, "*batch query_len key_len"] = einx.dot(
+        "... q [d_k], ... k [d_k] -> ... q k", query, key
+    ) * (
         1 / d_k**0.5 if scale is None else scale  # in convex relaxation terms, acts like a temperature
     )
 
