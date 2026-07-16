@@ -334,6 +334,11 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
 
 
 class SoftMax(nn.Module):  # mimicking :cls:`torch.nn.Softmax`
+    """Applies softmax to the input along dim.
+
+    the static method softmax_einx allows more flexible operation.
+    """
+
     __constants__ = ["dim"]
     dim: int  # we will canonicalize the dim to be an int; we cannot enforce a stronger constraint without breaking compatibility with :cls:`torch.nn.Softmax`
 
@@ -372,6 +377,8 @@ class SoftMax(nn.Module):  # mimicking :cls:`torch.nn.Softmax`
 
 
 class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
+    """Applies a linear transformation to the incoming data: :math:`y = x A^T` where :math:`A` is the learnable weight matrix."""
+
     __constants__ = ["in_features", "out_features"]
     in_features: int
     out_features: int

@@ -6,6 +6,8 @@ import torch
 from jaxtyping import Float, Int, Shaped
 from torch import nn
 
+from ..modules import Linear
+
 
 class RotaryPositionalEmbedding(nn.Module):
     """RoPE for attention, with trigs cached"""
@@ -178,3 +180,72 @@ class RotaryPositionalEmbedding(nn.Module):
         )
 
         return x_rotated.to(in_dtype)
+
+
+class MultiheadSelfAttention(nn.Module):  # mimicking :cls:`torch.nn.MultiheadAttention`, but with RoPE and GQA support
+    """Multi-head self-attention with optional RoPE and GQA support"""
+
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        dropout: float = 0.0,
+        bias: bool = True,
+        add_bias_kv: bool = False,
+        add_zero_attn: bool = False,
+        d_k: int | None = None,
+        d_v: int | None = None,
+        use_rope: bool = False,
+        rope_theta: float = 10000.0,
+        max_seq_len: int = 512,
+        enable_gqa: bool = False,
+        batch_first: bool = False,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+        *,  # for compatibility with torch.nn.MultiheadAttention
+        embed_dim: int | None = None,
+        kdim: int | None = None,
+        vdim: int | None = None,
+    ):
+        # region
+        if d_model is not None and embed_dim is not None:
+            if d_model != embed_dim:
+                raise ValueError("conflicting parameters d_model and embed_dim; supply one instead of both")
+        elif embed_dim is not None:
+            d_model: int = embed_dim
+        if d_k is not None and kdim is not None:
+            if d_k != kdim:
+                raise ValueError("conflicting parameters d_k and kdim; supply one instead of both")
+        elif kdim is not None:
+            d_k: int = kdim
+        if d_v is not None and vdim is not None:
+            if d_v != vdim:
+                raise ValueError("conflicting parameters d_v and vdim; supply one instead of both")
+        elif vdim is not None:
+            d_v: int = vdim
+        # endregion
+        if d_model <= 0 or num_heads <= 0:
+            raise ValueError(
+                f"d_model and num_heads must be greater than 0, got d_model={d_model} and num_heads={num_heads} instead"
+            )
+        if d_model % num_heads != 0:
+            raise ValueError("d_model must be divisible by num_heads")
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.head_dim = d_model // num_heads
+        self.d_k = d_k if d_k is not None else self.head_dim
+        self.d_v = d_v if d_v is not None else self.head_dim
+        self._qkv_same_embed_dim = self.d_k == d_model and self.d_v == d_model
+
+        self.dropout = dropout
+        self.batch_first = batch_first
+        self.d_k = d_model // num_heads
+        self.use_rope = use_rope
+        self.enable_gqa = enable_gqa
+
+        self.qkv_proj = Linear(d_model, 3 * d_model)
+        self.out_proj = Linear(d_model, d_model)
+
+        if use_rope:
+            self.rope = RotaryPositionalEmbedding(theta=rope_theta, d_k=self.d_k, max_seq_len=max_seq_len, device="cpu")

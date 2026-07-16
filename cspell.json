@@ -15,8 +15,10 @@
         "inuse",
         "jaxtyped",
         "jaxtyping",
+        "kdim",
         "keepdim",
         "majorize",
+        "namedtensor",
         "noclone",
         "nonblocking",
         "operatorname",
@@ -35,6 +37,7 @@
         "trigs",
         "tril",
         "triu",
+        "vdim",
         "vocabs"
     ],
     "ignoreWords": [],
