@@ -1,6 +1,6 @@
 import warnings
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, overload
 
 import einops
 import einx
@@ -205,6 +205,9 @@ class MultiheadAttention(nn.Module):
 
     ``kdim`` and ``vdim`` describe the raw key and value input widths. The
     projected per-head widths are ``qk_head_dim`` and ``value_head_dim``.
+    These pairs are independent: the K projection has shape
+    ``(num_heads * qk_head_dim, kdim)``, while the V projection has shape
+    ``(num_heads * value_head_dim, vdim)``.
     Boolean masks follow :func:`cs336_basics.nn.functional.scaled_dot_product_attention`:
     ``True`` permits attention and ``False`` masks it.
     """
@@ -523,35 +526,113 @@ class MultiheadAttention(nn.Module):
 
 
 class MultiheadSelfAttention(MultiheadAttention):
-    """Causal-by-default self-attention specialization of :class:`MultiheadAttention`."""
+    """Causal-by-default self-attention with shared query, key, and value inputs.
+
+    ``d_model`` is the input and output width. ``d_k`` and ``d_v`` are the
+    projected per-head query/key and value widths. The corresponding
+    :class:`MultiheadAttention` names are available as keyword-only aliases.
+
+    Note:
+        This class inherits from :class:`MultiheadAttention` to reuse its
+        implementation and parameter representation, but it is intentionally
+        not a substitutable subtype: its constructor uses course notation, its
+        forward method accepts one shared input, and causal attention is the
+        default.
+    """
 
     type ModelVec = Float[torch.Tensor, "{self.d_model}"]  # noqa: F821
 
+    @property
+    def d_model(self) -> int:
+        return self.embed_dim
+
+    @property
+    def d_k(self) -> int:
+        return self.qk_head_dim
+
+    @property
+    def d_v(self) -> int:
+        return self.value_head_dim
+
+    @staticmethod
+    def _coalesce_dimension_alias(
+        course_name: str,
+        course_value: int | None,
+        mha_name: str,
+        mha_value: int | None,
+    ) -> int | None:
+        if course_value is not None and mha_value is not None:
+            raise ValueError(f"{course_name} and {mha_name} are mutually exclusive")
+        return course_value if course_value is not None else mha_value
+
+    @overload
     def __init__(
         self,
         d_model: int,
         num_heads: int,
+        d_k: int | None = None,
+        d_v: int | None = None,
         dropout: float = 0.0,
         *,
+        embed_dim: int | None = None,
+        qk_head_dim: int | None = None,
+        value_head_dim: int | None = None,
+        rope: RotaryPositionalEmbedding | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        *,
+        embed_dim: int,
+        num_heads: int,
+        d_k: int | None = None,
+        d_v: int | None = None,
+        qk_head_dim: int | None = None,
+        value_head_dim: int | None = None,
+        dropout: float = 0.0,
+        rope: RotaryPositionalEmbedding | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None: ...
+
+    def __init__(
+        self,
+        d_model: int | None = None,
+        num_heads: int | None = None,
+        d_k: int | None = None,
+        d_v: int | None = None,
+        dropout: float = 0.0,
+        *,
+        embed_dim: int | None = None,
         qk_head_dim: int | None = None,
         value_head_dim: int | None = None,
         rope: RotaryPositionalEmbedding | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ) -> None:
+        model_dim = self._coalesce_dimension_alias("d_model", d_model, "embed_dim", embed_dim)
+        projected_qk_dim = self._coalesce_dimension_alias("d_k", d_k, "qk_head_dim", qk_head_dim)
+        projected_value_dim = self._coalesce_dimension_alias("d_v", d_v, "value_head_dim", value_head_dim)
+        if model_dim is None:
+            raise TypeError("missing model width: supply d_model or embed_dim")
+        if num_heads is None:
+            raise TypeError("missing required argument: num_heads")
+
         super().__init__(
-            embed_dim=d_model,
+            embed_dim=model_dim,
             num_heads=num_heads,
             dropout=dropout,
-            kdim=d_model,
-            vdim=d_model,
-            qk_head_dim=qk_head_dim,
-            value_head_dim=value_head_dim,
+            kdim=model_dim,
+            vdim=model_dim,
+            qk_head_dim=projected_qk_dim,
+            value_head_dim=projected_value_dim,
             rope=rope,
             device=device,
             dtype=dtype,
         )
-        self.d_model = d_model
 
     def forward(  # ty: ignore[invalid-method-override]
         self,

@@ -117,6 +117,45 @@ def test_self_attention_is_causal_by_default() -> None:
     assert not torch.allclose(default, noncausal)
 
 
+def test_self_attention_course_dimensions_are_read_only_mha_aliases() -> None:
+    course_names = MultiheadSelfAttention(12, 3, 2, 5)
+    mha_names = MultiheadSelfAttention(
+        embed_dim=12,
+        num_heads=3,
+        qk_head_dim=2,
+        value_head_dim=5,
+    )
+
+    for module in (course_names, mha_names):
+        assert (module.d_model, module.d_k, module.d_v) == (12, 2, 5)
+        assert (module.embed_dim, module.qk_head_dim, module.value_head_dim) == (12, 2, 5)
+        assert (module.kdim, module.vdim) == (12, 12)
+
+    assert MultiheadSelfAttention.d_model.fset is None
+    assert MultiheadSelfAttention.d_k.fset is None
+    assert MultiheadSelfAttention.d_v.fset is None
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"d_model": 8, "embed_dim": 8, "num_heads": 2},
+        {"d_model": 8, "num_heads": 2, "d_k": 4, "qk_head_dim": 4},
+        {"d_model": 8, "num_heads": 2, "d_v": 4, "value_head_dim": 4},
+    ],
+)
+def test_self_attention_rejects_conflicting_dimension_aliases(kwargs: dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        MultiheadSelfAttention(**kwargs)
+
+
+def test_self_attention_requires_one_model_width_name() -> None:
+    kwargs: dict[str, Any] = {"num_heads": 2}
+
+    with pytest.raises(TypeError, match="d_model or embed_dim"):
+        MultiheadSelfAttention(**kwargs)
+
+
 def test_module_disables_attention_dropout_during_evaluation(monkeypatch: pytest.MonkeyPatch) -> None:
     observed: list[float] = []
     original: Callable[..., torch.Tensor] = F.scaled_dot_product_attention
