@@ -1,6 +1,6 @@
 import warnings
 from collections.abc import Mapping
-from typing import Any, overload
+from typing import Any, Literal, overload
 
 import einops
 import einx
@@ -17,16 +17,23 @@ from ..modules import Linear
 
 
 class RotaryPositionalEmbedding(nn.Module):
-    """RoPE for attention, with trigs cached"""
+    """RoPE for attention, with cached rotation data.
 
-    __constants__ = ["theta", "d_pair", "max_seq_len"]
+    Matrix-form caches store a 2-by-2 rotation for every frequency and are
+    therefore twice the size of the equivalent cosine/sine caches.
+    """
+
+    __constants__ = ["theta", "d_pair", "max_seq_len", "use_matrix_form"]
     theta: float
     d_pair: int
     max_seq_len: int
     # sin_angles: Float[torch.Tensor, "{self.max_seq_len} {self.d_pair}"]
     # cos_angles: Float[torch.Tensor, "{self.max_seq_len} {self.d_pair}"]
     # trigs: Float[torch.Tensor, "2 {self.max_seq_len} {self.d_pair}"]
-    rot: Float[torch.Tensor, "{self.max_seq_len} {self.d_pair} 2 2"]
+    use_matrix_form: bool
+    rot: Float[torch.Tensor, "{self.max_seq_len} {self.d_pair} 2 2"] | None
+    cos: Float[torch.Tensor, "{self.max_seq_len} {self.d_pair}"] | None
+    sin: Float[torch.Tensor, "{self.max_seq_len} {self.d_pair}"] | None
 
     type KeyVec = Float[torch.Tensor, "{self.d_k}"]  # noqa: F821
     type HalfKey = Float[torch.Tensor, "{self.d_pair}"]  # noqa: F821
@@ -42,6 +49,8 @@ class RotaryPositionalEmbedding(nn.Module):
         max_seq_len: int,
         device: torch.device
         | None = None,  # usual torch convention is to keep construction of this device-agnostic; we are following the handout-signature
+        *,
+        use_matrix_form: bool = True,
     ):
         """
         theta        Θ value for the RoPE
@@ -55,6 +64,7 @@ class RotaryPositionalEmbedding(nn.Module):
             raise ValueError("RoPE expects even dimensional queries and keys")
         self.d_pair = d_k // 2
         self.max_seq_len = max_seq_len
+        self.use_matrix_form = use_matrix_form
 
         # Precompute the rotation angles for efficiency
         inv_freq: self.HalfKey = 1.0 / (self.theta ** (torch.arange(0, d_k, 2, device=device) / d_k))
@@ -66,21 +76,181 @@ class RotaryPositionalEmbedding(nn.Module):
         )
         # self.register_buffer("sin_angles", freqs.sin(), persistent=False)
         # self.register_buffer("cos_angles", freqs.cos(), persistent=False)
-        s = torch.sin(freqs)
-        c = torch.cos(freqs)
-        # self.register_buffer(
-        #     "trigs",
-        #     einx.id("max_seq_len d_pair, max_seq_len d_pair -> 2 max_seq_len d_pair", s, c),
-        #     persistent=False,
-        # )
-        rot = einops.rearrange(
-            [c, -s, s, c],
-            "(col row) max_seq_len d_pair -> max_seq_len d_pair col row",
+        sin = torch.sin(freqs)
+        cos = torch.cos(freqs)
+        if use_matrix_form:
+            rot = einops.rearrange(
+                [cos, -sin, sin, cos],
+                "(col row) max_seq_len d_pair -> max_seq_len d_pair col row",
+                d_pair=self.d_pair,
+                col=2,
+                row=2,
+            )
+            self.register_buffer("rot", rot, persistent=False)
+            self.cos = None
+            self.sin = None
+        else:
+            self.rot = None
+            self.register_buffer("cos", cos, persistent=False)
+            self.register_buffer("sin", sin, persistent=False)
+
+    @staticmethod
+    def _position_target_shape(
+        x: torch.Tensor,
+        layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
+    ) -> tuple[int, ...]:
+        if layout_strategy == "head_before_sequence":
+            return tuple(x.shape[:-1])
+        if layout_strategy == "head_after_sequence":
+            if x.ndim < 3:
+                raise ValueError("head-after-sequence RoPE inputs must include sequence and head dimensions")
+            return (*x.shape[:-3], x.shape[-2], x.shape[-3])
+        raise ValueError(f"unknown RoPE layout strategy: {layout_strategy!r}")
+
+    def _validate_token_positions(
+        self,
+        x: torch.Tensor,
+        token_positions: torch.Tensor,
+        *,
+        broadcast_positions: bool,
+        layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
+    ) -> tuple[torch.Tensor, tuple[int, ...]]:
+        target_shape = self._position_target_shape(x, layout_strategy)
+        token_positions = token_positions.to(x.device)
+        if token_positions.ndim == 0:
+            raise ValueError("token_positions must include a sequence dimension")
+
+        if broadcast_positions:
+            if token_positions.ndim > len(target_shape):
+                raise ValueError(
+                    f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
+                )
+            suffix_shape = target_shape[-token_positions.ndim :]
+            if token_positions.shape[-1] != suffix_shape[-1]:
+                raise ValueError(
+                    f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
+                )
+            try:
+                # Validation only: retaining the unexpanded index avoids gathering
+                # duplicate cache blocks for singleton head or batch dimensions.
+                token_positions.expand(suffix_shape)
+            except RuntimeError as error:
+                raise ValueError(
+                    f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
+                ) from error
+        elif tuple(token_positions.shape) != target_shape:
+            raise ValueError(
+                f"token_positions shape {token_positions.shape} does not match with x shape {x.shape}; is broadcasting needed?"
+            )
+        return token_positions, target_shape
+
+    def _select_rotations(
+        self,
+        x: torch.Tensor,
+        token_positions: torch.Tensor | None,
+        *,
+        broadcast_positions: bool,
+        layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        target_shape = self._position_target_shape(x, layout_strategy)
+        if token_positions is None:
+            seq_len = target_shape[-1]
+            if seq_len > self.max_seq_len:
+                raise ValueError(f"sequence length {seq_len} exceeds the RoPE cache length {self.max_seq_len}")
+            index_shape = (seq_len,)
+            prefix_ndim = len(target_shape) - 1
+        else:
+            token_positions, target_shape = self._validate_token_positions(
+                x,
+                token_positions,
+                broadcast_positions=broadcast_positions,
+                layout_strategy=layout_strategy,
+            )
+            index_shape = tuple(token_positions.shape)
+            prefix_ndim = len(target_shape) - token_positions.ndim
+
+        def select(cache: torch.Tensor) -> torch.Tensor:
+            selected = cache[: target_shape[-1]] if token_positions is None else cache[token_positions]
+            cache_shape = tuple(cache.shape[1:])
+            selected = selected.reshape((1,) * prefix_ndim + index_shape + cache_shape)
+            return selected.expand(target_shape + cache_shape)
+
+        if self.use_matrix_form:
+            assert self.rot is not None, "matrix-form RoPE must own a rotation-matrix cache"
+            return select(self.rot)
+        assert self.cos is not None, "elementwise RoPE must own a cosine cache"
+        assert self.sin is not None, "elementwise RoPE must own a sine cache"
+        return select(self.cos), select(self.sin)
+
+    @staticmethod
+    def _selection_to_physical_layout(
+        selection: torch.Tensor,
+        *,
+        cache_ndim: int,
+        layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
+    ) -> torch.Tensor:
+        if layout_strategy == "head_before_sequence":
+            return selection
+        return selection.transpose(-cache_ndim - 2, -cache_ndim - 1)
+
+    def _apply_rotations(
+        self,
+        x: torch.Tensor,
+        selection: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
+        *,
+        layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
+    ) -> torch.Tensor:
+        in_dtype = x.dtype
+        cache = selection if isinstance(selection, torch.Tensor) else selection[0]
+        op_dtype = torch.promote_types(in_dtype, cache.dtype)
+        if op_dtype not in (torch.float32, torch.float64):
+            op_dtype = torch.float32
+        x_split = einx.id("... (d_pair p) -> ... d_pair p", x.to(op_dtype), d_pair=self.d_pair, p=2)
+
+        if isinstance(selection, torch.Tensor):
+            rot = self._selection_to_physical_layout(
+                selection,
+                cache_ndim=3,
+                layout_strategy=layout_strategy,
+            ).to(op_dtype)
+            x_split_rotated = einx.dot(
+                "... d_pair [row], ... d_pair col [row] -> ... d_pair col",
+                x_split,
+                rot,
+                d_pair=self.d_pair,
+                col=2,
+                row=2,
+            )
+        else:
+            cos, sin = (
+                self._selection_to_physical_layout(part, cache_ndim=1, layout_strategy=layout_strategy).to(op_dtype)
+                for part in selection
+            )
+            x_even, x_odd = x_split[..., 0], x_split[..., 1]
+            x_split_rotated = torch.stack(
+                (x_even * cos - x_odd * sin, x_even * sin + x_odd * cos),
+                dim=-1,
+            )
+        return einx.id(
+            "... d_pair p -> ... (d_pair p)",
+            x_split_rotated,
             d_pair=self.d_pair,
-            col=2,
-            row=2,
+            p=2,
+        ).to(in_dtype)
+
+    @staticmethod
+    def _prepend_selection_axis(
+        selection: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
+        size: int,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        def prepend(x: torch.Tensor) -> torch.Tensor:
+            return x.unsqueeze(0).expand((size, *x.shape))
+
+        return (
+            prepend(selection)
+            if isinstance(selection, torch.Tensor)
+            else (prepend(selection[0]), prepend(selection[1]))
         )
-        self.register_buffer("rot", rot, persistent=False)
 
     def forward(
         self,
@@ -104,100 +274,53 @@ class RotaryPositionalEmbedding(nn.Module):
         Returns:
             Tensor with the same shape as ``x`` and RoPE applied.
         """
-        leading: tuple[int, ...] = tuple(x.shape[:-2])
-
-        # Ensure token_positions is of the same device as x
-        token_positions = token_positions.to(x.device)
-
-        if token_positions.ndim == 0:
-            raise ValueError("token_positions must include a sequence dimension")
-
-        if broadcast_positions:
-            if token_positions.ndim >= x.ndim:
-                raise ValueError(
-                    f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
-                )
-            suffix_start = -token_positions.ndim - 1
-            target_shape = x.shape[suffix_start:-1]
-            if token_positions.shape[-1] != target_shape[-1]:
-                raise ValueError(
-                    f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
-                )
-            try:
-                token_positions = token_positions.expand(target_shape)
-            except RuntimeError as error:
-                raise ValueError(
-                    f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
-                ) from error
-            mapped: tuple[int, ...] = tuple(x.shape[:suffix_start])
-            slew: tuple[int, ...] = tuple(target_shape[:-1])
-        elif token_positions.ndim != x.ndim - 1 or token_positions.shape != x.shape[:-1]:
-            raise ValueError(
-                f"token_positions shape {token_positions.shape} does not match with x shape {x.shape}; is broadcasting needed?"
-            )
-        else:  # *slew === *leading
-            mapped: tuple[int, ...] = tuple()
-            slew: tuple[int, ...] = leading
-
+        selection = self._select_rotations(
+            x,
+            token_positions,
+            broadcast_positions=broadcast_positions,
+            layout_strategy="head_before_sequence",
+        )
         if x.numel() == 0 and token_positions.numel() == 0:
             warnings.warn("Applying RoPE to empty tensors is a no-op", stacklevel=2)
             return x
+        return self._apply_rotations(x, selection, layout_strategy="head_before_sequence")
 
-        axes_map: dict[str, tuple[int, ...] | int] = {
-            "mapped": mapped,
-            "slew": slew,
-            "d_pair": self.d_pair,
-            "col": 2,
-            "row": 2,
-        }
+    def apply_qk(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        token_positions: torch.Tensor | None = None,
+        *,
+        broadcast_positions: bool = True,
+        _stacked: bool = False,
+        _layout_strategy: Literal["head_before_sequence", "head_after_sequence"] = "head_before_sequence",
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Apply one shared positional selection to query and key tensors.
 
-        # # Compute the rotation angles for the given token positions
-        # angles = self.freqs[token_positions]
-        #
-        # # Compute the sine and cosine components (cached)
-        # sin_angles = torch.sin(angles)
-        # cos_angles = torch.cos(angles)
-        rot = einx.get_at(
-            "[max_seq_len] d_pair col row, slew... seq_len -> slew... seq_len d_pair col row",
-            self.rot,
+        ``None`` selects consecutive zero-based positions by slicing the cache.
+        ``_stacked`` is an allocation-forcing benchmark control, not an
+        automatically selected execution policy.
+        """
+        if query.shape != key.shape:
+            raise ValueError(f"query and key must have equal shapes for shared RoPE, got {query.shape} and {key.shape}")
+        selection = self._select_rotations(
+            query,
             token_positions,
-            **axes_map,
+            broadcast_positions=broadcast_positions,
+            layout_strategy=_layout_strategy,
         )
-
-        in_dtype = x.dtype
-        op_dtype = torch.promote_types(in_dtype, rot.dtype)
-        if op_dtype not in (torch.float32, torch.float64):
-            op_dtype = torch.float32
-        rot = rot.to(op_dtype)
-
-        # # Split x into even and odd parts
-        # x_even = x[..., 0::2]
-        # x_odd = x[..., 1::2]
-        x_split = einx.id(
-            "mapped... slew... seq_len (d_pair p) -> mapped... slew... seq_len d_pair p",
-            x.to(op_dtype),
-            **axes_map,
-        )
-
-        # # Apply the rotation
-        # x_rotated_even = x_even * cos_angles - x_odd * sin_angles
-        # x_rotated_odd = x_even * sin_angles + x_odd * cos_angles
-        x_split_rotated = einx.dot(
-            "mapped... slew... seq_len d_pair [row], slew... seq_len d_pair col [row] -> mapped... slew... seq_len d_pair col",
-            x_split,
-            rot,
-            **axes_map,
-        )
-
-        # # Interleave the rotated even and odd parts back together
-        # x_rotated = torch.stack((x_rotated_even, x_rotated_odd), dim=-1).reshape_as(x)
-        x_rotated = einx.id(
-            "mapped... slew... seq_len d_pair p -> mapped... slew... seq_len (d_pair p)",
-            x_split_rotated,
-            **axes_map,
-        )
-
-        return x_rotated.to(in_dtype)
+        if query.numel() == 0 and (token_positions is None or token_positions.numel() == 0):
+            warnings.warn("Applying RoPE to empty tensors is a no-op", stacklevel=2)
+            return query, key
+        if not _stacked:
+            return (
+                self._apply_rotations(query, selection, layout_strategy=_layout_strategy),
+                self._apply_rotations(key, selection, layout_strategy=_layout_strategy),
+            )
+        qk = torch.stack((query, key), dim=0)
+        stacked_selection = self._prepend_selection_axis(selection, 2)
+        qk = self._apply_rotations(qk, stacked_selection, layout_strategy=_layout_strategy)
+        return qk[0], qk[1]
 
 
 class MultiheadAttention(nn.Module):

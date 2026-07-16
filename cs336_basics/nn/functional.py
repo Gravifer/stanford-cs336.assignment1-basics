@@ -260,12 +260,14 @@ def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled
             attn_bias: _Bias = attn_bias.to(dtype=query.dtype)
 
     if is_causal:
+        query_positions = torch.arange(seq_q, device=query.device).unsqueeze(-1)
+        key_positions = torch.arange(seq_k, device=query.device).unsqueeze(0)
+        causal_mask: _Mask = key_positions <= query_positions
         if attn_bias is None:
-            attn_bias: _Mask = torch.ones((seq_q, seq_k), dtype=torch.bool, device=query.device).tril(diagonal=0)
+            attn_bias: _Mask = causal_mask
         elif attn_bias.dtype == torch.bool:
-            attn_bias: _Mask = attn_bias.tril(diagonal=0)
+            attn_bias: _Mask = attn_bias & causal_mask
         else:
-            causal_mask: _Mask = torch.ones((seq_q, seq_k), dtype=torch.bool, device=query.device).tril(diagonal=0)
             # Clone attn_bias to avoid mutating the caller's tensor
             attn_bias: _Bias = attn_bias.clone().masked_fill_(~causal_mask, float("-inf"))
 

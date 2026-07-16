@@ -2,7 +2,7 @@ from typing import Never, assert_type
 
 import torch
 
-from cs336_basics.nn.attention import MultiheadSelfAttention
+from cs336_basics.nn.attention import MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU, SwiGLU_packed_input
 from cs336_basics.nn.modules import Embedding, Linear, RMSNorm
 
@@ -34,3 +34,11 @@ def check_self_attention_constructor_aliases() -> None:
         ),
         MultiheadSelfAttention,
     )
+
+
+def check_rope_execution_contracts() -> None:
+    rope = RotaryPositionalEmbedding(10_000.0, 8, 16, use_matrix_form=False)
+    query = torch.randn(2, 3, 4, 8)
+    key = torch.randn(2, 3, 4, 8)
+    assert_type(rope.forward(query, torch.arange(4)), torch.Tensor)
+    assert_type(rope.apply_qk(query, key), tuple[torch.Tensor, torch.Tensor])

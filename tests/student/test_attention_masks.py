@@ -1,5 +1,4 @@
-import math
-
+import pytest
 import torch
 
 from cs336_basics.nn.functional import scaled_dot_product_attention
@@ -76,3 +75,34 @@ def test_attn_bias_alias_and_dtype_promotion():
     out2 = scaled_dot_product_attention(q, k, v, mask=bias, dropout_p=0.0, is_causal=False)
     assert out1.shape == (1, 4, 8)
     assert out2.shape == (1, 4, 8)
+
+
+@pytest.mark.parametrize("query_len,key_len", [(4, 4), (3, 5), (5, 3)])
+def test_causal_mask_matches_broadcasted_index_reference(query_len: int, key_len: int):
+    q = torch.randn(2, query_len, 4)
+    k = torch.randn(2, key_len, 4)
+    v = torch.randn(2, key_len, 3)
+    causal = torch.arange(key_len).unsqueeze(0) <= torch.arange(query_len).unsqueeze(1)
+
+    actual = scaled_dot_product_attention(q, k, v, is_causal=True)
+    expected = scaled_dot_product_attention(q, k, v, mask=causal)
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_rectangular_causal_mask_composes_with_boolean_and_additive_masks():
+    q = torch.randn(2, 3, 4)
+    k = torch.randn(2, 5, 4)
+    v = torch.randn(2, 5, 3)
+    allowed = torch.ones(3, 5, dtype=torch.bool)
+    allowed[:, 1] = False
+    causal = torch.arange(5).unsqueeze(0) <= torch.arange(3).unsqueeze(1)
+
+    bool_actual = scaled_dot_product_attention(q, k, v, mask=allowed, is_causal="compose")
+    bool_expected = scaled_dot_product_attention(q, k, v, mask=allowed & causal)
+    torch.testing.assert_close(bool_actual, bool_expected)
+
+    bias = torch.zeros(3, 5).masked_fill(~allowed, -10.0)
+    float_actual = scaled_dot_product_attention(q, k, v, attn_bias=bias, is_causal="compose")
+    float_expected = scaled_dot_product_attention(q, k, v, attn_bias=bias.masked_fill(~causal, float("-inf")))
+    torch.testing.assert_close(float_actual, float_expected)
