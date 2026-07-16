@@ -302,6 +302,21 @@ class MultiheadAttention(nn.Module):
         self.output_proj = Linear(num_heads * value_head_dim, embed_dim, device=device, dtype=dtype)
         self.reset_parameters()
 
+    def _separate_projection_weights(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        assert self.q_proj_weight is not None, (
+            "projection storage invariant broken: in_proj_weight is None but q_proj_weight is also None; "
+            f"the separate Q weight should have shape ({self.q_proj_dim}, {self.embed_dim})"
+        )
+        assert self.k_proj_weight is not None, (
+            "projection storage invariant broken: in_proj_weight is None but k_proj_weight is also None; "
+            f"the separate K weight should have shape ({self.k_proj_dim}, {self.kdim})"
+        )
+        assert self.v_proj_weight is not None, (
+            "projection storage invariant broken: in_proj_weight is None but v_proj_weight is also None; "
+            f"the separate V weight should have shape ({self.v_proj_dim}, {self.vdim})"
+        )
+        return self.q_proj_weight, self.k_proj_weight, self.v_proj_weight
+
     def reset_parameters(self) -> None:
         """Reset all projection parameters."""
         if self.in_proj_weight is not None:
@@ -316,12 +331,10 @@ class MultiheadAttention(nn.Module):
             init.starter_trunc_normal_for_linear_(k_weight, self.kdim, self.k_proj_dim)
             init.starter_trunc_normal_for_linear_(v_weight, self.vdim, self.v_proj_dim)
         else:
-            assert self.q_proj_weight is not None
-            assert self.k_proj_weight is not None
-            assert self.v_proj_weight is not None
-            init.starter_trunc_normal_for_linear_(self.q_proj_weight, self.embed_dim, self.q_proj_dim)
-            init.starter_trunc_normal_for_linear_(self.k_proj_weight, self.kdim, self.k_proj_dim)
-            init.starter_trunc_normal_for_linear_(self.v_proj_weight, self.vdim, self.v_proj_dim)
+            q_weight, k_weight, v_weight = self._separate_projection_weights()
+            init.starter_trunc_normal_for_linear_(q_weight, self.embed_dim, self.q_proj_dim)
+            init.starter_trunc_normal_for_linear_(k_weight, self.kdim, self.k_proj_dim)
+            init.starter_trunc_normal_for_linear_(v_weight, self.vdim, self.v_proj_dim)
         self.output_proj.reset_parameters()
 
     def _in_projection(
@@ -332,13 +345,11 @@ class MultiheadAttention(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Project Q/K/V using the cheapest path allowed by storage and input identity."""
         if self.in_proj_weight is None:
-            assert self.q_proj_weight is not None
-            assert self.k_proj_weight is not None
-            assert self.v_proj_weight is not None
+            q_weight, k_weight, v_weight = self._separate_projection_weights()
             return (
-                F.linear(query, self.q_proj_weight),
-                F.linear(key, self.k_proj_weight),
-                F.linear(value, self.v_proj_weight),
+                F.linear(query, q_weight),
+                F.linear(key, k_weight),
+                F.linear(value, v_weight),
             )
 
         if query is key and key is value:
