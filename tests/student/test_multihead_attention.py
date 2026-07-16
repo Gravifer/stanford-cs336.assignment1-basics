@@ -19,11 +19,23 @@ def test_mha_matches_torch_with_distinct_input_widths() -> None:
         bias=False,
         batch_first=True,
     )
+    q_weight = torch.randn(12, 12)
+    k_weight = torch.randn(12, 5)
+    v_weight = torch.randn(12, 7)
+    output_weight = torch.randn(12, 12)
+    actual.load_state_dict(
+        {
+            "q_proj.weight": q_weight,
+            "k_proj.weight": k_weight,
+            "v_proj.weight": v_weight,
+            "output_proj.weight": output_weight,
+        }
+    )
     with torch.no_grad():
-        expected.q_proj_weight.copy_(actual.q_proj.weight)
-        expected.k_proj_weight.copy_(actual.k_proj.weight)
-        expected.v_proj_weight.copy_(actual.v_proj.weight)
-        expected.out_proj.weight.copy_(actual.output_proj.weight)
+        expected.q_proj_weight.copy_(q_weight)
+        expected.k_proj_weight.copy_(k_weight)
+        expected.v_proj_weight.copy_(v_weight)
+        expected.out_proj.weight.copy_(output_weight)
 
     query = torch.randn(2, 4, 12)
     key = torch.randn(2, 6, 5)
@@ -48,9 +60,11 @@ def test_generalized_head_widths_and_leading_batch_axes() -> None:
     output = module(query, key, value)
 
     assert output.shape == (2, 3, 4, 10)
-    assert module.q_proj.weight.shape == (12, 10)
-    assert module.k_proj.weight.shape == (12, 10)
-    assert module.v_proj.weight.shape == (6, 10)
+    assert module.in_proj_weight is not None
+    assert module.in_proj_weight.shape == (30, 10)
+    assert module.q_proj_weight is None
+    assert module.k_proj_weight is None
+    assert module.v_proj_weight is None
     assert module.output_proj.weight.shape == (10, 6)
 
 
@@ -152,3 +166,143 @@ def test_rejects_incompatible_input_shapes() -> None:
 
     with pytest.raises(ValueError, match="widths"):
         module(torch.randn(2, 4, 8), torch.randn(2, 6, 6), torch.randn(2, 6, 7))
+
+
+def test_uses_separate_owned_weights_for_distinct_input_widths() -> None:
+    module = MultiheadAttention(
+        embed_dim=10,
+        num_heads=3,
+        kdim=5,
+        vdim=7,
+        qk_head_dim=4,
+        value_head_dim=2,
+    )
+
+    assert module.in_proj_weight is None
+    assert module.q_proj_weight is not None and module.q_proj_weight.shape == (12, 10)
+    assert module.k_proj_weight is not None and module.k_proj_weight.shape == (12, 5)
+    assert module.v_proj_weight is not None and module.v_proj_weight.shape == (6, 7)
+
+
+def test_packed_projection_uses_identity_sensitive_matmul_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = MultiheadAttention(embed_dim=8, num_heads=2)
+    original: Callable[..., torch.Tensor] = F.linear
+    calls: list[tuple[int, ...]] = []
+
+    def traced(input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+        calls.append(tuple(weight.shape))
+        return original(input, weight)
+
+    monkeypatch.setattr(F, "linear", traced)
+    query = torch.randn(2, 4, 8)
+    key_value = torch.randn(2, 6, 8)
+
+    module(query, query, query)
+    assert len(calls) == 2  # one packed QKV projection and one output projection
+
+    calls.clear()
+    module(query, key_value, key_value)
+    assert len(calls) == 3  # Q, packed KV, and output
+
+    calls.clear()
+    module(query, key_value, key_value.clone())
+    assert len(calls) == 4  # Q, K, V, and output
+
+
+def test_load_state_dict_translates_delegated_weights_into_packed_storage() -> None:
+    module = MultiheadAttention(embed_dim=8, num_heads=2)
+    q_weight = torch.randn(8, 8)
+    k_weight = torch.randn(8, 8)
+    v_weight = torch.randn(8, 8)
+    output_weight = torch.randn(8, 8)
+
+    result = module.load_state_dict(
+        {
+            "q_proj.weight": q_weight,
+            "k_proj.weight": k_weight,
+            "v_proj.weight": v_weight,
+            "output_proj.weight": output_weight,
+        }
+    )
+
+    assert result.missing_keys == []
+    assert result.unexpected_keys == []
+    assert module.in_proj_weight is not None
+    torch.testing.assert_close(module.in_proj_weight, torch.cat((q_weight, k_weight, v_weight)))
+    torch.testing.assert_close(module.output_proj.weight, output_weight)
+
+
+def test_load_state_dict_translates_delegated_weights_into_separate_storage() -> None:
+    module = MultiheadAttention(embed_dim=8, num_heads=2, kdim=5, vdim=7)
+    q_weight = torch.randn(8, 8)
+    k_weight = torch.randn(8, 5)
+    v_weight = torch.randn(8, 7)
+
+    result = module.load_state_dict(
+        {
+            "q_proj.weight": q_weight,
+            "k_proj.weight": k_weight,
+            "v_proj.weight": v_weight,
+            "output_proj.weight": torch.randn(8, 8),
+        }
+    )
+
+    assert result.missing_keys == []
+    assert result.unexpected_keys == []
+    assert module.q_proj_weight is not None
+    assert module.k_proj_weight is not None
+    assert module.v_proj_weight is not None
+    torch.testing.assert_close(module.q_proj_weight, q_weight)
+    torch.testing.assert_close(module.k_proj_weight, k_weight)
+    torch.testing.assert_close(module.v_proj_weight, v_weight)
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        MultiheadAttention(embed_dim=8, num_heads=2),
+        MultiheadAttention(embed_dim=8, num_heads=2, kdim=5, vdim=7),
+    ],
+)
+def test_load_state_dict_accepts_native_layout(module: MultiheadAttention) -> None:
+    clone = MultiheadAttention(
+        embed_dim=module.embed_dim,
+        num_heads=module.num_heads,
+        kdim=module.kdim,
+        vdim=module.vdim,
+        qk_head_dim=module.qk_head_dim,
+        value_head_dim=module.value_head_dim,
+    )
+
+    result = clone.load_state_dict(module.state_dict())
+
+    assert result.missing_keys == []
+    assert result.unexpected_keys == []
+
+
+def test_load_state_dict_rejects_conflicting_projection_layouts() -> None:
+    module = MultiheadAttention(embed_dim=8, num_heads=2)
+
+    with pytest.raises(ValueError, match="conflicting"):
+        module.load_state_dict(
+            {
+                "in_proj_weight": torch.randn(24, 8),
+                "q_proj.weight": torch.randn(8, 8),
+            },
+            strict=False,
+        )
+
+
+def test_load_state_dict_preserves_missing_and_unexpected_key_reporting() -> None:
+    module = MultiheadAttention(embed_dim=8, num_heads=2)
+
+    result = module.load_state_dict(
+        {
+            "output_proj.weight": torch.randn(8, 8),
+            "surprise": torch.tensor(1),
+        },
+        strict=False,
+    )
+
+    assert result.missing_keys == ["in_proj_weight"]
+    assert result.unexpected_keys == ["surprise"]

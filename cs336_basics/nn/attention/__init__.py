@@ -1,14 +1,18 @@
 import warnings
+from collections.abc import Mapping
+from typing import Any
 
 import einops
 import einx
 import torch
 from jaxtyping import Float, Int, Shaped
 from torch import nn
+from torch.nn.modules.module import _IncompatibleKeys
 
 from cs336_basics.nn import functional as F
 
 from .._typing import MaskBias
+from .. import initializer as init
 from ..modules import Linear
 
 
@@ -211,6 +215,10 @@ class MultiheadAttention(nn.Module):
         "qk_head_dim",
         "value_head_dim",
         "dropout",
+        "q_proj_dim",
+        "k_proj_dim",
+        "v_proj_dim",
+        "_qkv_same_input_dim",
     ]
 
     type QueryVec = Float[torch.Tensor, "{self.embed_dim}"]  # noqa: F821
@@ -268,18 +276,104 @@ class MultiheadAttention(nn.Module):
         self.value_head_dim = value_head_dim
         self.dropout = dropout
         self.rope = rope
+        self.q_proj_dim = num_heads * qk_head_dim
+        self.k_proj_dim = num_heads * qk_head_dim
+        self.v_proj_dim = num_heads * value_head_dim
+        self._qkv_same_input_dim = kdim == embed_dim and vdim == embed_dim
 
-        self.q_proj = Linear(embed_dim, num_heads * qk_head_dim, device=device, dtype=dtype)
-        self.k_proj = Linear(kdim, num_heads * qk_head_dim, device=device, dtype=dtype)
-        self.v_proj = Linear(vdim, num_heads * value_head_dim, device=device, dtype=dtype)
+        if self._qkv_same_input_dim:
+            self.in_proj_weight = nn.Parameter(
+                torch.empty(
+                    (self.q_proj_dim + self.k_proj_dim + self.v_proj_dim, embed_dim),
+                    device=device,
+                    dtype=dtype,
+                )
+            )
+            self.register_parameter("q_proj_weight", None)
+            self.register_parameter("k_proj_weight", None)
+            self.register_parameter("v_proj_weight", None)
+        else:
+            self.register_parameter("in_proj_weight", None)
+            self.q_proj_weight = nn.Parameter(torch.empty((self.q_proj_dim, embed_dim), device=device, dtype=dtype))
+            self.k_proj_weight = nn.Parameter(torch.empty((self.k_proj_dim, kdim), device=device, dtype=dtype))
+            self.v_proj_weight = nn.Parameter(torch.empty((self.v_proj_dim, vdim), device=device, dtype=dtype))
         self.output_proj = Linear(num_heads * value_head_dim, embed_dim, device=device, dtype=dtype)
+        self.reset_parameters()
 
     def reset_parameters(self) -> None:
         """Reset all projection parameters."""
-        self.q_proj.reset_parameters()
-        self.k_proj.reset_parameters()
-        self.v_proj.reset_parameters()
+        if self.in_proj_weight is not None:
+            q_weight, k_weight, v_weight = einx.id(
+                "(q + k + v) input -> q input, k input, v input",
+                self.in_proj_weight,
+                q=self.q_proj_dim,
+                k=self.k_proj_dim,
+                v=self.v_proj_dim,
+            )
+            init.starter_trunc_normal_for_linear_(q_weight, self.embed_dim, self.q_proj_dim)
+            init.starter_trunc_normal_for_linear_(k_weight, self.kdim, self.k_proj_dim)
+            init.starter_trunc_normal_for_linear_(v_weight, self.vdim, self.v_proj_dim)
+        else:
+            assert self.q_proj_weight is not None
+            assert self.k_proj_weight is not None
+            assert self.v_proj_weight is not None
+            init.starter_trunc_normal_for_linear_(self.q_proj_weight, self.embed_dim, self.q_proj_dim)
+            init.starter_trunc_normal_for_linear_(self.k_proj_weight, self.kdim, self.k_proj_dim)
+            init.starter_trunc_normal_for_linear_(self.v_proj_weight, self.vdim, self.v_proj_dim)
         self.output_proj.reset_parameters()
+
+    def _in_projection(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Project Q/K/V using the cheapest path allowed by storage and input identity."""
+        if self.in_proj_weight is None:
+            assert self.q_proj_weight is not None
+            assert self.k_proj_weight is not None
+            assert self.v_proj_weight is not None
+            return (
+                F.linear(query, self.q_proj_weight),
+                F.linear(key, self.k_proj_weight),
+                F.linear(value, self.v_proj_weight),
+            )
+
+        if query is key and key is value:
+            projected = F.linear(query, self.in_proj_weight)
+            return einx.id(
+                "batch... (q + k + v) -> batch... q, batch... k, batch... v",
+                projected,
+                q=self.q_proj_dim,
+                k=self.k_proj_dim,
+                v=self.v_proj_dim,
+            )
+
+        if key is value:
+            q_weight, kv_weight = einx.id(
+                "(q + kv) input -> q input, kv input",
+                self.in_proj_weight,
+                q=self.q_proj_dim,
+                kv=self.k_proj_dim + self.v_proj_dim,
+            )
+            projected_q = F.linear(query, q_weight)
+            projected_kv = F.linear(key, kv_weight)
+            projected_k, projected_v = einx.id(
+                "batch... (k + v) -> batch... k, batch... v",
+                projected_kv,
+                k=self.k_proj_dim,
+                v=self.v_proj_dim,
+            )
+            return projected_q, projected_k, projected_v
+
+        q_weight, k_weight, v_weight = einx.id(
+            "(q + k + v) input -> q input, k input, v input",
+            self.in_proj_weight,
+            q=self.q_proj_dim,
+            k=self.k_proj_dim,
+            v=self.v_proj_dim,
+        )
+        return F.linear(query, q_weight), F.linear(key, k_weight), F.linear(value, v_weight)
 
     def _validate_inputs(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> None:
         if query.shape[:-2] != key.shape[:-2] or key.shape[:-2] != value.shape[:-2]:
@@ -308,9 +402,7 @@ class MultiheadAttention(nn.Module):
         """Project Q/K/V, apply optional RoPE, attend, and project the result."""
         self._validate_inputs(query, key, value)
 
-        projected_q = self.q_proj(query)
-        projected_k = self.k_proj(key)
-        projected_v = self.v_proj(value)
+        projected_q, projected_k, projected_v = self._in_projection(query, key, value)
 
         # Heads follow the ordinary batch axes so RoPE can treat them as its position-broadcast suffix.
         q = einx.id(
@@ -361,8 +453,60 @@ class MultiheadAttention(nn.Module):
         return (
             f"embed_dim={self.embed_dim}, num_heads={self.num_heads}, "
             f"kdim={self.kdim}, vdim={self.vdim}, qk_head_dim={self.qk_head_dim}, "
-            f"value_head_dim={self.value_head_dim}, dropout={self.dropout}, rope={self.rope is not None}"
+            f"value_head_dim={self.value_head_dim}, dropout={self.dropout}, rope={self.rope is not None}, "
+            f"packed={self.in_proj_weight is not None}"
         )
+
+    def load_state_dict(
+        self,
+        state_dict: Mapping[str, Any],
+        strict: bool = True,
+        assign: bool = False,
+    ) -> _IncompatibleKeys:
+        """Load native weights or translate the earlier delegated projection layout."""
+        delegated_keys = ("q_proj.weight", "k_proj.weight", "v_proj.weight")
+        separate_keys = ("q_proj_weight", "k_proj_weight", "v_proj_weight")
+        has_delegated = any(key in state_dict for key in delegated_keys)
+        has_separate = any(key in state_dict for key in separate_keys)
+        has_packed = "in_proj_weight" in state_dict
+        if sum((has_delegated, has_separate, has_packed)) > 1:
+            raise ValueError("state_dict contains conflicting packed and unpacked Q/K/V weight layouts")
+
+        translated: dict[str, Any] = {}
+        source_keys: tuple[str, str, str] | None = None
+        if has_delegated:
+            source_keys = delegated_keys
+        elif has_separate:
+            source_keys = separate_keys
+
+        if source_keys is not None:
+            present = [key in state_dict for key in source_keys]
+            if all(present):
+                q_weight, k_weight, v_weight = (state_dict[key] for key in source_keys)
+                if self.in_proj_weight is not None:
+                    translated["in_proj_weight"] = einx.id(
+                        "q input, k input, v input -> (q + k + v) input",
+                        q_weight,
+                        k_weight,
+                        v_weight,
+                        q=self.q_proj_dim,
+                        k=self.k_proj_dim,
+                        v=self.v_proj_dim,
+                    )
+                else:
+                    translated.update(
+                        q_proj_weight=q_weight,
+                        k_proj_weight=k_weight,
+                        v_proj_weight=v_weight,
+                    )
+        elif has_packed:
+            if self.in_proj_weight is None:
+                raise ValueError("cannot load packed Q/K/V weights when key or value input widths differ")
+            translated["in_proj_weight"] = state_dict["in_proj_weight"]
+
+        known_projection_keys = {"in_proj_weight", *delegated_keys, *separate_keys}
+        translated.update((key, value) for key, value in state_dict.items() if key not in known_projection_keys)
+        return super().load_state_dict(translated, strict, assign)
 
 
 class MultiheadSelfAttention(MultiheadAttention):

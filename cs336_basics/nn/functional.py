@@ -195,8 +195,8 @@ def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled
 ) -> Float[torch.Tensor, "*batch query_len d_v"]:
     """Compute scaled dot-product attention.
 
-    Handles queries of shape ``(*batch, query_len, d_k)``, keys of shape
-    ``(*batch, key_len, d_k)``, and values of shape ``(*batch, key_len, d_v)``,
+    Handles keys and queries of shape (batch_size, ..., seq_len, d_k)
+    and values of shape (batch_size, ..., seq_len, d_v),
     where ... represents any number of other batch-like dimensions (if provided).
     Also support an optional user-provided boolean mask of shape (seq_len, seq_len);
     can have additional dimensions, but have to be a suffix of the input batch shapes.
