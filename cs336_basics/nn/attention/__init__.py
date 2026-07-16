@@ -118,9 +118,9 @@ class RotaryPositionalEmbedding(nn.Module):
                 raise ValueError(
                     f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
                 )
-            if any(
+            if token_positions.shape[-1] != target_shape[-1] or any(
                 position_dim not in (1, target_dim)
-                for position_dim, target_dim in zip(token_positions.shape, target_shape)
+                for position_dim, target_dim in zip(token_positions.shape[:-1], target_shape[:-1])
             ):
                 raise ValueError(
                     f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"

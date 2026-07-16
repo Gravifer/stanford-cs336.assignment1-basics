@@ -137,6 +137,26 @@ def test_rope_broadcasts_position_batch_suffix() -> None:
     assert output.shape == x.shape
 
 
+def test_rope_broadcasts_singleton_position_batch() -> None:
+    rope = RotaryPositionalEmbedding(10_000.0, 8, 16)
+    x = torch.randn(2, 3, 4, 8)
+    positions = torch.arange(4).unsqueeze(0)
+
+    actual = rope(x, positions)
+    expected = rope(x, positions.expand(3, -1))
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_rope_rejects_singleton_sequence_dimension() -> None:
+    rope = RotaryPositionalEmbedding(10_000.0, 8, 16)
+    x = torch.randn(2, 3, 4, 8)
+    positions = torch.zeros((1, 1), dtype=torch.int64)
+
+    with pytest.raises((ValueError, TypeCheckError)):
+        rope(x, positions)
+
+
 def test_rope_rejects_non_suffix_position_batch() -> None:
     rope = RotaryPositionalEmbedding(10_000.0, 8, 16)
     x = torch.randn(3, 2, 4, 8)
