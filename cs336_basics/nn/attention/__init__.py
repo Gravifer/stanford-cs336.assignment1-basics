@@ -84,26 +84,27 @@ class RotaryPositionalEmbedding(nn.Module):
 
     def forward(
         self,
-        x: Shaped[KeyVec, "*map_batch seq_len"],
-        token_positions: Int[torch.Tensor, "*batch seq_len"],
+        x: Shaped[KeyVec, "*leading seq_len"],
+        token_positions: Int[torch.Tensor, "*slew seq_len"],
         *,
         broadcast_positions: bool = True,  # if False, second case of token_positions is not allowed
-    ) -> Shaped[KeyVec, "*map_batch seq_len"]:
+    ) -> Shaped[KeyVec, "*leading seq_len"]:
         """
         Apply RoPE to the input tensor `𝑥` based on token positions.
 
         Process an input tensor of shape (..., seq_len, d_k) and return a tensor of the same shape.
-        The token positions are a tensor of shape (..., seq_len)
-        specifying the token positions of `𝑥` along the sequence dimension.
+        With position broadcasting, the leading axes are interpreted as
+        ``(*mapped, *slew)``: token positions cover the ``*slew`` suffix, while
+        the selected rotations are reused over the ``*mapped`` prefix.
 
         Args:
-            x: Input tensor of shape (batch_size, seq_len, d_k)
-            token_positions: Tensor of shape (batch_size, seq_len) containing the positions of tokens
+            x: Input tensor of shape (*mapped, *slew, seq_len, d_k).
+            token_positions: Token positions of shape (*slew, seq_len).
 
         Returns:
-            Tensor of shape (batch_size, seq_len, d_k) with RoPE applied
+            Tensor with the same shape as ``x`` and RoPE applied.
         """
-        map_batch: tuple[int, ...] = tuple(x.shape[:-2])
+        leading: tuple[int, ...] = tuple(x.shape[:-2])
 
         # Ensure token_positions is of the same device as x
         token_positions = token_positions.to(x.device)
@@ -127,23 +128,22 @@ class RotaryPositionalEmbedding(nn.Module):
                 )
             token_positions = token_positions.expand(target_shape)
             mapped: tuple[int, ...] = tuple(x.shape[:suffix_start])
-            batch: tuple[int, ...] = tuple(target_shape[:-1])
+            slew: tuple[int, ...] = tuple(target_shape[:-1])
         elif token_positions.ndim != x.ndim - 1 or token_positions.shape != x.shape[:-1]:
             raise ValueError(
                 f"token_positions shape {token_positions.shape} does not match with x shape {x.shape}; is broadcasting needed?"
             )
-        else:  # *batch === *map_batch
+        else:  # *slew === *leading
             mapped: tuple[int, ...] = tuple()
-            batch: tuple[int, ...] = map_batch
+            slew: tuple[int, ...] = leading
 
         if x.numel() == 0 and token_positions.numel() == 0:
             warnings.warn("Applying RoPE to empty tensors is a no-op", stacklevel=2)
             return x
 
         axes_map: dict[str, tuple[int, ...] | int] = {
-            "map_batch": map_batch,
             "mapped": mapped,
-            "batch": batch,
+            "slew": slew,
             "d_pair": self.d_pair,
             "col": 2,
             "row": 2,
@@ -156,7 +156,7 @@ class RotaryPositionalEmbedding(nn.Module):
         # sin_angles = torch.sin(angles)
         # cos_angles = torch.cos(angles)
         rot = einx.get_at(
-            "[max_seq_len] d_pair col row, batch... seq_len -> batch... seq_len d_pair col row",
+            "[max_seq_len] d_pair col row, slew... seq_len -> slew... seq_len d_pair col row",
             self.rot,
             token_positions,
             **axes_map,
@@ -172,7 +172,7 @@ class RotaryPositionalEmbedding(nn.Module):
         # x_even = x[..., 0::2]
         # x_odd = x[..., 1::2]
         x_split = einx.id(
-            "mapped... batch... seq_len (d_pair p) -> mapped... batch... seq_len d_pair p",
+            "mapped... slew... seq_len (d_pair p) -> mapped... slew... seq_len d_pair p",
             x.to(op_dtype),
             **axes_map,
         )
@@ -181,7 +181,7 @@ class RotaryPositionalEmbedding(nn.Module):
         # x_rotated_even = x_even * cos_angles - x_odd * sin_angles
         # x_rotated_odd = x_even * sin_angles + x_odd * cos_angles
         x_split_rotated = einx.dot(
-            "mapped... batch... seq_len d_pair [row], batch... seq_len d_pair col [row] -> mapped... batch... seq_len d_pair col",
+            "mapped... slew... seq_len d_pair [row], slew... seq_len d_pair col [row] -> mapped... slew... seq_len d_pair col",
             x_split,
             rot,
             **axes_map,
@@ -190,7 +190,7 @@ class RotaryPositionalEmbedding(nn.Module):
         # # Interleave the rotated even and odd parts back together
         # x_rotated = torch.stack((x_rotated_even, x_rotated_odd), dim=-1).reshape_as(x)
         x_rotated = einx.id(
-            "mapped... batch... seq_len d_pair p -> mapped... batch... seq_len (d_pair p)",
+            "mapped... slew... seq_len d_pair p -> mapped... slew... seq_len (d_pair p)",
             x_split_rotated,
             **axes_map,
         )
