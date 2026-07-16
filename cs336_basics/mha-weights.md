@@ -90,6 +90,26 @@ $$
 
 These are two members of a larger design space, not an exhaustive binary. A representation must also specify whether Q/K/V is a true tensor axis, a heterogeneous grouped axis, three separately registered tensors, or merely three views into a two-dimensional parameter. Further subdivisions arise for packed QK with separate V, packed KV with separate Q, grouped-query attention, quantized tiles, and backend-specific blocked formats.
 
+Equal projected widths permit the segmented dimension to be factored more explicitly. If $d_k=d_v=d$, the head-segmented representation becomes
+
+$$
+W_{QKV}^{\mathrm{head}}
+\in
+\mathbb{R}^{h\times 3d\times d_{\mathrm{model}}}
+\cong
+\mathbb{R}^{h\times 3\times d\times d_{\mathrm{model}}}.
+$$
+
+The axis of size three selects query, key, or value; it is part of the weight representation and introduces neither batch nor sequence dimensions. A projection-segmented representation instead exposes
+
+$$
+W_{QKV}^{\mathrm{projection}}
+\in
+\mathbb{R}^{3\times h\times d\times d_{\mathrm{model}}}.
+$$
+
+Both orderings flatten to $(3hd,d_{\mathrm{model}})$, but their scalar order differs. Converting between them requires a permutation rather than a reshape.
+
 The implementation registers a conventional two-dimensional parameter with projection-segmented rows:
 
 $$
@@ -115,7 +135,7 @@ Two activation pipelines are useful to compare:
 - **Head before sequence:** $(B,H,S,D)$. Heads act as a batch-like axis for the local attention implementation. Reaching this order from projection output is a view, but joining attended heads for the output projection ordinarily requires the significant BHSD-to-BSHD rearrangement.
 - **Head after sequence:** $(B,S,H,D)$. If the attention contraction writes a contiguous tensor in this order, grouping $(H,D)$ into the model feature is a reshape view. Whether the dimensions are written as separate `H D` symbols or as a grouped `(H D)` symbol does not change memory layout.
 
-Thus the material distinction is not “fused versus unfused head dimensions.” It is whether a producer and consumer agree on strides—most visibly whether a BHSD activation must become BSHD. The head-after-sequence path in this implementation preserves BSHD through RoPE and a layout-specific local attention contraction, so the attended result can enter the output projection through a view. It does not pretend that projection-segmented Q/K/V views have thereby become contiguous; eliminating those strides would require a different projection output ordering or a fused producer.
+Producer-consumer agreement on strides determines the material layout cost, most visibly when a BHSD activation must become BSHD. The head-after-sequence path in this implementation preserves BSHD through RoPE and a layout-specific local attention contraction, so the attended result can enter the output projection through a view. Projection-segmented Q/K/V views retain their original strides along this path; eliminating those strides would require a different projection output ordering or a fused producer.
 
 Modern fused attention interfaces confirm that the consumer matters. The official FlashAttention packed interface accepts QKV as $(B,S,3,H,D)$ and returns $(B,S,H,D)$; its separate interface accepts Q, K, and V as $(B,S,H,D)$. It also states that an already stacked QKV tensor is preferable to concatenating one for the call, especially in backward. ([FlashAttention interface](https://github.com/Dao-AILab/flash-attention#how-to-use-flashattention)) NVIDIA Transformer Engine exposes several packed and separate layout groups, including BS3HD, BSH3D, BSHD/BS2HD, and three separate BSHD tensors. ([Transformer Engine fused-attention layouts](https://nvidia.github.io/TransformerEngine/api/c/fused_attn.html))
 
@@ -136,7 +156,7 @@ R_{p,j}
 \end{bmatrix},
 $$
 
-or separate cached values $(\cos\theta_{p,j},\sin\theta_{p,j})$. The matrix cache stores four scalars per position-frequency pair; the cosine/sine cache stores two. The matrix cache is therefore exactly twice—not four times—the size of the paired elementwise cache.
+or separate cached values $(\cos\theta_{p,j},\sin\theta_{p,j})$. The matrix cache stores four scalars per position-frequency pair; the cosine/sine cache stores two. The matrix cache is therefore exactly twice the size of the paired elementwise cache.
 
 Explicit token positions are validated by attempting suffix expansion. Cache gathering nevertheless uses the original index shape. A position tensor shaped $(1,S)$ therefore gathers one head-independent selection and expands it afterward as a zero-stride view, rather than gathering $H$ duplicate cache blocks. Non-singleton batch or head indices remain distinct. When positions are omitted for self-attention, consecutive zero-based positions use a cache slice and avoid index gathering altogether.
 
@@ -161,7 +181,9 @@ The course case therefore does not pay for general cross-attention dispatch in i
 
 The current educational local SDPA still materializes attention scores and masks rather than using FlashAttention. Its causal mask is formed by a broadcasted query/key index comparison rather than allocating an all-ones square followed by `tril`. Square and rectangular masks, boolean True-means-allowed masks, additive masks, and composition modes share the same masking and softmax core.
 
-## Benchmark methodology
+## Benchmark evidence
+
+### Methodology
 
 [`scripts/benchmarks/attention.py`](../scripts/benchmarks/attention.py) treats layout and execution claims as empirical questions. Its `rope` and `mha` subcommands compare:
 
@@ -173,6 +195,31 @@ The current educational local SDPA still materializes attention scores and masks
 - forward and forward-plus-backward timing.
 
 Every case checks forward and gradient parity before timing. Reports include Python, PyTorch, device and CUDA metadata, dtype, compilation mode, strides, contiguity, elapsed time, and peak CUDA allocation when available. Warmup and repeats are explicit command-line controls, and the script writes no artifacts by default.
+
+### Local measurements
+
+The CUDA measurements below were collected on an NVIDIA GeForce RTX 3070 Ti Laptop GPU with Windows 11, Python 3.12.2, PyTorch 2.11.0+cu130, CUDA 13.0, and cuDNN 9.19. Inputs used FP32 with $B=4$, $S=128$, $H=8$, and $D=64$. Forward measurements used 10 warmup iterations and 50 timed repetitions; forward-plus-backward measurements used 5 warmup iterations and 20 repetitions. Each entry is the mean elapsed time per repetition, and the harness checked forward and gradient parity before timing.
+
+The common self-attention case uses one shared sequence-position vector. Representative MHA results were:
+
+| RoPE cache | Q/K execution | Activation layout | Forward (ms) | Forward + backward (ms) |
+|---|---|---|---:|---:|
+| matrix | zero-copy packed | head before sequence | 2.205 | **3.972** |
+| matrix | separate | head before sequence | 2.694 | 4.047 |
+| matrix | allocated stack | head before sequence | **1.903** | 6.559 |
+| matrix | zero-copy packed | head after sequence | 2.076 | 6.617 |
+| elementwise | zero-copy packed | head before sequence | 2.857 | 5.949 |
+| elementwise | separate | head before sequence | 3.323 | 6.770 |
+| elementwise | allocated stack | head before sequence | 2.675 | **5.916** |
+| elementwise | zero-copy packed | head after sequence | **2.562** | **5.894** |
+| elementwise | separate | head after sequence | 2.986 | 6.091 |
+| elementwise | allocated stack | head after sequence | 2.635 | 6.078 |
+
+Bold values are the best result within the same cache representation and measurement column. The matrix, head-before-sequence, zero-copy path was the best common training configuration in this run. Allocating a Q/K stack improved eager forward latency for matrix RoPE but increased forward-plus-backward latency substantially. This supports the current automatic policy: reuse a packed QK view when projection already provides one, without allocating a stack solely to combine the rotations. The head-after-sequence layout did not repay its forward benefit during backward for matrix RoPE on this workload.
+
+An isolated RoPE forward comparison showed that the best elementwise stacked cases took approximately 0.50--0.65 ms, while matrix/separate cases were approximately 0.94--1.03 ms. The representative head-before-sequence results were 0.942 ms for matrix/separate, 0.960 ms for matrix/stacked, 0.949 ms for elementwise/separate, and 0.620 ms for elementwise/stacked. Forced stacking added roughly 3--8 MiB of peak allocation in nearby comparisons. For head-dependent position tensors, some MHA cases diverged much more sharply: matrix automatic execution reached 7.197 ms while elementwise automatic execution took 2.191 ms. That uncommon path warrants profiling before its difference is attributed to cache representation alone.
+
+`torch.compile` was verified on the same CUDA installation after configuring the Windows C++ toolchain and Triton. A single process compiling all twelve cache, execution, and layout combinations reached Dynamo's recompilation limit because the private strategy values participate in guards. Later cases were therefore not guaranteed to have comparable compilation status. Clean compiled comparisons should isolate cases in separate processes, or reset compiler state between cases, before those timings are used to choose an implementation. The peak-memory numbers also include parity-reference tensors retained by the harness, so their absolute values are not comparable across distant rows; the nearby stacking deltas above are the safer directional observation.
 
 CPU observations are useful for finding accidental copies and gross overhead, but they do not establish CUDA policy. Results must be interpreted with their exact hardware, backend, dtype, shape, compilation state, and input strides. In particular, an allocated stack may win a small eager microbenchmark while still being undesirable as an automatic path because it adds memory traffic, changes backward behavior, and may lose once the producer or consumer is fused. The automatic implementation consequently combines Q/K only when that view already exists.
 
