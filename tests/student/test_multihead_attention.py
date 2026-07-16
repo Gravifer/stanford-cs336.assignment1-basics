@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal, cast
 
 import pytest
 import torch
@@ -345,3 +345,192 @@ def test_load_state_dict_preserves_missing_and_unexpected_key_reporting() -> Non
 
     assert result.missing_keys == ["in_proj_weight"]
     assert result.unexpected_keys == ["surprise"]
+
+
+@pytest.mark.parametrize("use_rope", [False, True])
+@pytest.mark.parametrize("use_matrix_form", [False, True])
+def test_head_sequence_layouts_match_with_masks_and_gradients(
+    use_rope: bool,
+    use_matrix_form: bool,
+) -> None:
+    torch.manual_seed(4)
+    rope_before = RotaryPositionalEmbedding(10_000.0, 4, 16, use_matrix_form=use_matrix_form) if use_rope else None
+    rope_after = RotaryPositionalEmbedding(10_000.0, 4, 16, use_matrix_form=use_matrix_form) if use_rope else None
+    before = MultiheadAttention(
+        embed_dim=10,
+        num_heads=3,
+        kdim=7,
+        vdim=9,
+        qk_head_dim=4,
+        value_head_dim=2,
+        rope=rope_before,
+        _layout_strategy="head_before_sequence",
+    )
+    after = MultiheadAttention(
+        embed_dim=10,
+        num_heads=3,
+        kdim=7,
+        vdim=9,
+        qk_head_dim=4,
+        value_head_dim=2,
+        rope=rope_after,
+        _layout_strategy="head_after_sequence",
+    )
+    after.load_state_dict(before.state_dict())
+    query_before = torch.randn(2, 3, 4, 10, requires_grad=True)
+    key_before = torch.randn(2, 3, 6, 7, requires_grad=True)
+    value_before = torch.randn(2, 3, 6, 9, requires_grad=True)
+    query_after = query_before.detach().clone().requires_grad_()
+    key_after = key_before.detach().clone().requires_grad_()
+    value_after = value_before.detach().clone().requires_grad_()
+    mask = torch.ones(1, 4, 6, dtype=torch.bool)
+    mask[..., -1] = False
+
+    output_before = before(query_before, key_before, value_before, mask)
+    output_after = after(query_after, key_after, value_after, mask)
+    torch.testing.assert_close(output_before, output_after)
+
+    output_before.square().sum().backward()
+    output_after.square().sum().backward()
+    for before_grad, after_grad in (
+        (query_before.grad, query_after.grad),
+        (key_before.grad, key_after.grad),
+        (value_before.grad, value_after.grad),
+    ):
+        torch.testing.assert_close(before_grad, after_grad)
+
+
+@pytest.mark.parametrize(
+    ("strategy", "expected_rotation_calls", "expected_stack_calls"),
+    [("auto", 1, 0), ("separate", 2, 0), ("stacked", 1, 1)],
+)
+def test_self_attention_qk_execution_strategies(
+    strategy: Literal["auto", "separate", "stacked"],
+    expected_rotation_calls: int,
+    expected_stack_calls: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rope = RotaryPositionalEmbedding(10_000.0, 4, 16)
+    module = MultiheadSelfAttention(
+        8,
+        2,
+        rope=rope,
+        _qk_execution_strategy=strategy,
+    )
+    rotation_calls = 0
+    stack_calls = 0
+    original_apply: Callable[..., torch.Tensor] = rope._apply_rotations
+    original_stack: Callable[..., torch.Tensor] = torch.stack
+
+    def traced_apply(*args: Any, **kwargs: Any) -> torch.Tensor:
+        nonlocal rotation_calls
+        rotation_calls += 1
+        return original_apply(*args, **kwargs)
+
+    def traced_stack(*args: Any, **kwargs: Any) -> torch.Tensor:
+        nonlocal stack_calls
+        stack_calls += 1
+        return original_stack(*args, **kwargs)
+
+    monkeypatch.setattr(rope, "_apply_rotations", traced_apply)
+    monkeypatch.setattr(torch, "stack", traced_stack)
+    module(torch.randn(2, 5, 8))
+
+    assert rotation_calls == expected_rotation_calls
+    assert stack_calls == expected_stack_calls
+
+
+def test_auto_qk_execution_falls_back_for_cross_attention(monkeypatch: pytest.MonkeyPatch) -> None:
+    rope = RotaryPositionalEmbedding(10_000.0, 4, 16)
+    module = MultiheadAttention(8, 2, kdim=5, vdim=7, rope=rope, _qk_execution_strategy="auto")
+    calls = 0
+    original: Callable[..., torch.Tensor] = rope._apply_rotations
+
+    def traced(*args: Any, **kwargs: Any) -> torch.Tensor:
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(rope, "_apply_rotations", traced)
+    module(torch.randn(2, 4, 8), torch.randn(2, 6, 5), torch.randn(2, 6, 7))
+
+    assert calls == 2
+
+
+def test_packed_self_projection_exposes_zero_copy_qk_head_view() -> None:
+    module = MultiheadAttention(8, 2)
+    x = torch.randn(2, 5, 8)
+
+    projected_q, projected_k, projected_v, projected_qk = module._in_projection(x, x, x)
+    _, _, _, packed_qk = module._split_heads(projected_q, projected_k, projected_v, projected_qk)
+
+    assert projected_qk is not None and packed_qk is not None
+    assert projected_qk.untyped_storage().data_ptr() == packed_qk.untyped_storage().data_ptr()
+    assert packed_qk.shape == (2, 2, 2, 5, 4)
+
+
+@pytest.mark.parametrize("strategy", ["auto", "separate", "stacked"])
+def test_packed_self_attention_layouts_match_with_head_dependent_positions_and_gradients(
+    strategy: Literal["auto", "separate", "stacked"],
+) -> None:
+    rope_before = RotaryPositionalEmbedding(10_000.0, 4, 16, use_matrix_form=False)
+    rope_after = RotaryPositionalEmbedding(10_000.0, 4, 16, use_matrix_form=False)
+    before = MultiheadSelfAttention(
+        10,
+        3,
+        4,
+        2,
+        rope=rope_before,
+        _layout_strategy="head_before_sequence",
+        _qk_execution_strategy=strategy,
+    )
+    after = MultiheadSelfAttention(
+        10,
+        3,
+        4,
+        2,
+        rope=rope_after,
+        _layout_strategy="head_after_sequence",
+        _qk_execution_strategy=strategy,
+    )
+    after.load_state_dict(before.state_dict())
+    x_before = torch.randn(2, 3, 5, 10, requires_grad=True)
+    x_after = x_before.detach().clone().requires_grad_()
+    positions = torch.stack((torch.arange(5), torch.arange(5).flip(0), torch.zeros(5, dtype=torch.int64)))
+    mask = torch.ones(3, 5, 5, dtype=torch.bool)
+    mask[:, :, -1] = False
+
+    output_before = before(x_before, mask, token_positions=positions, is_causal=False)
+    output_after = after(x_after, mask, token_positions=positions, is_causal=False)
+    torch.testing.assert_close(output_before, output_after)
+
+    output_before.square().sum().backward()
+    output_after.square().sum().backward()
+    torch.testing.assert_close(x_before.grad, x_after.grad)
+
+
+def test_head_after_sequence_joins_attended_heads_as_a_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = MultiheadSelfAttention(8, 2, _layout_strategy="head_after_sequence")
+    observed: list[tuple[tuple[int, ...], bool]] = []
+    original: Callable[..., torch.Tensor] = module.output_proj.forward
+
+    def traced(input: torch.Tensor) -> torch.Tensor:
+        observed.append((input.stride(), input.is_contiguous()))
+        return original(input)
+
+    monkeypatch.setattr(module.output_proj, "forward", traced)
+    module(torch.randn(2, 5, 8))
+
+    assert observed == [((40, 8, 1), True)]
+
+
+@pytest.mark.parametrize(
+    ("keyword", "value", "message"),
+    [
+        ("_layout_strategy", "sequence_first", "layout strategy"),
+        ("_qk_execution_strategy", "combined", "execution strategy"),
+    ],
+)
+def test_rejects_unknown_experimental_strategies(keyword: str, value: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        cast(Any, MultiheadAttention)(8, 2, **{keyword: value})

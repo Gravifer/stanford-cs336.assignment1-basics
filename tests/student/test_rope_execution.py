@@ -7,7 +7,7 @@ import torch
 from cs336_basics.nn.attention import RotaryPositionalEmbedding
 
 
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32, torch.float64])
 @pytest.mark.parametrize("position_shape", ["sequence", "singleton_head", "per_head"])
 def test_matrix_and_elementwise_rope_match_with_gradients(dtype: torch.dtype, position_shape: str) -> None:
     matrix = RotaryPositionalEmbedding(10_000.0, 8, 16, use_matrix_form=True).to(dtype=dtype)

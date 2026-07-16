@@ -347,6 +347,8 @@ class MultiheadAttention(nn.Module):
         "k_proj_dim",
         "v_proj_dim",
         "_qkv_same_input_dim",
+        "_layout_strategy",
+        "_qk_execution_strategy",
     ]
 
     type QueryVec = Float[torch.Tensor, "{self.embed_dim}"]  # noqa: F821
@@ -367,6 +369,8 @@ class MultiheadAttention(nn.Module):
         rope: RotaryPositionalEmbedding | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
+        _layout_strategy: Literal["head_before_sequence", "head_after_sequence"] = "head_before_sequence",
+        _qk_execution_strategy: Literal["auto", "separate", "stacked"] = "auto",
     ) -> None:
         if embed_dim <= 0 or num_heads <= 0:
             raise ValueError(
@@ -394,6 +398,10 @@ class MultiheadAttention(nn.Module):
             )
         if rope is not None and rope.d_k != qk_head_dim:
             raise ValueError(f"RoPE width {rope.d_k} does not match qk_head_dim {qk_head_dim}")
+        if _layout_strategy not in ("head_before_sequence", "head_after_sequence"):
+            raise ValueError(f"unknown layout strategy: {_layout_strategy!r}")
+        if _qk_execution_strategy not in ("auto", "separate", "stacked"):
+            raise ValueError(f"unknown Q/K execution strategy: {_qk_execution_strategy!r}")
 
         super().__init__()
         self.embed_dim = embed_dim
@@ -408,6 +416,8 @@ class MultiheadAttention(nn.Module):
         self.k_proj_dim = num_heads * qk_head_dim
         self.v_proj_dim = num_heads * value_head_dim
         self._qkv_same_input_dim = kdim == embed_dim and vdim == embed_dim
+        self._layout_strategy = _layout_strategy
+        self._qk_execution_strategy = _qk_execution_strategy
 
         if self._qkv_same_input_dim:
             self.in_proj_weight = nn.Parameter(
@@ -468,7 +478,7 @@ class MultiheadAttention(nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """Project Q/K/V using the cheapest path allowed by storage and input identity."""
         if self.in_proj_weight is None:
             q_weight, k_weight, v_weight = self._separate_projection_weights()
@@ -476,17 +486,24 @@ class MultiheadAttention(nn.Module):
                 F.linear(query, q_weight),
                 F.linear(key, k_weight),
                 F.linear(value, v_weight),
+                None,
             )
 
         if query is key and key is value:
             projected = F.linear(query, self.in_proj_weight)
-            return einx.id(
-                "batch... (q + k + v) -> batch... q, batch... k, batch... v",
+            projected_qk, projected_v = einx.id(
+                "batch... (qk + v) -> batch... qk, batch... v",
                 projected,
-                q=self.q_proj_dim,
-                k=self.k_proj_dim,
+                qk=self.q_proj_dim + self.k_proj_dim,
                 v=self.v_proj_dim,
             )
+            projected_q, projected_k = einx.id(
+                "batch... (q + k) -> batch... q, batch... k",
+                projected_qk,
+                q=self.q_proj_dim,
+                k=self.k_proj_dim,
+            )
+            return projected_q, projected_k, projected_v, projected_qk
 
         if key is value:
             q_weight, kv_weight = einx.id(
@@ -503,7 +520,7 @@ class MultiheadAttention(nn.Module):
                 k=self.k_proj_dim,
                 v=self.v_proj_dim,
             )
-            return projected_q, projected_k, projected_v
+            return projected_q, projected_k, projected_v, None
 
         q_weight, k_weight, v_weight = einx.id(
             "(q + k + v) input -> q input, k input, v input",
@@ -512,7 +529,106 @@ class MultiheadAttention(nn.Module):
             k=self.k_proj_dim,
             v=self.v_proj_dim,
         )
-        return F.linear(query, q_weight), F.linear(key, k_weight), F.linear(value, v_weight)
+        return F.linear(query, q_weight), F.linear(key, k_weight), F.linear(value, v_weight), None
+
+    def _split_heads(
+        self,
+        projected_q: torch.Tensor,
+        projected_k: torch.Tensor,
+        projected_v: torch.Tensor,
+        projected_qk: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        if self._layout_strategy == "head_before_sequence":
+            q_description = "batch... query (head d_k) -> batch... head query d_k"
+            k_description = "batch... key (head d_k) -> batch... head key d_k"
+            v_description = "batch... key (head d_v) -> batch... head key d_v"
+            qk_description = "batch... query (qk head d_k) -> qk batch... head query d_k"
+        else:
+            q_description = "batch... query (head d_k) -> batch... query head d_k"
+            k_description = "batch... key (head d_k) -> batch... key head d_k"
+            v_description = "batch... key (head d_v) -> batch... key head d_v"
+            qk_description = "batch... query (qk head d_k) -> qk batch... query head d_k"
+
+        qk = None
+        if projected_qk is not None:
+            qk = einx.id(
+                qk_description,
+                projected_qk,
+                qk=2,
+                head=self.num_heads,
+                d_k=self.qk_head_dim,
+            )
+            q, k = qk[0], qk[1]
+        else:
+            q = einx.id(
+                q_description,
+                projected_q,
+                head=self.num_heads,
+                d_k=self.qk_head_dim,
+            )
+            k = einx.id(
+                k_description,
+                projected_k,
+                head=self.num_heads,
+                d_k=self.qk_head_dim,
+            )
+        v = einx.id(
+            v_description,
+            projected_v,
+            head=self.num_heads,
+            d_v=self.value_head_dim,
+        )
+        return q, k, v, qk
+
+    def _apply_single_rope(self, x: torch.Tensor, token_positions: torch.Tensor | None) -> torch.Tensor:
+        assert self.rope is not None, "RoPE application requires a registered RotaryPositionalEmbedding"
+        selection = self.rope._select_rotations(
+            x,
+            token_positions,
+            broadcast_positions=True,
+            layout_strategy=self._layout_strategy,
+        )
+        return self.rope._apply_rotations(x, selection, layout_strategy=self._layout_strategy)
+
+    def _apply_rope(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        packed_qk: torch.Tensor | None,
+        query_positions: torch.Tensor | None,
+        key_positions: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert self.rope is not None, "Q/K RoPE application requires a registered RotaryPositionalEmbedding"
+        shared_positions = q.shape == k.shape and (
+            (query_positions is None and key_positions is None) or query_positions is key_positions
+        )
+        if not shared_positions:
+            if self._qk_execution_strategy == "stacked":
+                raise ValueError("stacked Q/K RoPE requires equal shapes and shared token positions")
+            return self._apply_single_rope(q, query_positions), self._apply_single_rope(k, key_positions)
+
+        positions = query_positions
+        if self._qk_execution_strategy == "auto" and packed_qk is not None:
+            selection = self.rope._select_rotations(
+                q,
+                positions,
+                broadcast_positions=True,
+                layout_strategy=self._layout_strategy,
+            )
+            selection = self.rope._prepend_selection_axis(selection, 2)
+            rotated_qk = self.rope._apply_rotations(
+                packed_qk,
+                selection,
+                layout_strategy=self._layout_strategy,
+            )
+            return rotated_qk[0], rotated_qk[1]
+        return self.rope.apply_qk(
+            q,
+            k,
+            positions,
+            _stacked=self._qk_execution_strategy == "stacked",
+            _layout_strategy=self._layout_strategy,
+        )
 
     def _validate_inputs(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> None:
         if query.shape[:-2] != key.shape[:-2] or key.shape[:-2] != value.shape[:-2]:
@@ -541,37 +657,18 @@ class MultiheadAttention(nn.Module):
         """Project Q/K/V, apply optional RoPE, attend, and project the result."""
         self._validate_inputs(query, key, value)
 
-        projected_q, projected_k, projected_v = self._in_projection(query, key, value)
-
-        # Heads follow the ordinary batch axes so RoPE can treat them as its position-broadcast suffix.
-        q = einx.id(
-            "batch... query (head d_k) -> batch... head query d_k",
-            projected_q,
-            head=self.num_heads,
-            d_k=self.qk_head_dim,
-        )
-        k = einx.id(
-            "batch... key (head d_k) -> batch... head key d_k",
-            projected_k,
-            head=self.num_heads,
-            d_k=self.qk_head_dim,
-        )
-        v = einx.id(
-            "batch... key (head d_v) -> batch... head key d_v",
-            projected_v,
-            head=self.num_heads,
-            d_v=self.value_head_dim,
-        )
+        projected_q, projected_k, projected_v, projected_qk = self._in_projection(query, key, value)
+        q, k, v, packed_qk = self._split_heads(projected_q, projected_k, projected_v, projected_qk)
 
         if self.rope is not None:
-            if query_positions is None:
-                query_positions = torch.arange(query.shape[-2], device=query.device)
-            if key_positions is None:
-                key_positions = torch.arange(key.shape[-2], device=key.device)
-            q = self.rope(q, query_positions)
-            k = self.rope(k, key_positions)
+            q, k = self._apply_rope(q, k, packed_qk, query_positions, key_positions)
 
-        attended = F.scaled_dot_product_attention(
+        attention = (
+            F.scaled_dot_product_attention
+            if self._layout_strategy == "head_before_sequence"
+            else F._scaled_dot_product_attention_head_after_sequence
+        )
+        attended = attention(
             q,
             k,
             v,
@@ -580,12 +677,20 @@ class MultiheadAttention(nn.Module):
             is_causal=is_causal,
             scale=self.qk_head_dim**-0.5,
         )
-        joined = einx.id(
-            "batch... head query d_v -> batch... query (head d_v)",
-            attended,
-            head=self.num_heads,
-            d_v=self.value_head_dim,
-        )
+        if self._layout_strategy == "head_before_sequence":
+            joined = einx.id(
+                "batch... head query d_v -> batch... query (head d_v)",
+                attended,
+                head=self.num_heads,
+                d_v=self.value_head_dim,
+            )
+        else:
+            joined = einx.id(
+                "batch... query head d_v -> batch... query (head d_v)",
+                attended,
+                head=self.num_heads,
+                d_v=self.value_head_dim,
+            )
         return self.output_proj(joined)
 
     def extra_repr(self) -> str:
@@ -593,7 +698,8 @@ class MultiheadAttention(nn.Module):
             f"embed_dim={self.embed_dim}, num_heads={self.num_heads}, "
             f"kdim={self.kdim}, vdim={self.vdim}, qk_head_dim={self.qk_head_dim}, "
             f"value_head_dim={self.value_head_dim}, dropout={self.dropout}, rope={self.rope is not None}, "
-            f"packed={self.in_proj_weight is not None}"
+            f"packed={self.in_proj_weight is not None}, layout={self._layout_strategy}, "
+            f"qk_execution={self._qk_execution_strategy}"
         )
 
     def load_state_dict(
@@ -703,6 +809,8 @@ class MultiheadSelfAttention(MultiheadAttention):
         rope: RotaryPositionalEmbedding | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
+        _layout_strategy: Literal["head_before_sequence", "head_after_sequence"] = "head_before_sequence",
+        _qk_execution_strategy: Literal["auto", "separate", "stacked"] = "auto",
     ) -> None: ...
 
     @overload
@@ -719,6 +827,8 @@ class MultiheadSelfAttention(MultiheadAttention):
         rope: RotaryPositionalEmbedding | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
+        _layout_strategy: Literal["head_before_sequence", "head_after_sequence"] = "head_before_sequence",
+        _qk_execution_strategy: Literal["auto", "separate", "stacked"] = "auto",
     ) -> None: ...
 
     def __init__(
@@ -735,6 +845,8 @@ class MultiheadSelfAttention(MultiheadAttention):
         rope: RotaryPositionalEmbedding | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
+        _layout_strategy: Literal["head_before_sequence", "head_after_sequence"] = "head_before_sequence",
+        _qk_execution_strategy: Literal["auto", "separate", "stacked"] = "auto",
     ) -> None:
         model_dim = self._coalesce_dimension_alias("d_model", d_model, "embed_dim", embed_dim)
         projected_qk_dim = self._coalesce_dimension_alias("d_k", d_k, "qk_head_dim", qk_head_dim)
@@ -755,6 +867,8 @@ class MultiheadSelfAttention(MultiheadAttention):
             rope=rope,
             device=device,
             dtype=dtype,
+            _layout_strategy=_layout_strategy,
+            _qk_execution_strategy=_qk_execution_strategy,
         )
 
     def forward(  # ty: ignore[invalid-method-override]

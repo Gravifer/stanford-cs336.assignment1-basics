@@ -180,6 +180,77 @@ def rms_norm(  # torch flavored
     return normed
 
 
+def _attention_weights(
+    scores: torch.Tensor,
+    seq_q: int,
+    seq_k: int,
+    mask: torch.Tensor | None,
+    dropout_p: float,
+    is_causal: bool | Literal["torch", "compose", "noclone"],
+    *,
+    attn_mask: torch.Tensor | None,
+    attn_bias: torch.Tensor | None,
+    enable_gqa: bool,
+) -> torch.Tensor:
+    """Apply mask composition, softmax, and dropout to precomputed scores."""
+    type _Mask = Bool[torch.Tensor, "*slew query_len key_len"]
+    type _Bias = Float[torch.Tensor, "*slew query_len key_len"]
+    type _MaskBias = MaskBias[torch.Tensor, "*slew query_len key_len"]  # ty:ignore[invalid-syntax-in-forward-annotation]
+    if sum(x is None for x in (mask, attn_mask, attn_bias)) < 2:
+        raise ValueError("Only one of `mask` `attn_mask` `attn_bias` should be provided.")
+    attn_bias: _MaskBias | None = attn_bias if attn_bias is not None else mask if mask is not None else attn_mask
+    if is_causal == "torch":
+        assert attn_bias is None, "torch's sdpa does not accept a mask with is_causal on; compose the mask yourself"
+    elif is_causal == "noclone":
+        assert attn_bias is None or attn_bias.dtype == torch.bool, (
+            f"{attn_bias.dtype} mask will need to be cloned to apply causal masking"
+        )
+    if attn_bias is not None:
+        assert attn_bias.shape[-2:] == (seq_q, seq_k), (
+            f"Mask shape must be compatible with query and key; expected ({seq_q}, {seq_k}), got {attn_bias.shape[-2:]}."
+        )
+
+    if attn_bias is not None:
+        if attn_bias.device != scores.device:
+            warnings.warn(
+                f"The mask is on device {attn_bias.device}, "
+                f"but attention scores are on device {scores.device}. "
+                "Moving the mask to the scores' device.",
+                stacklevel=2,
+            )
+            attn_bias: _MaskBias = attn_bias.to(device=scores.device)
+        if attn_bias.dtype != torch.bool:
+            attn_bias: _Bias = attn_bias.to(dtype=scores.dtype)
+
+    if is_causal:
+        query_positions = torch.arange(seq_q, device=scores.device).unsqueeze(-1)
+        key_positions = torch.arange(seq_k, device=scores.device).unsqueeze(0)
+        causal_mask: _Mask = key_positions <= query_positions
+        if attn_bias is None:
+            attn_bias: _Mask = causal_mask
+        elif attn_bias.dtype == torch.bool:
+            attn_bias: _Mask = attn_bias & causal_mask
+        else:
+            # Clone attn_bias to avoid mutating the caller's tensor
+            attn_bias: _Bias = attn_bias.clone().masked_fill_(~causal_mask, float("-inf"))
+
+    if enable_gqa:
+        # Grouped query attention: average the attention scores across the query dimension.
+        # scores = einx.mean("... q k -> ... k", scores)
+        ...  # TODO
+
+    if attn_bias is not None:
+        # Support both boolean masks and additive numeric biases.
+        if attn_bias.dtype == torch.bool:
+            scores = scores.masked_fill(~attn_bias, float("-inf"))
+        else:
+            scores += attn_bias
+    attn_weights = torch.softmax(scores, dim=-1)
+    if dropout_p > 0.0:
+        torch.dropout_(attn_weights, p=dropout_p, train=True)
+    return attn_weights
+
+
 def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled_dot_product_attention`
     query: Float[torch.Tensor, "*batch query_len d_k"],
     key: Float[torch.Tensor, "*batch key_len d_k"],
@@ -223,67 +294,50 @@ def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled
         f"Cannot determine d_k; queries are {query.shape[-1]}-D while keys are {key.shape[-1]}-D."
     )
     seq_q, seq_k, d_k = query.shape[-2], key.shape[-2], key.shape[-1]
-
-    type _Mask = Bool[torch.Tensor, "*slew query_len key_len"]
-    type _Bias = Float[torch.Tensor, "*slew query_len key_len"]
-    type _MaskBias = MaskBias[torch.Tensor, "*slew query_len key_len"]  # ty:ignore[invalid-syntax-in-forward-annotation]
-    if sum(x is None for x in (mask, attn_mask, attn_bias)) < 2:
-        raise ValueError("Only one of `mask` `attn_mask` `attn_bias` should be provided.")
-    attn_bias: _MaskBias | None = attn_bias if attn_bias is not None else mask if mask is not None else attn_mask
-    if is_causal == "torch":
-        assert attn_bias is None, "torch's sdpa does not accept a mask with is_causal on; compose the mask yourself"
-    elif is_causal == "noclone":
-        assert attn_bias is None or attn_bias.dtype == torch.bool, (
-            f"{attn_bias.dtype} mask will need to be cloned to apply causal masking"
-        )
-    if attn_bias is not None:
-        assert attn_bias.shape[-2:] == (seq_q, seq_k), (
-            f"Mask shape must be compatible with query and key; expected ({seq_q}, {seq_k}), got {attn_bias.shape[-2:]}."
-        )
-
-    scores: Float[torch.Tensor, "*batch query_len key_len"] = einx.dot(
-        "... q [d_k], ... k [d_k] -> ... q k", query, key
-    ) * (
-        1 / d_k**0.5 if scale is None else scale  # in convex relaxation terms, acts like a temperature
+    scores = einx.dot("... q [d_k], ... k [d_k] -> ... q k", query, key) * (1 / d_k**0.5 if scale is None else scale)
+    attn_weights = _attention_weights(
+        scores,
+        seq_q,
+        seq_k,
+        mask,
+        dropout_p,
+        is_causal,
+        attn_mask=attn_mask,
+        attn_bias=attn_bias,
+        enable_gqa=enable_gqa,
     )
+    return einx.dot("... q k, ... k d_v -> ... q d_v", attn_weights, value)
 
-    if attn_bias is not None:
-        if attn_bias.device != query.device:
-            warnings.warn(
-                f"The mask is on device {attn_bias.device}, "
-                f"but query is on device {query.device}. "
-                "Moving the mask to query's device.",
-                stacklevel=2,
-            )
-            attn_bias: _MaskBias = attn_bias.to(device=query.device)
-        if attn_bias.dtype != torch.bool:
-            attn_bias: _Bias = attn_bias.to(dtype=query.dtype)
 
-    if is_causal:
-        query_positions = torch.arange(seq_q, device=query.device).unsqueeze(-1)
-        key_positions = torch.arange(seq_k, device=query.device).unsqueeze(0)
-        causal_mask: _Mask = key_positions <= query_positions
-        if attn_bias is None:
-            attn_bias: _Mask = causal_mask
-        elif attn_bias.dtype == torch.bool:
-            attn_bias: _Mask = attn_bias & causal_mask
-        else:
-            # Clone attn_bias to avoid mutating the caller's tensor
-            attn_bias: _Bias = attn_bias.clone().masked_fill_(~causal_mask, float("-inf"))
-
-    if enable_gqa:
-        # Grouped query attention: average the attention scores across the query dimension.
-        # scores = einx.mean("... q k -> ... k", scores)
-        ...  # TODO
-
-    if attn_bias is not None:
-        # Support both boolean masks and additive numeric biases.
-        if attn_bias.dtype == torch.bool:
-            scores = scores.masked_fill(~attn_bias, float("-inf"))
-        else:
-            scores += attn_bias
-    attn_weights = torch.softmax(scores, dim=-1)
-    if dropout_p > 0.0:
-        torch.dropout_(attn_weights, p=dropout_p, train=True)
-    output = einx.dot("... q k, ... k d_v -> ... q d_v", attn_weights, value)
-    return output
+def _scaled_dot_product_attention_head_after_sequence(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    mask: torch.Tensor | None = None,
+    dropout_p: float = 0.0,
+    is_causal: bool | Literal["torch", "compose", "noclone"] = False,
+    scale: float | None = None,
+    *,
+    attn_mask: torch.Tensor | None = None,
+    attn_bias: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Internal SDPA for ``(*batch, sequence, head, feature)`` activations."""
+    assert query.shape[-1] == key.shape[-1], (
+        f"Cannot determine d_k; queries are {query.shape[-1]}-D while keys are {key.shape[-1]}-D."
+    )
+    seq_q, seq_k, d_k = query.shape[-3], key.shape[-3], key.shape[-1]
+    scores = einx.dot("... q head [d_k], ... k head [d_k] -> ... head q k", query, key) * (
+        1 / d_k**0.5 if scale is None else scale
+    )
+    attn_weights = _attention_weights(
+        scores,
+        seq_q,
+        seq_k,
+        mask,
+        dropout_p,
+        is_causal,
+        attn_mask=attn_mask,
+        attn_bias=attn_bias,
+        enable_gqa=False,
+    )
+    return einx.dot("... head q k, ... k head d_v -> ... q head d_v", attn_weights, value)

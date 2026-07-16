@@ -34,6 +34,15 @@ def check_self_attention_constructor_aliases() -> None:
         ),
         MultiheadSelfAttention,
     )
+    assert_type(
+        MultiheadSelfAttention(
+            8,
+            2,
+            _layout_strategy="head_after_sequence",
+            _qk_execution_strategy="stacked",
+        ),
+        MultiheadSelfAttention,
+    )
 
 
 def check_rope_execution_contracts() -> None:
