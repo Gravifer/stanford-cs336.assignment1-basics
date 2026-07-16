@@ -162,8 +162,10 @@ def test_rope_rejects_non_suffix_position_batch() -> None:
     x = torch.randn(3, 2, 4, 8)
     positions = torch.arange(4).expand(3, -1)
 
-    with pytest.raises(ValueError, match="not compatible"):
+    with pytest.raises(ValueError, match="not compatible") as exc_info:
         rope(x, positions)
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
 
 
 def test_rope_rejects_scalar_positions() -> None:

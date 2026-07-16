@@ -113,20 +113,22 @@ class RotaryPositionalEmbedding(nn.Module):
             raise ValueError("token_positions must include a sequence dimension")
 
         if broadcast_positions:
+            if token_positions.ndim >= x.ndim:
+                raise ValueError(
+                    f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
+                )
             suffix_start = -token_positions.ndim - 1
             target_shape = x.shape[suffix_start:-1]
-            if token_positions.ndim >= x.ndim or len(token_positions.shape) != len(target_shape):
+            if token_positions.shape[-1] != target_shape[-1]:
                 raise ValueError(
                     f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
                 )
-            if token_positions.shape[-1] != target_shape[-1] or any(
-                position_dim not in (1, target_dim)
-                for position_dim, target_dim in zip(token_positions.shape[:-1], target_shape[:-1])
-            ):
+            try:
+                token_positions = token_positions.expand(target_shape)
+            except RuntimeError as error:
                 raise ValueError(
                     f"token_positions shape {token_positions.shape} is not compatible with x shape {x.shape}"
-                )
-            token_positions = token_positions.expand(target_shape)
+                ) from error
             mapped: tuple[int, ...] = tuple(x.shape[:suffix_start])
             slew: tuple[int, ...] = tuple(target_shape[:-1])
         elif token_positions.ndim != x.ndim - 1 or token_positions.shape != x.shape[:-1]:
