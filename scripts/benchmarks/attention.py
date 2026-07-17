@@ -13,6 +13,7 @@ import sys
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal
 
 import torch
@@ -22,11 +23,13 @@ from cs336_basics.nn.attention import MultiheadSelfAttention, RotaryPositionalEm
 type Layout = Literal["head_before_sequence", "head_after_sequence"]
 type QKStrategy = Literal["auto", "separate", "stacked"]
 type PositionKind = Literal["sequence", "singleton_head", "per_head"]
+type TensorOutput = torch.Tensor | tuple[torch.Tensor, torch.Tensor]
 
 
 @dataclass(frozen=True)
 class Result:
     case: str
+    execution: str
     milliseconds: float
     peak_megabytes: float | None
     strides: str
@@ -102,10 +105,17 @@ def _sync(device: torch.device) -> None:
         torch.cuda.synchronize(device)
 
 
-def _compiled(function: Callable[..., torch.Tensor | tuple[torch.Tensor, torch.Tensor]], mode: str) -> Callable:
+def _compiled[**P, R: TensorOutput](function: Callable[P, R], mode: str) -> Callable[P, R]:
     if mode == "none":
         return function
+    torch.compiler.reset()
     return torch.compile(function, mode=mode)
+
+
+def _execution_modes(mode: str) -> tuple[tuple[str, str], ...]:
+    if mode == "none":
+        return (("eager", "none"),)
+    return (("eager", "none"), (f"compiled ({mode})", mode))
 
 
 def _time(
@@ -156,17 +166,13 @@ def _assert_parity(
 
 
 def _rope_evaluation(
-    rope: RotaryPositionalEmbedding,
+    operation: Callable[[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]],
     query: torch.Tensor,
     key: torch.Tensor,
-    positions: torch.Tensor,
-    *,
-    stacked: bool,
-    layout: Layout,
 ) -> tuple[torch.Tensor, ...]:
     q = query.detach().clone().requires_grad_()
     k = key.detach().clone().requires_grad_()
-    output = rope.apply_qk(q, k, positions, _stacked=stacked, _layout_strategy=layout)
+    output = operation(q, k)
     loss = output[0].square().mean() + output[1].square().mean()
     gradients = torch.autograd.grad(loss, (q, k))
     return output[0].detach(), output[1].detach(), gradients[0], gradients[1]
@@ -201,13 +207,16 @@ def _run_rope(args: argparse.Namespace, device: torch.device, dtype: torch.dtype
                 ).to(dtype=dtype)
                 for strategy in ("separate", "stacked"):
                     stacked = strategy == "stacked"
+                    operation = partial(
+                        rope.apply_qk,
+                        token_positions=positions,
+                        _stacked=stacked,
+                        _layout_strategy=layout,
+                    )
                     evaluation = _rope_evaluation(
-                        rope,
+                        operation,
                         query,
                         key,
-                        positions,
-                        stacked=stacked,
-                        layout=layout,
                     )
                     key_name = (layout, position_kind)
                     if key_name not in baseline:
@@ -215,47 +224,43 @@ def _run_rope(args: argparse.Namespace, device: torch.device, dtype: torch.dtype
                     else:
                         _assert_parity(evaluation, baseline[key_name], dtype)
 
-                    q = query.detach().clone().requires_grad_(args.backward)
-                    k = key.detach().clone().requires_grad_(args.backward)
-                    run = _compiled(
-                        lambda: rope.apply_qk(
-                            q,
-                            k,
-                            positions,
-                            _stacked=stacked,
-                            _layout_strategy=layout,
-                        ),
-                        args.compile_mode,
-                    )
-                    milliseconds, peak = _time(
-                        run,
-                        (q, k),
-                        rope,
-                        backward=args.backward,
-                        warmup=args.warmup,
-                        repeats=args.repeats,
-                        device=device,
-                    )
-                    results.append(
-                        Result(
-                            f"{'matrix' if matrix_form else 'elementwise'}/"
-                            f"{'zero-copy-packed' if strategy == 'auto' else strategy}/{position_kind}/{layout}",
-                            milliseconds,
-                            peak,
-                            str(query.stride()),
-                            str(query.is_contiguous()),
+                    for execution, compile_mode in _execution_modes(args.compile_mode):
+                        executable = _compiled(operation, compile_mode)
+                        _assert_parity(_rope_evaluation(executable, query, key), evaluation, dtype)
+
+                        q = query.detach().clone().requires_grad_(args.backward)
+                        k = key.detach().clone().requires_grad_(args.backward)
+                        run = partial(executable, q, k)
+                        milliseconds, peak = _time(
+                            run,
+                            (q, k),
+                            rope,
+                            backward=args.backward,
+                            warmup=args.warmup,
+                            repeats=args.repeats,
+                            device=device,
                         )
-                    )
+                        results.append(
+                            Result(
+                                f"{'matrix' if matrix_form else 'elementwise'}/"
+                                f"{'zero-copy-packed' if strategy == 'auto' else strategy}/{position_kind}/{layout}",
+                                execution,
+                                milliseconds,
+                                peak,
+                                str(query.stride()),
+                                str(query.is_contiguous()),
+                            )
+                        )
     return results
 
 
 def _mha_evaluation(
     module: MultiheadSelfAttention,
+    operation: Callable[[torch.Tensor], torch.Tensor],
     x: torch.Tensor,
-    positions: torch.Tensor,
 ) -> tuple[torch.Tensor, ...]:
     input_ = x.detach().clone().requires_grad_()
-    output = module(input_, token_positions=positions)
+    output = operation(input_)
     gradients = torch.autograd.grad(output.square().mean(), (input_, *module.parameters()))
     return output.detach(), *(gradient.detach() for gradient in gradients)
 
@@ -297,35 +302,41 @@ def _run_mha(args: argparse.Namespace, device: torch.device, dtype: torch.dtype)
                         _qk_execution_strategy=strategy,
                     )
                     module.load_state_dict(reference_state)
-                    evaluation = _mha_evaluation(module, x_template, positions)
+                    operation = partial(module, token_positions=positions)
+                    evaluation = _mha_evaluation(module, operation, x_template)
                     if position_kind not in baseline:
                         baseline[position_kind] = evaluation
                     else:
                         _assert_parity(evaluation, baseline[position_kind], dtype)
 
-                    x = x_template.detach().clone().requires_grad_(args.backward)
-                    run = _compiled(lambda: module(x, token_positions=positions), args.compile_mode)
-                    projected = module._in_projection(x, x, x)
+                    projected = module._in_projection(x_template, x_template, x_template)
                     q, _, _, _ = module._split_heads(*projected)
-                    milliseconds, peak = _time(
-                        run,
-                        (x,),
-                        module,
-                        backward=args.backward,
-                        warmup=args.warmup,
-                        repeats=args.repeats,
-                        device=device,
-                    )
-                    results.append(
-                        Result(
-                            f"{'matrix' if matrix_form else 'elementwise'}/"
-                            f"{'zero-copy-packed' if strategy == 'auto' else strategy}/{position_kind}/{layout}",
-                            milliseconds,
-                            peak,
-                            str(q.stride()),
-                            str(q.is_contiguous()),
+                    for execution, compile_mode in _execution_modes(args.compile_mode):
+                        executable = _compiled(operation, compile_mode)
+                        _assert_parity(_mha_evaluation(module, executable, x_template), evaluation, dtype)
+
+                        x = x_template.detach().clone().requires_grad_(args.backward)
+                        run = partial(executable, x)
+                        milliseconds, peak = _time(
+                            run,
+                            (x,),
+                            module,
+                            backward=args.backward,
+                            warmup=args.warmup,
+                            repeats=args.repeats,
+                            device=device,
                         )
-                    )
+                        results.append(
+                            Result(
+                                f"{'matrix' if matrix_form else 'elementwise'}/"
+                                f"{'zero-copy-packed' if strategy == 'auto' else strategy}/{position_kind}/{layout}",
+                                execution,
+                                milliseconds,
+                                peak,
+                                str(q.stride()),
+                                str(q.is_contiguous()),
+                            )
+                        )
     return results
 
 
@@ -344,11 +355,14 @@ def _print_metadata(args: argparse.Namespace, device: torch.device, dtype: torch
 
 def _print_results(results: list[Result]) -> None:
     print()
-    print("| case | ms | peak MiB | strides | contiguous |")
-    print("|---|---:|---:|---|---|")
+    print("| case | execution | ms | peak MiB | strides | contiguous |")
+    print("|---|---|---:|---:|---|---|")
     for result in results:
         peak = "n/a" if result.peak_megabytes is None else f"{result.peak_megabytes:.1f}"
-        print(f"| {result.case} | {result.milliseconds:.3f} | {peak} | `{result.strides}` | {result.contiguous} |")
+        print(
+            f"| {result.case} | {result.execution} | {result.milliseconds:.3f} | "
+            f"{peak} | `{result.strides}` | {result.contiguous} |"
+        )
 
 
 def main() -> None:
