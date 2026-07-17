@@ -12,36 +12,43 @@ def make_tensors():
     return q, k, v
 
 
+def make_uniform_score_tensors():
+    q = torch.zeros(1, 4, 1)
+    k = torch.zeros(1, 4, 1)
+    v = torch.tensor([[[1.0], [2.0], [4.0], [8.0]]])
+    return q, k, v
+
+
 def test_boolean_mask():
-    q, k, v = make_tensors()
+    q, k, v = make_uniform_score_tensors()
     bool_mask = torch.tril(torch.ones(4, 4, dtype=torch.bool))
     out = scaled_dot_product_attention(q, k, v, mask=bool_mask, dropout_p=0.0, is_causal=False)
-    assert out.shape == (1, 4, 8)
+    torch.testing.assert_close(out.squeeze(), torch.tensor([1.0, 1.5, 7 / 3, 15 / 4]))
 
 
 def test_numeric_mask():
-    q, k, v = make_tensors()
+    q, k, v = make_uniform_score_tensors()
     bool_mask = torch.tril(torch.ones(4, 4, dtype=torch.bool))
     num_mask = torch.zeros(4, 4)
     num_mask[~bool_mask] = float("-inf")
     out = scaled_dot_product_attention(q, k, v, mask=num_mask, dropout_p=0.0, is_causal=False)
-    assert out.shape == (1, 4, 8)
+    torch.testing.assert_close(out.squeeze(), torch.tensor([1.0, 1.5, 7 / 3, 15 / 4]))
 
 
 def test_compose_with_boolean_mask():
-    q, k, v = make_tensors()
+    q, k, v = make_uniform_score_tensors()
     mask2 = torch.ones(4, 4, dtype=torch.bool)
-    mask2[0, 3] = False
+    mask2[3, 0] = False
     out = scaled_dot_product_attention(q, k, v, mask=mask2, dropout_p=0.0, is_causal="compose")
-    assert out.shape == (1, 4, 8)
+    torch.testing.assert_close(out.squeeze(), torch.tensor([1.0, 1.5, 7 / 3, 14 / 3]))
 
 
 def test_compose_with_numeric_mask():
-    q, k, v = make_tensors()
+    q, k, v = make_uniform_score_tensors()
     num_mask2 = torch.zeros(4, 4)
-    num_mask2[0, 3] = float("-inf")
+    num_mask2[3, 0] = float("-inf")
     out = scaled_dot_product_attention(q, k, v, mask=num_mask2, dropout_p=0.0, is_causal="compose")
-    assert out.shape == (1, 4, 8)
+    torch.testing.assert_close(out.squeeze(), torch.tensor([1.0, 1.5, 7 / 3, 14 / 3]))
 
 
 def test_broadcast_mask_suffix():
@@ -52,7 +59,11 @@ def test_broadcast_mask_suffix():
     v = torch.randn(2, 4, 8)
     mask = torch.tril(torch.ones(1, 4, 4, dtype=torch.bool))
     out = scaled_dot_product_attention(q, k, v, mask=mask, dropout_p=0.0, is_causal=False)
-    assert out.shape == (2, 4, 8)
+    for batch_index in range(2):
+        expected = scaled_dot_product_attention(
+            q[batch_index], k[batch_index], v[batch_index], mask=mask[0], dropout_p=0.0
+        )
+        torch.testing.assert_close(out[batch_index], expected)
 
 
 def test_mask_matches_batch():
@@ -61,9 +72,18 @@ def test_mask_matches_batch():
     q = torch.randn(2, 4, 8)
     k = torch.randn(2, 4, 8)
     v = torch.randn(2, 4, 8)
-    mask = torch.stack([torch.tril(torch.ones(4, 4, dtype=torch.bool)) for _ in range(2)], dim=0)
+    mask = torch.stack(
+        [
+            torch.tril(torch.ones(4, 4, dtype=torch.bool)),
+            torch.triu(torch.ones(4, 4, dtype=torch.bool)),
+        ]
+    )
     out = scaled_dot_product_attention(q, k, v, mask=mask, dropout_p=0.0, is_causal=False)
-    assert out.shape == (2, 4, 8)
+    for batch_index in range(2):
+        expected = scaled_dot_product_attention(
+            q[batch_index], k[batch_index], v[batch_index], mask=mask[batch_index], dropout_p=0.0
+        )
+        torch.testing.assert_close(out[batch_index], expected)
 
 
 def test_attn_bias_alias_and_dtype_promotion():
@@ -73,8 +93,8 @@ def test_attn_bias_alias_and_dtype_promotion():
     bias[0, 3] = float("-inf")
     out1 = scaled_dot_product_attention(q, k, v, attn_bias=bias, dropout_p=0.0, is_causal=False)
     out2 = scaled_dot_product_attention(q, k, v, mask=bias, dropout_p=0.0, is_causal=False)
-    assert out1.shape == (1, 4, 8)
-    assert out2.shape == (1, 4, 8)
+    torch.testing.assert_close(out1, out2)
+    assert out1.dtype == q.dtype
 
 
 @pytest.mark.parametrize("query_len,key_len", [(4, 4), (3, 5), (5, 3)])
