@@ -187,17 +187,6 @@ class RotaryPositionalEmbedding(nn.Module):
         assert self.sin is not None, "elementwise RoPE must own a sine cache"
         return select(self.cos), select(self.sin)
 
-    @staticmethod
-    def _selection_to_physical_layout(
-        selection: torch.Tensor,
-        *,
-        cache_ndim: int,
-        layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
-    ) -> torch.Tensor:
-        if layout_strategy == "head_before_sequence":
-            return selection
-        return selection.transpose(-cache_ndim - 2, -cache_ndim - 1)
-
     def _apply_rotations(
         self,
         x: torch.Tensor,
@@ -213,10 +202,15 @@ class RotaryPositionalEmbedding(nn.Module):
         x_split = einx.id("... (d_pair p) -> ... d_pair p", x.to(op_dtype), d_pair=self.d_pair, p=2)
 
         if isinstance(selection, torch.Tensor):
-            rot = self._selection_to_physical_layout(
-                selection,
-                cache_ndim=3,
-                layout_strategy=layout_strategy,
+            rot = (
+                selection
+                if layout_strategy == "head_before_sequence"
+                else einx.id(
+                    "mapped... head sequence trailing... -> mapped... sequence head trailing...",
+                    selection,
+                    mapped=tuple(x.shape[:-3]),
+                    trailing=(self.d_pair, 2, 2),
+                )
             ).to(op_dtype)
             x_split_rotated = einx.dot(
                 "... d_pair [row], ... d_pair col [row] -> ... d_pair col",
@@ -228,7 +222,16 @@ class RotaryPositionalEmbedding(nn.Module):
             )
         else:
             cos, sin = (
-                self._selection_to_physical_layout(part, cache_ndim=1, layout_strategy=layout_strategy).to(op_dtype)
+                (
+                    part
+                    if layout_strategy == "head_before_sequence"
+                    else einx.id(
+                        "mapped... head sequence trailing... -> mapped... sequence head trailing...",
+                        part,
+                        mapped=tuple(x.shape[:-3]),
+                        trailing=(self.d_pair,),
+                    )
+                ).to(op_dtype)
                 for part in selection
             )
             x_even, x_odd = x_split[..., 0], x_split[..., 1]
