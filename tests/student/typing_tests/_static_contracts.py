@@ -54,3 +54,27 @@ def check_rope_execution_contracts() -> None:
     key = torch.randn(2, 3, 4, 8)
     assert_type(rope.forward(query, torch.arange(4)), torch.Tensor)
     assert_type(rope.apply_qk(query, key), tuple[torch.Tensor, torch.Tensor])
+
+
+def check_attention_position_layout_aliases() -> None:
+    attention = MultiheadAttention(8, 2)
+    self_attention = MultiheadSelfAttention(8, 2)
+    x = torch.randn(2, 4, 8)
+    positions = torch.arange(4).expand(2, -1)
+    assert_type(
+        attention.forward(x, x, x, query_positions=positions, key_positions=positions, position_layout="batch"),
+        torch.Tensor,
+    )
+    assert_type(
+        attention.forward(
+            x,
+            x,
+            x,
+            query_positions=positions,
+            key_positions=positions,
+            query_position_layout="batch",
+            key_position_layout="head",
+        ),
+        torch.Tensor,
+    )
+    assert_type(self_attention.forward(x, token_positions=positions, position_layout="batch"), torch.Tensor)

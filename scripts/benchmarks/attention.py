@@ -303,7 +303,7 @@ def _run_mha(args: argparse.Namespace, device: torch.device, dtype: torch.dtype)
                         _qk_execution_strategy=strategy,
                     )
                     module.load_state_dict(reference_state)
-                    operation = partial(module, token_positions=positions)
+                    operation = partial(module, token_positions=positions, position_layout="head")
                     evaluation = _mha_evaluation(module, operation, x_template)
                     if position_kind not in baseline:
                         baseline[position_kind] = evaluation

@@ -16,6 +16,9 @@ from .. import initializer as init
 from ..modules import Linear
 
 
+type _PositionLayout = Literal["batch", "head"]
+
+
 class RotaryPositionalEmbedding(nn.Module):
     """RoPE for attention, with cached rotation data.
 
@@ -670,8 +673,49 @@ class MultiheadAttention(nn.Module):
         )
         return q, k, v, qk
 
-    def _apply_single_rope(self, x: torch.Tensor, token_positions: torch.Tensor | None) -> torch.Tensor:
+    def _prepare_rope_positions(
+        self,
+        x: torch.Tensor,
+        token_positions: torch.Tensor | None,
+        position_layout: _PositionLayout,
+    ) -> torch.Tensor | None:
+        if token_positions is None or position_layout == "head":
+            return token_positions
+
+        if token_positions.ndim == 0:
+            raise ValueError("token_positions must include a sequence dimension")
+        if self._layout_strategy == "head_before_sequence":
+            batch_sequence_shape = (*x.shape[:-3], x.shape[-2])
+        else:
+            batch_sequence_shape = (*x.shape[:-3], x.shape[-3])
+        if token_positions.ndim > len(batch_sequence_shape):
+            raise ValueError(
+                f"batch-aligned token_positions shape {token_positions.shape} "
+                f"is not compatible with batch/sequence shape {batch_sequence_shape}"
+            )
+        suffix_shape = batch_sequence_shape[-token_positions.ndim :]
+        if token_positions.shape[-1] != suffix_shape[-1]:
+            raise ValueError(
+                f"batch-aligned token_positions shape {token_positions.shape} "
+                f"is not compatible with batch/sequence shape {batch_sequence_shape}"
+            )
+        try:
+            token_positions.expand(suffix_shape)
+        except RuntimeError as error:
+            raise ValueError(
+                f"batch-aligned token_positions shape {token_positions.shape} "
+                f"is not compatible with batch/sequence shape {batch_sequence_shape}"
+            ) from error
+        return einx.id("batch... sequence -> batch... 1 sequence", token_positions)
+
+    def _apply_single_rope(
+        self,
+        x: torch.Tensor,
+        token_positions: torch.Tensor | None,
+        position_layout: _PositionLayout,
+    ) -> torch.Tensor:
         assert self.rope is not None, "RoPE application requires a registered RotaryPositionalEmbedding"
+        token_positions = self._prepare_rope_positions(x, token_positions, position_layout)
         selection = self.rope._select_rotations(
             x,
             token_positions,
@@ -687,17 +731,23 @@ class MultiheadAttention(nn.Module):
         packed_qk: torch.Tensor | None,
         query_positions: torch.Tensor | None,
         key_positions: torch.Tensor | None,
+        query_position_layout: _PositionLayout,
+        key_position_layout: _PositionLayout,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         assert self.rope is not None, "Q/K RoPE application requires a registered RotaryPositionalEmbedding"
         shared_positions = q.shape == k.shape and (
-            (query_positions is None and key_positions is None) or query_positions is key_positions
+            (query_positions is None and key_positions is None)
+            or (query_positions is key_positions and query_position_layout == key_position_layout)
         )
         if not shared_positions:
             if self._qk_execution_strategy == "stacked":
                 raise ValueError("stacked Q/K RoPE requires equal shapes and shared token positions")
-            return self._apply_single_rope(q, query_positions), self._apply_single_rope(k, key_positions)
+            return (
+                self._apply_single_rope(q, query_positions, query_position_layout),
+                self._apply_single_rope(k, key_positions, key_position_layout),
+            )
 
-        positions = query_positions
+        positions = self._prepare_rope_positions(q, query_positions, query_position_layout)
         if self._qk_execution_strategy == "auto" and packed_qk is not None:
             selection = self.rope._select_rotations(
                 q,
@@ -733,6 +783,29 @@ class MultiheadAttention(nn.Module):
         if actual_widths != expected_widths:
             raise ValueError(f"expected query/key/value widths {expected_widths}, got {actual_widths}")
 
+    @staticmethod
+    def _resolve_position_layouts(
+        position_layout: _PositionLayout | None,
+        query_position_layout: _PositionLayout | None,
+        key_position_layout: _PositionLayout | None,
+    ) -> tuple[_PositionLayout, _PositionLayout]:
+        if position_layout is not None and (query_position_layout is not None or key_position_layout is not None):
+            raise ValueError(
+                "position_layout is mutually exclusive with query_position_layout and key_position_layout"
+            )
+        valid_layouts = ("batch", "head")
+        for name, layout in (
+            ("position_layout", position_layout),
+            ("query_position_layout", query_position_layout),
+            ("key_position_layout", key_position_layout),
+        ):
+            if layout is not None and layout not in valid_layouts:
+                raise ValueError(f"{name} must be 'batch' or 'head', got {layout!r}")
+        if position_layout is not None:
+            return position_layout, position_layout
+        return query_position_layout or "batch", key_position_layout or "batch"
+
+    @overload
     def forward(
         self,
         query: Shaped[QueryVec, "*batch query_len"],
@@ -743,15 +816,69 @@ class MultiheadAttention(nn.Module):
         is_causal: bool = False,
         query_positions: Int[torch.Tensor, "*query_position_batch query_len"] | None = None,
         key_positions: Int[torch.Tensor, "*key_position_batch key_len"] | None = None,
+        position_layout: _PositionLayout,
+        query_position_layout: None = None,
+        key_position_layout: None = None,
+    ) -> Shaped[OutputVec, "*batch query_len"]: ...
+
+    @overload
+    def forward(
+        self,
+        query: Shaped[QueryVec, "*batch query_len"],
+        key: Shaped[KeyVec, "*batch key_len"],
+        value: Shaped[ValueVec, "*batch key_len"],
+        mask: MaskBias[torch.Tensor, "*slew query_len key_len"] | None = None,  # ty: ignore[invalid-syntax-in-forward-annotation]
+        *,
+        is_causal: bool = False,
+        query_positions: Int[torch.Tensor, "*query_position_batch query_len"] | None = None,
+        key_positions: Int[torch.Tensor, "*key_position_batch key_len"] | None = None,
+        position_layout: None = None,
+        query_position_layout: _PositionLayout | None = None,
+        key_position_layout: _PositionLayout | None = None,
+    ) -> Shaped[OutputVec, "*batch query_len"]: ...
+
+    def forward(
+        self,
+        query: Shaped[QueryVec, "*batch query_len"],
+        key: Shaped[KeyVec, "*batch key_len"],
+        value: Shaped[ValueVec, "*batch key_len"],
+        mask: MaskBias[torch.Tensor, "*slew query_len key_len"] | None = None,  # ty: ignore[invalid-syntax-in-forward-annotation]
+        *,
+        is_causal: bool = False,
+        query_positions: Int[torch.Tensor, "*query_position_batch query_len"] | None = None,
+        key_positions: Int[torch.Tensor, "*key_position_batch key_len"] | None = None,
+        position_layout: _PositionLayout | None = None,
+        query_position_layout: _PositionLayout | None = None,
+        key_position_layout: _PositionLayout | None = None,
     ) -> Shaped[OutputVec, "*batch query_len"]:
-        """Project Q/K/V, apply optional RoPE, attend, and project the result."""
+        """Project Q/K/V, apply optional RoPE, attend, and project the result.
+
+        Position tensors are batch-aligned by default. Use ``position_layout``
+        to set one interpretation for Q and K, or the mutually exclusive
+        ``query_position_layout`` and ``key_position_layout`` controls to set
+        them independently. ``"head"`` preserves explicit head-dependent
+        position axes.
+        """
         self._validate_inputs(query, key, value)
+        resolved_query_layout, resolved_key_layout = self._resolve_position_layouts(
+            position_layout,
+            query_position_layout,
+            key_position_layout,
+        )
 
         projected_q, projected_k, projected_v, projected_qk = self._in_projection(query, key, value)
         q, k, v, packed_qk = self._split_heads(projected_q, projected_k, projected_v, projected_qk)
 
         if self.rope is not None:
-            q, k = self._apply_rope(q, k, packed_qk, query_positions, key_positions)
+            q, k = self._apply_rope(
+                q,
+                k,
+                packed_qk,
+                query_positions,
+                key_positions,
+                resolved_query_layout,
+                resolved_key_layout,
+            )
 
         if self.num_heads == self.num_kv_heads:
             attention = (
@@ -1025,6 +1152,7 @@ class MultiheadSelfAttention(MultiheadAttention):
         *,
         token_positions: Int[torch.Tensor, "*position_batch sequence"] | None = None,
         is_causal: bool = True,
+        position_layout: _PositionLayout = "batch",
     ) -> Shaped[ModelVec, "*batch sequence"]:
         """Apply self-attention with shared Q/K/V inputs and positions."""
         return super().forward(
@@ -1035,4 +1163,5 @@ class MultiheadSelfAttention(MultiheadAttention):
             is_causal=is_causal,
             query_positions=token_positions,
             key_positions=token_positions,
+            position_layout=position_layout,
         )

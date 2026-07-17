@@ -143,7 +143,7 @@ These interfaces are evidence for preserving compatible producer layouts, not fo
 
 ## Q/K reuse and RoPE
 
-RoPE applies to Q and K, never V. The same frequency basis is used for every head by default, while the position tensor may still contain a non-singleton head axis and thereby select different positions for different heads. A singleton head axis is also accepted because it appears in the course tests.
+RoPE applies to Q and K, never V. The same frequency basis is used for every head by default. At the attention-module boundary, position tensors are batch-aligned by default because the public inputs have shape $(*\text{batch},S,D)$. An explicit head layout permits a non-singleton head axis and thereby selects different positions for different heads. Direct use of `RotaryPositionalEmbedding` retains its general suffix-broadcasting contract. A singleton head axis is also accepted because it appears in the course tests.
 
 Two mathematically equivalent cache representations are implemented:
 
@@ -158,7 +158,7 @@ $$
 
 or separate cached values $(\cos\theta_{p,j},\sin\theta_{p,j})$. The matrix cache stores four scalars per position-frequency pair; the cosine/sine cache stores two. The matrix cache is therefore exactly twice the size of the paired elementwise cache.
 
-Explicit token positions are validated by attempting suffix expansion. Cache gathering nevertheless uses the original index shape. A position tensor shaped $(1,S)$ therefore gathers one head-independent selection and expands it afterward as a zero-stride view, rather than gathering $H$ duplicate cache blocks. Non-singleton batch or head indices remain distinct. When positions are omitted for self-attention, consecutive zero-based positions use a cache slice and avoid index gathering altogether.
+Explicit token positions are validated by attempting suffix expansion. Batch-aligned attention positions receive a singleton head axis as a view before cache selection; explicitly head-aligned positions already contain that axis. Cache gathering nevertheless uses the original singleton dimensions. A position tensor shaped $(1,S)$ therefore gathers one head-independent selection and expands it afterward as a zero-stride view, rather than gathering $H$ duplicate cache blocks. Non-singleton batch or explicitly requested head indices remain distinct. When positions are omitted for self-attention, consecutive zero-based positions use a cache slice and avoid index gathering altogether.
 
 Q and K share positional selection whenever their shapes and positions permit it. Three execution modes expose the remaining distinction:
 

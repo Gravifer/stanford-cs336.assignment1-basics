@@ -169,7 +169,7 @@ These APIs serve different abstraction boundaries. The presence or absence of a 
 
 RoPE still applies to Q and K and never to V. Q and K have the same per-head feature width but different head counts under GQA, so they cannot use the equal-shaped packed-QK rotation view.
 
-Packed self-projection remains active, but it exposes combined QK rotation metadata only for ordinary MHA. GQA and MQA use the existing separate Q/K RoPE path. Inferred consecutive positions, singleton-broadcast positions, and distinct cross-attention query/key positions retain their previous semantics. The private forced-stacking benchmark strategy rejects unequal Q/K shapes.
+Packed self-projection remains active, but it exposes combined QK rotation metadata only for ordinary MHA. GQA and MQA use the existing separate Q/K RoPE path. Attention positions are batch-aligned by default, while an explicit head layout preserves head-dependent selection. Generic cross-attention may choose the query and key interpretations independently; self-attention uses one shared interpretation. The private forced-stacking benchmark strategy rejects unequal Q/K shapes.
 
 Separate application may select equivalent cache data twice when Q and K share positions. Removing that duplication would require generalizing shared positional selection across unequal target head shapes, especially for head-dependent position tensors. It is an independent optimization rather than part of the logical GQA contract.
 

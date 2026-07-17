@@ -104,6 +104,97 @@ def test_rope_infers_positions_and_broadcasts_over_heads(monkeypatch: pytest.Mon
     assert observed_shapes == [expected_shapes, expected_shapes]
 
 
+@pytest.mark.parametrize("batch_size,num_heads", [(2, 3), (3, 3)])
+@pytest.mark.parametrize("layout", ["head_before_sequence", "head_after_sequence"])
+def test_self_attention_defaults_to_per_example_positions(
+    batch_size: int,
+    num_heads: int,
+    layout: Literal["head_before_sequence", "head_after_sequence"],
+) -> None:
+    torch.manual_seed(20)
+    sequence_length = 4
+    module = MultiheadSelfAttention(
+        12,
+        num_heads,
+        rope=RotaryPositionalEmbedding(10_000.0, 12 // num_heads, 32),
+        _layout_strategy=layout,
+    )
+    x = torch.randn(batch_size, sequence_length, 12)
+    positions = torch.stack(
+        [torch.arange(sequence_length) + index * sequence_length for index in range(batch_size)]
+    )
+
+    actual = module(x, token_positions=positions, is_causal=False)
+    expected = torch.stack(
+        [
+            module(x[index], token_positions=positions[index], is_causal=False)
+            for index in range(batch_size)
+        ]
+    )
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_batch_aligned_positions_suffix_broadcast_over_leading_batch_axes() -> None:
+    module = MultiheadSelfAttention(
+        8,
+        4,
+        rope=RotaryPositionalEmbedding(10_000.0, 2, 32),
+    )
+    x = torch.randn(2, 3, 5, 8)
+    positions = torch.stack((torch.arange(5), torch.arange(5) + 5, torch.arange(5) + 10))
+
+    actual = module(x, token_positions=positions, is_causal=False)
+    expected = torch.stack(
+        [module(x[index], token_positions=positions, is_causal=False) for index in range(x.shape[0])]
+    )
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_cross_attention_accepts_independent_position_layouts_and_combined_alias() -> None:
+    module = MultiheadAttention(
+        8,
+        4,
+        num_kv_heads=2,
+        rope=RotaryPositionalEmbedding(10_000.0, 2, 32),
+    )
+    query = torch.randn(2, 4, 8)
+    key = torch.randn(2, 6, 8)
+    value = torch.randn(2, 6, 8)
+    query_positions = torch.stack((torch.arange(4), torch.arange(4) + 4))
+    key_positions = torch.stack((torch.arange(6), torch.arange(6).flip(0)))
+
+    actual = module(
+        query,
+        key,
+        value,
+        query_positions=query_positions,
+        key_positions=key_positions,
+        query_position_layout="batch",
+        key_position_layout="head",
+    )
+    expected = module(
+        query,
+        key,
+        value,
+        query_positions=query_positions.unsqueeze(-2),
+        key_positions=key_positions,
+        position_layout="head",
+    )
+
+    torch.testing.assert_close(actual, expected)
+
+
+@pytest.mark.parametrize("separate_name", ["query_position_layout", "key_position_layout"])
+def test_position_layout_alias_rejects_separate_controls(separate_name: str) -> None:
+    module = MultiheadAttention(8, 2)
+    x = torch.randn(2, 4, 8)
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        module(x, x, x, position_layout="batch", **{separate_name: "head"})
+
+
 def test_self_attention_is_causal_by_default() -> None:
     torch.manual_seed(3)
     module = MultiheadSelfAttention(d_model=8, num_heads=2)
@@ -526,8 +617,8 @@ def test_packed_self_attention_layouts_match_with_head_dependent_positions_and_g
     mask = torch.ones(3, 5, 5, dtype=torch.bool)
     mask[:, :, -1] = False
 
-    output_before = before(x_before, mask, token_positions=positions, is_causal=False)
-    output_after = after(x_after, mask, token_positions=positions, is_causal=False)
+    output_before = before(x_before, mask, token_positions=positions, is_causal=False, position_layout="head")
+    output_after = after(x_after, mask, token_positions=positions, is_causal=False, position_layout="head")
     torch.testing.assert_close(output_before, output_after)
 
     output_before.square().sum().backward()

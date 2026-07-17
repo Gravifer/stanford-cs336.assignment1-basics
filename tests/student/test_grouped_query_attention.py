@@ -19,11 +19,21 @@ def _expanded_kv_reference(
     is_causal: bool = False,
     query_positions: torch.Tensor | None = None,
     key_positions: torch.Tensor | None = None,
+    query_position_layout: Literal["batch", "head"] = "batch",
+    key_position_layout: Literal["batch", "head"] = "batch",
 ) -> torch.Tensor:
     projected_q, projected_k, projected_v, projected_qk = module._in_projection(query, key, value)
     q, k, v, packed_qk = module._split_heads(projected_q, projected_k, projected_v, projected_qk)
     if module.rope is not None:
-        q, k = module._apply_rope(q, k, packed_qk, query_positions, key_positions)
+        q, k = module._apply_rope(
+            q,
+            k,
+            packed_qk,
+            query_positions,
+            key_positions,
+            query_position_layout,
+            key_position_layout,
+        )
 
     queries_per_kv_head = module.num_heads // module.num_kv_heads
     if module._layout_strategy == "head_after_sequence":
@@ -226,6 +236,22 @@ def test_gqa_rope_matches_expanded_reference_and_stacked_rejects() -> None:
     )
     with pytest.raises(ValueError, match="equal shapes"):
         stacked(x)
+
+
+def test_gqa_self_attention_rejects_nonbroadcastable_shared_head_positions() -> None:
+    module = MultiheadSelfAttention(
+        8,
+        4,
+        num_kv_heads=2,
+        rope=RotaryPositionalEmbedding(10_000.0, 2, 16),
+    )
+
+    with pytest.raises(ValueError, match="not compatible"):
+        module(
+            torch.randn(2, 5, 8),
+            token_positions=torch.arange(5).expand(4, -1),
+            position_layout="head",
+        )
 
 
 def test_gqa_cross_attention_rope_supports_distinct_positions() -> None:
