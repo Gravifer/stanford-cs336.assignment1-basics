@@ -1,3 +1,5 @@
+import os
+
 import pytest
 import torch
 from jaxtyping import TypeCheckError
@@ -7,10 +9,16 @@ from cs336_basics.nn.attention import RotaryPositionalEmbedding
 from cs336_basics.nn.modules import Embedding, Linear
 
 
+_HOOK_REQUIRED = os.environ.get("CS336_REQUIRE_RUNTIME_IMPORT_HOOK") == "1"
+
 pytestmark = pytest.mark.skipif(
-    not hasattr(F.gelu, "__wrapped__"),
+    not _HOOK_REQUIRED,
     reason="runtime annotation checks require the jaxtyping import hook",
 )
+
+
+def test_runtime_import_hook_is_installed() -> None:
+    assert hasattr(F.gelu, "__wrapped__"), "jaxtyping import hook did not instrument cs336_basics.nn"
 
 
 def test_runtime_checker_rejects_invalid_literal() -> None:
