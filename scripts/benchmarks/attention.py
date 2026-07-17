@@ -175,7 +175,7 @@ def _rope_evaluation(
     output = operation(q, k)
     loss = output[0].square().mean() + output[1].square().mean()
     gradients = torch.autograd.grad(loss, (q, k))
-    return output[0].detach(), output[1].detach(), gradients[0], gradients[1]
+    return tuple(tensor.detach().cpu() for tensor in (*output, *gradients))
 
 
 def _run_rope(args: argparse.Namespace, device: torch.device, dtype: torch.dtype) -> list[Result]:
@@ -262,7 +262,7 @@ def _mha_evaluation(
     input_ = x.detach().clone().requires_grad_()
     output = operation(input_)
     gradients = torch.autograd.grad(output.square().mean(), (input_, *module.parameters()))
-    return output.detach(), *(gradient.detach() for gradient in gradients)
+    return output.detach().cpu(), *(gradient.detach().cpu() for gradient in gradients)
 
 
 def _run_mha(args: argparse.Namespace, device: torch.device, dtype: torch.dtype) -> list[Result]:
@@ -277,7 +277,8 @@ def _run_mha(args: argparse.Namespace, device: torch.device, dtype: torch.dtype)
         dtype=dtype,
     )
     reference = MultiheadSelfAttention(d_model, args.num_heads, device=device, dtype=dtype)
-    reference_state = reference.state_dict()
+    reference_state = {key: value.detach().cpu() for key, value in reference.state_dict().items()}
+    del reference
     results: list[Result] = []
     baseline: dict[PositionKind, tuple[torch.Tensor, ...]] = {}
     for position_kind in _position_kinds(args.positions):
