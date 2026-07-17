@@ -1,8 +1,10 @@
-from typing import Literal
+from typing import Any, Literal
 
 import pytest
 import torch
 
+from cs336_basics.nn import functional as F
+from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention
 from cs336_basics.nn.functional import scaled_dot_product_attention
 
 
@@ -190,3 +192,106 @@ def test_attention_modules_zero_fully_masked_rows_for_all_head_paths(
     torch.testing.assert_close(output[:, 1], torch.zeros_like(output[:, 1]))
     output.sum().backward()
     assert x.grad is not None and torch.isfinite(x.grad).all()
+
+
+@pytest.mark.parametrize(
+    ("batch_size", "num_heads", "num_kv_heads"),
+    [(2, 3, 3), (3, 3, 3), (2, 4, 2)],
+)
+@pytest.mark.parametrize("layout", ["head_before_sequence", "head_after_sequence"])
+@pytest.mark.parametrize("mask_kind", ["boolean", "additive"])
+def test_attention_masks_default_to_per_example_batch_alignment(
+    batch_size: int,
+    num_heads: int,
+    num_kv_heads: int,
+    layout: Literal["head_before_sequence", "head_after_sequence"],
+    mask_kind: Literal["boolean", "additive"],
+) -> None:
+    torch.manual_seed(30)
+    module = MultiheadAttention(
+        12,
+        num_heads,
+        num_kv_heads=num_kv_heads,
+        _layout_strategy=layout,
+    )
+    query = torch.randn(batch_size, 4, 12)
+    key = torch.randn(batch_size, 6, 12)
+    value = torch.randn(batch_size, 6, 12)
+    allowed = torch.ones(batch_size, 4, 6, dtype=torch.bool)
+    for batch_index in range(batch_size):
+        allowed[batch_index, :, batch_index % 6] = False
+    mask = (
+        allowed
+        if mask_kind == "boolean"
+        else torch.zeros_like(allowed, dtype=query.dtype).masked_fill(~allowed, -7.0)
+    )
+
+    actual = module(query, key, value, mask)
+    expected = torch.stack(
+        [module(query[index], key[index], value[index], mask[index]) for index in range(batch_size)]
+    )
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_self_attention_forwards_batch_mask_layout() -> None:
+    module = MultiheadSelfAttention(12, 3)
+    x = torch.randn(3, 4, 12)
+    mask = torch.ones(3, 4, 4, dtype=torch.bool)
+    mask[0, :, 0] = False
+    mask[1, :, 1] = False
+    mask[2, :, 2] = False
+
+    actual = module(x, mask, is_causal=False)
+    expected = torch.stack([module(x[index], mask[index], is_causal=False) for index in range(x.shape[0])])
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_batch_aligned_masks_suffix_broadcast_over_leading_batch_axes() -> None:
+    module = MultiheadAttention(12, 3)
+    x = torch.randn(2, 3, 4, 12)
+    mask = torch.ones(3, 4, 4, dtype=torch.bool)
+    mask[0, :, 0] = False
+    mask[1, :, 1] = False
+    mask[2, :, 2] = False
+
+    actual = module(x, x, x, mask)
+    expected = torch.stack([module(x[index], x[index], x[index], mask) for index in range(x.shape[0])])
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_mask_layout_disambiguates_equal_batch_and_head_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = MultiheadAttention(12, 3)
+    x = torch.randn(3, 4, 12)
+    mask = torch.ones(3, 4, 4, dtype=torch.bool)
+    observed_masks: list[torch.Tensor] = []
+    original = F.scaled_dot_product_attention
+
+    def traced(*args: Any, **kwargs: Any) -> torch.Tensor:
+        observed_masks.append(args[3])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(F, "scaled_dot_product_attention", traced)
+
+    module(x, x, x, mask)
+    module(x, x, x, mask, mask_layout="head")
+
+    assert observed_masks[0].shape == (3, 1, 4, 4)
+    assert observed_masks[1] is mask
+
+
+def test_attention_rejects_invalid_or_incompatible_batch_mask_layouts() -> None:
+    module = MultiheadAttention(12, 3)
+    x = torch.randn(2, 4, 12)
+
+    with pytest.raises(ValueError, match="mask_layout"):
+        module(x, x, x, mask_layout="channel")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="batch-aligned mask"):
+        module(x, x, x, torch.ones(3, 4, 4, dtype=torch.bool))
+    with pytest.raises(ValueError, match="batch-aligned mask"):
+        module(x, x, x, torch.ones(2, 1, 4, dtype=torch.bool))
+
+    output = module(x, x, x, torch.ones(3, 4, 4, dtype=torch.bool), mask_layout="head")
+    assert output.shape == x.shape

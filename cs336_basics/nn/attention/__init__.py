@@ -17,6 +17,7 @@ from ..modules import Linear
 
 
 type _PositionLayout = Literal["batch", "head"]
+type _MaskLayout = Literal["batch", "head"]
 
 
 class RotaryPositionalEmbedding(nn.Module):
@@ -351,6 +352,8 @@ class MultiheadAttention(nn.Module):
 
     Boolean masks follow :func:`cs336_basics.nn.functional.scaled_dot_product_attention`:
     ``True`` permits attention and ``False`` masks it.
+    Masks are batch-aligned by default; pass ``mask_layout="head"`` to interpret
+    their leading suffix as an explicit query-head axis instead.
     """
 
     __constants__ = [
@@ -791,6 +794,40 @@ class MultiheadAttention(nn.Module):
             raise ValueError(f"expected query/key/value widths {expected_widths}, got {actual_widths}")
 
     @staticmethod
+    def _prepare_attention_mask(
+        mask: torch.Tensor | None,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        *,
+        mask_layout: _MaskLayout,
+    ) -> torch.Tensor | None:
+        if mask_layout not in ("batch", "head"):
+            raise ValueError(f"mask_layout must be 'batch' or 'head', got {mask_layout!r}")
+        if mask is None or mask_layout == "head":
+            return mask
+
+        batch_query_key_shape = (*query.shape[:-2], query.shape[-2], key.shape[-2])
+        if mask.ndim < 2 or mask.ndim > len(batch_query_key_shape):
+            raise ValueError(
+                f"batch-aligned mask shape {mask.shape} is not compatible with "
+                f"batch/query/key shape {batch_query_key_shape}"
+            )
+        suffix_shape = batch_query_key_shape[-mask.ndim :]
+        if tuple(mask.shape[-2:]) != tuple(suffix_shape[-2:]):
+            raise ValueError(
+                f"batch-aligned mask shape {mask.shape} is not compatible with "
+                f"batch/query/key shape {batch_query_key_shape}"
+            )
+        try:
+            mask.expand(suffix_shape)
+        except RuntimeError as error:
+            raise ValueError(
+                f"batch-aligned mask shape {mask.shape} is not compatible with "
+                f"batch/query/key shape {batch_query_key_shape}"
+            ) from error
+        return einx.id("batch... query key -> batch... 1 query key", mask)
+
+    @staticmethod
     def _resolve_position_layouts(
         *,
         position_layout: _PositionLayout | None,
@@ -822,6 +859,7 @@ class MultiheadAttention(nn.Module):
         mask: MaskBias[torch.Tensor, "*slew query_len key_len"] | None = None,  # ty: ignore[invalid-syntax-in-forward-annotation]
         *,
         is_causal: bool = False,
+        mask_layout: _MaskLayout = "batch",
         query_positions: Int[torch.Tensor, "*query_position_batch query_len"] | None = None,
         key_positions: Int[torch.Tensor, "*key_position_batch key_len"] | None = None,
         position_layout: _PositionLayout,
@@ -838,6 +876,7 @@ class MultiheadAttention(nn.Module):
         mask: MaskBias[torch.Tensor, "*slew query_len key_len"] | None = None,  # ty: ignore[invalid-syntax-in-forward-annotation]
         *,
         is_causal: bool = False,
+        mask_layout: _MaskLayout = "batch",
         query_positions: Int[torch.Tensor, "*query_position_batch query_len"] | None = None,
         key_positions: Int[torch.Tensor, "*key_position_batch key_len"] | None = None,
         position_layout: None = None,
@@ -853,6 +892,7 @@ class MultiheadAttention(nn.Module):
         mask: MaskBias[torch.Tensor, "*slew query_len key_len"] | None = None,  # ty: ignore[invalid-syntax-in-forward-annotation]
         *,
         is_causal: bool = False,
+        mask_layout: _MaskLayout = "batch",
         query_positions: Int[torch.Tensor, "*query_position_batch query_len"] | None = None,
         key_positions: Int[torch.Tensor, "*key_position_batch key_len"] | None = None,
         position_layout: _PositionLayout | None = None,
@@ -861,13 +901,16 @@ class MultiheadAttention(nn.Module):
     ) -> Shaped[OutputVec, "*batch query_len"]:
         """Project Q/K/V, apply optional RoPE, attend, and project the result.
 
-        Position tensors are batch-aligned by default. Use ``position_layout``
+        Masks and position tensors are batch-aligned by default. Use
+        ``mask_layout="head"`` for a mask with an explicit query-head axis.
+        Use ``position_layout``
         to set one interpretation for Q and K, or the mutually exclusive
         ``query_position_layout`` and ``key_position_layout`` controls to set
         them independently. ``"head"`` preserves explicit head-dependent
         position axes.
         """
         self._validate_inputs(query, key, value)
+        mask = self._prepare_attention_mask(mask, query, key, mask_layout=mask_layout)
         resolved_query_layout, resolved_key_layout = self._resolve_position_layouts(
             position_layout=position_layout,
             query_position_layout=query_position_layout,
@@ -1160,15 +1203,17 @@ class MultiheadSelfAttention(MultiheadAttention):
         *,
         token_positions: Int[torch.Tensor, "*position_batch sequence"] | None = None,
         is_causal: bool = True,
+        mask_layout: _MaskLayout = "batch",
         position_layout: _PositionLayout = "batch",
     ) -> Shaped[ModelVec, "*batch sequence"]:
-        """Apply self-attention with shared Q/K/V inputs and positions."""
+        """Apply self-attention with shared Q/K/V inputs, masks, and positions."""
         return super().forward(
             x,
             x,
             x,
             mask,
             is_causal=is_causal,
+            mask_layout=mask_layout,
             query_positions=token_positions,
             key_positions=token_positions,
             position_layout=position_layout,

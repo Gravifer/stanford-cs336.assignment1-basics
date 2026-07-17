@@ -97,7 +97,7 @@ def test_grouped_attention_matches_expanded_kv_with_gradients(
     allowed[1, :, 1] = False
     mask = allowed if mask_kind == "boolean" else torch.zeros_like(allowed, dtype=query.dtype).masked_fill(~allowed, -7.0)
 
-    actual = actual_module(query, key, value, mask, is_causal=True)
+    actual = actual_module(query, key, value, mask, is_causal=True, mask_layout="head")
     expected = _expanded_kv_reference(
         reference_module,
         reference_query,

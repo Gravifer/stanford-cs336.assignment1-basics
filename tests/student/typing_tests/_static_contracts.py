@@ -61,6 +61,8 @@ def check_attention_position_layout_aliases() -> None:
     self_attention = MultiheadSelfAttention(8, 2)
     x = torch.randn(2, 4, 8)
     positions = torch.arange(4).expand(2, -1)
+    batch_mask = torch.ones(2, 4, 4, dtype=torch.bool)
+    head_mask = torch.ones(2, 4, 4, dtype=torch.bool)
     assert_type(
         attention.forward(x, x, x, query_positions=positions, key_positions=positions, position_layout="batch"),
         torch.Tensor,
@@ -77,4 +79,7 @@ def check_attention_position_layout_aliases() -> None:
         ),
         torch.Tensor,
     )
+    assert_type(attention.forward(x, x, x, batch_mask, mask_layout="batch"), torch.Tensor)
+    assert_type(attention.forward(x, x, x, head_mask, mask_layout="head"), torch.Tensor)
     assert_type(self_attention.forward(x, token_positions=positions, position_layout="batch"), torch.Tensor)
+    assert_type(self_attention.forward(x, batch_mask, mask_layout="batch"), torch.Tensor)
