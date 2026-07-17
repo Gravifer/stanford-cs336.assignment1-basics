@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from typing import Any, Literal, cast
 
+import einops
 import pytest
 import torch
 
@@ -536,21 +537,21 @@ def test_self_attention_qk_execution_strategies(
     rotation_calls = 0
     stack_calls = 0
     original_apply: Callable[..., torch.Tensor] = rope._apply_rotations
-    original_stack: Callable[..., torch.Tensor] = torch.stack
+    original_rearrange: Callable[..., torch.Tensor] = einops.rearrange
 
     def traced_apply(*args: Any, **kwargs: Any) -> torch.Tensor:
         nonlocal rotation_calls
         rotation_calls += 1
         return original_apply(*args, **kwargs)
 
-    def traced_stack(*args: Any, **kwargs: Any) -> torch.Tensor:
+    def traced_rearrange(tensor: Any, pattern: str, **axes_lengths: Any) -> torch.Tensor:
         nonlocal stack_calls
-        if kwargs.get("dim", 0) == 0:
+        if pattern == "qk ... -> qk ...":
             stack_calls += 1
-        return original_stack(*args, **kwargs)
+        return original_rearrange(tensor, pattern, **axes_lengths)
 
     monkeypatch.setattr(rope, "_apply_rotations", traced_apply)
-    monkeypatch.setattr(torch, "stack", traced_stack)
+    monkeypatch.setattr(einops, "rearrange", traced_rearrange)
     module(torch.randn(2, 5, 8))
 
     assert rotation_calls == expected_rotation_calls

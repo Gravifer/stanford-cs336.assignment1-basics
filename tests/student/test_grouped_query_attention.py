@@ -31,8 +31,8 @@ def _expanded_kv_reference(
             packed_qk,
             query_positions,
             key_positions,
-            query_position_layout,
-            key_position_layout,
+            query_position_layout=query_position_layout,
+            key_position_layout=key_position_layout,
         )
 
     queries_per_kv_head = module.num_heads // module.num_kv_heads

@@ -102,6 +102,7 @@ class RotaryPositionalEmbedding(nn.Module):
     @staticmethod
     def _position_target_shape(
         x: torch.Tensor,
+        *,
         layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
     ) -> tuple[int, ...]:
         if layout_strategy == "head_before_sequence":
@@ -120,7 +121,7 @@ class RotaryPositionalEmbedding(nn.Module):
         broadcast_positions: bool,
         layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
     ) -> tuple[torch.Tensor, tuple[int, ...]]:
-        target_shape = self._position_target_shape(x, layout_strategy)
+        target_shape = self._position_target_shape(x, layout_strategy=layout_strategy)
         token_positions = token_positions.to(x.device)
         if token_positions.ndim == 0:
             raise ValueError("token_positions must include a sequence dimension")
@@ -157,7 +158,7 @@ class RotaryPositionalEmbedding(nn.Module):
         broadcast_positions: bool,
         layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        target_shape = self._position_target_shape(x, layout_strategy)
+        target_shape = self._position_target_shape(x, layout_strategy=layout_strategy)
         if token_positions is None:
             seq_len = target_shape[-1]
             if seq_len > self.max_seq_len:
@@ -235,9 +236,9 @@ class RotaryPositionalEmbedding(nn.Module):
                 for part in selection
             )
             x_even, x_odd = x_split[..., 0], x_split[..., 1]
-            x_split_rotated = torch.stack(
-                (x_even * cos - x_odd * sin, x_even * sin + x_odd * cos),
-                dim=-1,
+            x_split_rotated = einops.rearrange(
+                [x_even * cos - x_odd * sin, x_even * sin + x_odd * cos],
+                "pair ... -> ... pair",
             )
         return einx.id(
             "... d_pair p -> ... (d_pair p)",
@@ -325,7 +326,7 @@ class RotaryPositionalEmbedding(nn.Module):
                 self._apply_rotations(query, selection, layout_strategy=_layout_strategy),
                 self._apply_rotations(key, selection, layout_strategy=_layout_strategy),
             )
-        qk = torch.stack((query, key), dim=0)
+        qk = einops.rearrange([query, key], "qk ... -> qk ...")
         stacked_selection = self._prepend_selection_axis(selection, 2)
         qk = self._apply_rotations(qk, stacked_selection, layout_strategy=_layout_strategy)
         return qk[0], qk[1]
@@ -680,6 +681,7 @@ class MultiheadAttention(nn.Module):
         self,
         x: torch.Tensor,
         token_positions: torch.Tensor | None,
+        *,
         position_layout: _PositionLayout,
     ) -> torch.Tensor | None:
         if token_positions is None or position_layout == "head":
@@ -715,10 +717,11 @@ class MultiheadAttention(nn.Module):
         self,
         x: torch.Tensor,
         token_positions: torch.Tensor | None,
+        *,
         position_layout: _PositionLayout,
     ) -> torch.Tensor:
         assert self.rope is not None, "RoPE application requires a registered RotaryPositionalEmbedding"
-        token_positions = self._prepare_rope_positions(x, token_positions, position_layout)
+        token_positions = self._prepare_rope_positions(x, token_positions, position_layout=position_layout)
         selection = self.rope._select_rotations(
             x,
             token_positions,
@@ -734,6 +737,7 @@ class MultiheadAttention(nn.Module):
         packed_qk: torch.Tensor | None,
         query_positions: torch.Tensor | None,
         key_positions: torch.Tensor | None,
+        *,
         query_position_layout: _PositionLayout,
         key_position_layout: _PositionLayout,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -746,11 +750,11 @@ class MultiheadAttention(nn.Module):
             if self._qk_execution_strategy == "stacked":
                 raise ValueError("stacked Q/K RoPE requires equal shapes and shared token positions")
             return (
-                self._apply_single_rope(q, query_positions, query_position_layout),
-                self._apply_single_rope(k, key_positions, key_position_layout),
+                self._apply_single_rope(q, query_positions, position_layout=query_position_layout),
+                self._apply_single_rope(k, key_positions, position_layout=key_position_layout),
             )
 
-        positions = self._prepare_rope_positions(q, query_positions, query_position_layout)
+        positions = self._prepare_rope_positions(q, query_positions, position_layout=query_position_layout)
         if self._qk_execution_strategy == "auto" and packed_qk is not None:
             selection = self.rope._select_rotations(
                 q,
@@ -788,6 +792,7 @@ class MultiheadAttention(nn.Module):
 
     @staticmethod
     def _resolve_position_layouts(
+        *,
         position_layout: _PositionLayout | None,
         query_position_layout: _PositionLayout | None,
         key_position_layout: _PositionLayout | None,
@@ -864,9 +869,9 @@ class MultiheadAttention(nn.Module):
         """
         self._validate_inputs(query, key, value)
         resolved_query_layout, resolved_key_layout = self._resolve_position_layouts(
-            position_layout,
-            query_position_layout,
-            key_position_layout,
+            position_layout=position_layout,
+            query_position_layout=query_position_layout,
+            key_position_layout=key_position_layout,
         )
 
         projected_q, projected_k, projected_v, projected_qk = self._in_projection(query, key, value)
@@ -879,8 +884,8 @@ class MultiheadAttention(nn.Module):
                 packed_qk,
                 query_positions,
                 key_positions,
-                resolved_query_layout,
-                resolved_key_layout,
+                query_position_layout=resolved_query_layout,
+                key_position_layout=resolved_key_layout,
             )
 
         if self.num_heads == self.num_kv_heads:
