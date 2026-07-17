@@ -33,7 +33,8 @@
 
   },
   "conventionalCommits.scopes": [
-    "init"
+    "init",
+    "typo"
   ],
   "files.readonlyInclude": {
     ".venv/**": true
