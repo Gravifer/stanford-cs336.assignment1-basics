@@ -1,3 +1,5 @@
+from typing import Literal
+
 import pytest
 import torch
 
@@ -126,3 +128,65 @@ def test_rectangular_causal_mask_composes_with_boolean_and_additive_masks():
     float_actual = scaled_dot_product_attention(q, k, v, attn_bias=bias, is_causal="compose")
     float_expected = scaled_dot_product_attention(q, k, v, attn_bias=bias.masked_fill(~causal, float("-inf")))
     torch.testing.assert_close(float_actual, float_expected)
+
+
+@pytest.mark.parametrize("mask_kind", ["boolean", "additive"])
+def test_fully_masked_examples_match_torch_with_finite_zero_gradients(mask_kind: str) -> None:
+    torch.manual_seed(12)
+    q = torch.randn(2, 3, 4)
+    k = torch.randn(2, 5, 4)
+    v = torch.randn(2, 5, 6)
+    allowed = torch.ones(2, 3, 5, dtype=torch.bool)
+    allowed[0] = False
+    mask = allowed if mask_kind == "boolean" else torch.zeros_like(allowed, dtype=q.dtype).masked_fill(~allowed, -torch.inf)
+
+    actual_inputs = [tensor.detach().clone().requires_grad_() for tensor in (q, k, v)]
+    expected_inputs = [tensor.detach().clone().requires_grad_() for tensor in (q, k, v)]
+    actual = scaled_dot_product_attention(*actual_inputs, mask=mask)
+    expected = torch.nn.functional.scaled_dot_product_attention(*expected_inputs, attn_mask=mask)
+
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(actual[0], torch.zeros_like(actual[0]))
+    actual.sum().backward()
+    expected.sum().backward()
+    for actual_input, expected_input in zip(actual_inputs, expected_inputs, strict=True):
+        assert actual_input.grad is not None and expected_input.grad is not None
+        assert torch.isfinite(actual_input.grad).all()
+        torch.testing.assert_close(actual_input.grad, expected_input.grad)
+        torch.testing.assert_close(actual_input.grad[0], torch.zeros_like(actual_input.grad[0]))
+
+
+def test_causal_composition_zeroes_rows_with_no_permitted_keys() -> None:
+    q, k, v = make_tensors()
+    allowed = torch.ones(4, 4, dtype=torch.bool)
+    allowed[2] = False
+
+    output = scaled_dot_product_attention(q, k, v, mask=allowed, is_causal="compose")
+
+    torch.testing.assert_close(output[:, 2], torch.zeros_like(output[:, 2]))
+    assert torch.isfinite(output).all()
+
+
+@pytest.mark.parametrize("num_kv_heads", [2, 4])
+@pytest.mark.parametrize("layout", ["head_before_sequence", "head_after_sequence"])
+def test_attention_modules_zero_fully_masked_rows_for_all_head_paths(
+    num_kv_heads: int,
+    layout: Literal["head_before_sequence", "head_after_sequence"],
+) -> None:
+    from cs336_basics.nn.attention import MultiheadAttention
+
+    module = MultiheadAttention(
+        8,
+        4,
+        num_kv_heads=num_kv_heads,
+        _layout_strategy=layout,
+    )
+    x = torch.randn(2, 4, 8, requires_grad=True)
+    allowed = torch.ones(4, 4, dtype=torch.bool)
+    allowed[1] = False
+
+    output = module(x, x, x, allowed)
+
+    torch.testing.assert_close(output[:, 1], torch.zeros_like(output[:, 1]))
+    output.sum().backward()
+    assert x.grad is not None and torch.isfinite(x.grad).all()

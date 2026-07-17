@@ -242,13 +242,21 @@ def _attention_weights(
             # Clone attn_bias to avoid mutating the caller's tensor
             attn_bias: _Bias = attn_bias.clone().masked_fill_(~causal_mask, float("-inf"))
 
+    fully_masked: torch.Tensor | None = None
     if attn_bias is not None:
         # Support both boolean masks and additive numeric biases.
         if attn_bias.dtype == torch.bool:
+            fully_masked = ~einx.any("... query [key] -> ... query 1", attn_bias)
             scores = scores.masked_fill(~attn_bias, float("-inf"))
         else:
+            fully_masked = torch.isneginf(einx.max("... query [key] -> ... query 1", attn_bias))
             scores += attn_bias
+        # Softmax is undefined for an all-negative-infinity row. Give it a
+        # finite input, then restore the SDPA convention of zero attention.
+        scores = scores.masked_fill(fully_masked, 0.0)
     attn_weights = torch.softmax(scores, dim=-1)
+    if fully_masked is not None:
+        attn_weights = attn_weights.masked_fill(fully_masked, 0.0)
     if dropout_p > 0.0:
         torch.dropout_(attn_weights, p=dropout_p, train=True)
     return attn_weights
@@ -283,6 +291,7 @@ def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled
             to mimic the torch counterpart, but only one of the three should be provided.
             if numeric rather than boolean, it will be treated as additive mask.
             Passing a boolean mask is equivalent to 0 for True and -inf for False.
+            A query row with no permitted keys produces a zero output row.
         dropout_p: Dropout probability.
         is_causal: Whether to apply causal masking.
             when set to "torch", the passed mask will be rejected.

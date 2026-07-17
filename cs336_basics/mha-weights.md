@@ -179,7 +179,7 @@ The course notes that Q, K, and V can be computed in three matrix multiplication
 
 The course case therefore does not pay for general cross-attention dispatch in its dominant tensor operations. It receives the packed one-projection path, shared position selection, optional zero-copy combined QK rotation, explicit $d_k^{-1/2}$ scaling, and dropout disabled during evaluation.
 
-The current educational local SDPA still materializes attention scores and masks rather than using FlashAttention. Its causal mask is formed by a broadcasted query/key index comparison rather than allocating an all-ones square followed by `tril`. Square and rectangular masks, boolean True-means-allowed masks, additive masks, and composition modes share the same masking and softmax core.
+The current educational local SDPA still materializes attention scores and masks rather than using FlashAttention. Its causal mask is formed by a broadcasted query/key index comparison rather than allocating an all-ones square followed by `tril`. Square and rectangular masks, boolean True-means-allowed masks, additive masks, and composition modes share the same masking and softmax core. Rows with no permitted keys are stabilized before softmax and produce zero attention, including zero gradients through that row, rather than propagating undefined all-negative-infinity softmax values.
 
 ## Benchmark evidence
 
