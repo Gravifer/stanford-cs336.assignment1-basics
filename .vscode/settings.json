@@ -31,5 +31,12 @@
   "explorerExclude.backup": {
 
 
+  },
+  "conventionalCommits.scopes": [
+    "init",
+    "typo"
+  ],
+  "files.readonlyInclude": {
+    ".venv/**": true
   }
 }

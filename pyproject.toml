@@ -23,14 +23,25 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "beartype>=0.22.9",
     "ipykernel>=7.2.0",
     "ipython>=9.14.0",
+    "matplotlib>=3.11.0",
     "py-spy>=0.4.2",
     "rich>=15.0.0",
     "scalene>=2.3.0",
     "subword-nmt>=0.3.8",
     "types-regex>=2026.5.9.20260518",
-    "uv>=0.11.19",
+    "uv>=0.11.29",
+]
+cuda = [
+    "torch==2.11.0+cu130 ; sys_platform == 'win32' or sys_platform == 'linux'",
+    "triton>=3.6,<3.7 ; sys_platform == 'linux'",
+    "triton-windows>=3.6,<3.7 ; sys_platform == 'win32'",
+]
+cpu = [
+    "torch==2.11.0+cpu ; sys_platform == 'win32' or sys_platform == 'linux'",
+    "torch===2.11.0 ; sys_platform == 'darwin'",
 ]
 
 [build-system]
@@ -44,6 +55,17 @@ module-root = ""
 [tool.uv]
 package = true
 python-preference = "managed"
+default-groups = ["dev", "cpu"]
+find-links = [
+    "https://download.pytorch.org/whl/cpu/torch",
+    "https://download.pytorch.org/whl/cu130/torch",
+]
+conflicts = [
+    [
+        { group = "cpu" },
+        { group = "cuda" },
+    ],
+]
 
 [tool.pytest.ini_options]
 log_cli = true
