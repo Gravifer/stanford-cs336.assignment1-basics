@@ -340,12 +340,11 @@ class SoftMax(nn.Module):  # mimicking :cls:`torch.nn.Softmax`
     """
 
     __constants__ = ["dim"]
-    dim: int  # we will canonicalize the dim to be an int; we cannot enforce a stronger constraint without breaking compatibility with :cls:`torch.nn.Softmax`
+    dim: int | None
 
     def __init__(self, dim: int | None = None) -> None:
         super().__init__()
-        dim: int = dim if dim is not None else -1
-        if not isinstance(dim, int):
+        if dim is not None and not isinstance(dim, int):
             raise TypeError(f"dim must be an int, but got {type(dim).__name__}")
         self.dim = dim
 

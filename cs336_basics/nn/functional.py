@@ -61,6 +61,15 @@ def softmax(
     type InputShaped = Float[torch.Tensor, "*shape"]
     # type ReducedShaped = Float[torch.Tensor, "*reduced"]
     type KeptShaped = Float[torch.Tensor, "*kept"]
+    if dim is None:
+        warnings.warn(
+            "Implicit dimension choice for softmax has been deprecated. "
+            "Change the call to include dim=X as an argument.",
+            stacklevel=_stacklevel,
+        )
+        dim = 0 if input.ndim in (0, 1, 3) else 1
+    if dtype is not None:
+        input = input.to(dtype)
     # # derive einx strings
     # dim: int = (dim if dim is not None else -1) % input.ndim
     # axes_map: dict[str, int] = {(f"n{i}"): d                        for i, d in enumerate(input.shape)}
