@@ -718,32 +718,44 @@ class MultiheadAttention(nn.Module):
             raise ValueError("state_dict contains conflicting packed and unpacked Q/K/V weight layouts")
 
         translated: dict[str, Any] = {}
-        source_keys: tuple[str, str, str] | None = None
         if has_delegated:
-            source_keys = delegated_keys
+            present = [key in state_dict for key in delegated_keys]
+            if self.in_proj_weight is not None:
+                if not all(present):
+                    raise ValueError("delegated Q/K/V weight layout is incomplete")
+                q_weight, k_weight, v_weight = (state_dict[key] for key in delegated_keys)
+                translated["in_proj_weight"] = einx.id(
+                    "q input, k input, v input -> (q + k + v) input",
+                    q_weight,
+                    k_weight,
+                    v_weight,
+                    q=self.q_proj_dim,
+                    k=self.k_proj_dim,
+                    v=self.v_proj_dim,
+                )
+            else:
+                translated.update(
+                    (target, state_dict[source])
+                    for source, target in zip(delegated_keys, separate_keys, strict=True)
+                    if source in state_dict
+                )
         elif has_separate:
-            source_keys = separate_keys
-
-        if source_keys is not None:
-            present = [key in state_dict for key in source_keys]
-            if all(present):
-                q_weight, k_weight, v_weight = (state_dict[key] for key in source_keys)
-                if self.in_proj_weight is not None:
-                    translated["in_proj_weight"] = einx.id(
-                        "q input, k input, v input -> (q + k + v) input",
-                        q_weight,
-                        k_weight,
-                        v_weight,
-                        q=self.q_proj_dim,
-                        k=self.k_proj_dim,
-                        v=self.v_proj_dim,
-                    )
-                else:
-                    translated.update(
-                        q_proj_weight=q_weight,
-                        k_proj_weight=k_weight,
-                        v_proj_weight=v_weight,
-                    )
+            present = [key in state_dict for key in separate_keys]
+            if self.in_proj_weight is None:
+                translated.update((key, state_dict[key]) for key in separate_keys if key in state_dict)
+            else:
+                if not all(present):
+                    raise ValueError("separate Q/K/V weight layout is incomplete for packed storage")
+                q_weight, k_weight, v_weight = (state_dict[key] for key in separate_keys)
+                translated["in_proj_weight"] = einx.id(
+                    "q input, k input, v input -> (q + k + v) input",
+                    q_weight,
+                    k_weight,
+                    v_weight,
+                    q=self.q_proj_dim,
+                    k=self.k_proj_dim,
+                    v=self.v_proj_dim,
+                )
         elif has_packed:
             if self.in_proj_weight is None:
                 raise ValueError("cannot load packed Q/K/V weights when key or value input widths differ")

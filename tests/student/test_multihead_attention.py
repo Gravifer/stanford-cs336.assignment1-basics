@@ -347,6 +347,29 @@ def test_load_state_dict_preserves_missing_and_unexpected_key_reporting() -> Non
     assert result.unexpected_keys == ["surprise"]
 
 
+@pytest.mark.parametrize("delegated", [False, True])
+def test_load_state_dict_loads_partial_weights_into_separate_storage(delegated: bool) -> None:
+    module = MultiheadAttention(embed_dim=8, num_heads=2, kdim=5, vdim=7)
+    q_weight = torch.randn(8, 8)
+    key = "q_proj.weight" if delegated else "q_proj_weight"
+
+    result = module.load_state_dict({key: q_weight}, strict=False)
+
+    assert result.missing_keys == ["k_proj_weight", "v_proj_weight", "output_proj.weight"]
+    assert result.unexpected_keys == []
+    assert module.q_proj_weight is not None
+    torch.testing.assert_close(module.q_proj_weight, q_weight)
+
+
+@pytest.mark.parametrize("delegated", [False, True])
+def test_load_state_dict_rejects_incomplete_compatibility_layout_for_packed_storage(delegated: bool) -> None:
+    module = MultiheadAttention(embed_dim=8, num_heads=2)
+    key = "q_proj.weight" if delegated else "q_proj_weight"
+
+    with pytest.raises(ValueError, match="incomplete"):
+        module.load_state_dict({key: torch.randn(8, 8)}, strict=False)
+
+
 @pytest.mark.parametrize("use_rope", [False, True])
 @pytest.mark.parametrize("use_matrix_form", [False, True])
 def test_head_sequence_layouts_match_with_masks_and_gradients(
