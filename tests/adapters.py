@@ -31,7 +31,7 @@ def run_linear(
 
     from cs336_basics.nn.modules import Linear
 
-    l = Linear(d_in, d_out)  # noqa: E741
+    l = Linear(d_in, d_out, device=weights.device, dtype=weights.dtype)  # noqa: E741
     l.load_state_dict({"weight": weights})
 
     return l.forward(in_features)
@@ -58,7 +58,7 @@ def run_embedding(
 
     from cs336_basics.nn.modules import Embedding
 
-    e = Embedding(vocab_size, d_model)
+    e = Embedding(vocab_size, d_model, device=weights.device, dtype=weights.dtype)
     e.load_state_dict({"weight": weights})
 
     return e.forward(token_ids)
@@ -90,7 +90,7 @@ def run_swiglu(
     # from cs336_basics.nn.modules import SwiGLU
     from cs336_basics.nn.feed_forward import SwiGLU  # ! need to avoid circular import
 
-    swiglu = SwiGLU(d_model, d_ff)
+    swiglu = SwiGLU(d_model, d_ff, device=w1_weight.device, dtype=w1_weight.dtype)
 
     # Example:
     # If your state dict keys match, you can use `load_state_dict()`
@@ -159,7 +159,12 @@ def run_multihead_self_attention(
     """
     from cs336_basics.nn.attention import MultiheadSelfAttention
 
-    attention = MultiheadSelfAttention(d_model=d_model, num_heads=num_heads)
+    attention = MultiheadSelfAttention(
+        d_model=d_model,
+        num_heads=num_heads,
+        device=q_proj_weight.device,
+        dtype=q_proj_weight.dtype,
+    )
     attention.load_state_dict(
         {
             "q_proj.weight": q_proj_weight,
@@ -210,8 +215,19 @@ def run_multihead_self_attention_with_rope(
     """
     from cs336_basics.nn.attention import MultiheadSelfAttention, RotaryPositionalEmbedding
 
-    rope = RotaryPositionalEmbedding(theta=theta, d_k=d_model // num_heads, max_seq_len=max_seq_len)
-    attention = MultiheadSelfAttention(d_model=d_model, num_heads=num_heads, rope=rope)
+    rope = RotaryPositionalEmbedding(
+        theta=theta,
+        d_k=d_model // num_heads,
+        max_seq_len=max_seq_len,
+        device=q_proj_weight.device,
+    )
+    attention = MultiheadSelfAttention(
+        d_model=d_model,
+        num_heads=num_heads,
+        rope=rope,
+        device=q_proj_weight.device,
+        dtype=q_proj_weight.dtype,
+    )
     attention.load_state_dict(
         {
             "q_proj.weight": q_proj_weight,
@@ -244,7 +260,7 @@ def run_rope(
     """
     from cs336_basics.nn.attention import RotaryPositionalEmbedding as RoPE
 
-    rope = RoPE(theta=theta, d_k=d_k, max_seq_len=max_seq_len)
+    rope = RoPE(theta=theta, d_k=d_k, max_seq_len=max_seq_len, device=in_query_or_key.device)
     return rope(in_query_or_key, token_positions)
 
 
@@ -425,7 +441,7 @@ def run_rmsnorm(
     """
     from cs336_basics.nn.modules import RMSNorm
 
-    rmsnorm = RMSNorm(d_model, eps)
+    rmsnorm = RMSNorm(d_model, eps, device=weights.device, dtype=weights.dtype)
     rmsnorm.load_state_dict({"weight": weights})
     return rmsnorm(in_features)
 
