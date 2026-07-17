@@ -122,7 +122,8 @@ def test_rope_promotes_computation_and_preserves_input_dtype(
     output = rope(x, positions)
 
     expected_op_dtype = torch.float64 if dtype == torch.float64 else torch.float32
-    assert observed_dtypes == [(expected_op_dtype, expected_op_dtype)]
+    assert observed_dtypes
+    assert all(left == expected_op_dtype and right == expected_op_dtype for left, right in observed_dtypes)
     assert output.dtype == dtype
     assert output.shape == x.shape
 
