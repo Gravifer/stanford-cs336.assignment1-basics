@@ -427,14 +427,15 @@ def test_head_sequence_layouts_match_with_masks_and_gradients(
     ("strategy", "expected_rotation_calls", "expected_stack_calls"),
     [("auto", 1, 0), ("separate", 2, 0), ("stacked", 1, 1)],
 )
+@pytest.mark.parametrize("use_matrix_form", [True, False])
 def test_self_attention_qk_execution_strategies(
+    use_matrix_form: bool,
     strategy: Literal["auto", "separate", "stacked"],
     expected_rotation_calls: int,
     expected_stack_calls: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Matrix form avoids counting the elementwise implementation's internal pair stack.
-    rope = RotaryPositionalEmbedding(10_000.0, 4, 16, use_matrix_form=True)
+    rope = RotaryPositionalEmbedding(10_000.0, 4, 16, use_matrix_form=use_matrix_form)
     module = MultiheadSelfAttention(
         8,
         2,
@@ -453,7 +454,8 @@ def test_self_attention_qk_execution_strategies(
 
     def traced_stack(*args: Any, **kwargs: Any) -> torch.Tensor:
         nonlocal stack_calls
-        stack_calls += 1
+        if kwargs.get("dim", 0) == 0:
+            stack_calls += 1
         return original_stack(*args, **kwargs)
 
     monkeypatch.setattr(rope, "_apply_rotations", traced_apply)
