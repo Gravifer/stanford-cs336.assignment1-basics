@@ -19,8 +19,9 @@ from ..modules import Linear
 class RotaryPositionalEmbedding(nn.Module):
     """RoPE for attention, with cached rotation data.
 
-    Matrix-form caches store a 2-by-2 rotation for every frequency and are
-    therefore twice the size of the equivalent cosine/sine caches.
+    Elementwise cosine/sine rotation is the default. Optional matrix-form
+    caches store a 2-by-2 rotation for every frequency and are therefore twice
+    the size of the equivalent cosine/sine caches.
     """
 
     __constants__ = ["theta", "d_pair", "max_seq_len", "use_matrix_form"]
@@ -50,13 +51,14 @@ class RotaryPositionalEmbedding(nn.Module):
         device: torch.device
         | None = None,  # usual torch convention is to keep construction of this device-agnostic; we are following the handout-signature
         *,
-        use_matrix_form: bool = True,
+        use_matrix_form: bool = False,
     ):
         """
         theta        Θ value for the RoPE
         d_k          dimension of query and key vectors
         max_seq_len  Maximum sequence length that will be input
         device       Device to store the buffer on
+        use_matrix_form  Use cached 2-by-2 matrices instead of the default cosine/sine form
         """
         super().__init__()
         self.theta = theta

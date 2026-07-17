@@ -108,7 +108,7 @@ def test_swiglu_rejects_conflicting_weight_layouts(module_type: Callable[..., to
 def test_rope_promotes_computation_and_preserves_input_dtype(
     dtype: torch.dtype, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    rope = RotaryPositionalEmbedding(10_000.0, 8, 16).to(dtype=dtype)
+    rope = RotaryPositionalEmbedding(10_000.0, 8, 16, use_matrix_form=True).to(dtype=dtype)
     x = torch.randn(2, 4, 8, dtype=dtype)
     positions = torch.arange(4)
     observed_dtypes: list[tuple[torch.dtype, torch.dtype]] = []

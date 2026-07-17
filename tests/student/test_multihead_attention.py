@@ -433,7 +433,8 @@ def test_self_attention_qk_execution_strategies(
     expected_stack_calls: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    rope = RotaryPositionalEmbedding(10_000.0, 4, 16)
+    # Matrix form avoids counting the elementwise implementation's internal pair stack.
+    rope = RotaryPositionalEmbedding(10_000.0, 4, 16, use_matrix_form=True)
     module = MultiheadSelfAttention(
         8,
         2,

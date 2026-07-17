@@ -39,8 +39,16 @@ def test_rope_registers_only_selected_cache_representation() -> None:
     assert matrix.rot.numel() == 2 * (elementwise.cos.numel() + elementwise.sin.numel())
 
 
-def test_singleton_position_selection_expands_after_gather() -> None:
+def test_elementwise_rope_is_default() -> None:
     rope = RotaryPositionalEmbedding(10_000.0, 8, 16)
+
+    assert not rope.use_matrix_form
+    assert set(dict(rope.named_buffers())) == {"cos", "sin"}
+
+
+@pytest.mark.parametrize("use_matrix_form", [True, False])
+def test_singleton_position_selection_expands_after_gather(use_matrix_form: bool) -> None:
+    rope = RotaryPositionalEmbedding(10_000.0, 8, 16, use_matrix_form=use_matrix_form)
     x = torch.randn(2, 3, 5, 8)
 
     selection = rope._select_rotations(
@@ -50,10 +58,12 @@ def test_singleton_position_selection_expands_after_gather() -> None:
         layout_strategy="head_before_sequence",
     )
 
-    assert isinstance(selection, torch.Tensor)
-    assert selection.shape == (2, 3, 5, 4, 2, 2)
-    assert selection.stride(0) == 0
-    assert selection.stride(1) == 0
+    selections = (selection,) if isinstance(selection, torch.Tensor) else selection
+    expected_shape = (2, 3, 5, 4, 2, 2) if use_matrix_form else (2, 3, 5, 4)
+    for selected in selections:
+        assert selected.shape == expected_shape
+        assert selected.stride(0) == 0
+        assert selected.stride(1) == 0
 
 
 @pytest.mark.parametrize("use_matrix_form", [True, False])

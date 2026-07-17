@@ -198,30 +198,38 @@ Every case checks forward and gradient parity before timing. Reports include Pyt
 
 ### Local measurements
 
-The CUDA measurements below were collected on an NVIDIA GeForce RTX 3070 Ti Laptop GPU with Windows 11, Python 3.12.2, PyTorch 2.11.0+cu130, CUDA 13.0, and cuDNN 9.19. Inputs used FP32 with $B=4$, $S=128$, $H=8$, and $D=64$. Forward measurements used 10 warmup iterations and 50 timed repetitions; forward-plus-backward measurements used 5 warmup iterations and 20 repetitions. Each entry is the mean elapsed time per repetition, and the harness checked forward and gradient parity before timing.
+The expanded measurements used an NVIDIA GeForce RTX 3070 Ti Laptop GPU with Windows 11, Python 3.12.2, PyTorch 2.11.0+cu130, CUDA 13.0, cuDNN 9.19, and Triton 3.6. They covered FP32, FP16, and BF16; eager and compiled execution; forward and forward-plus-backward timing; sequence lengths from 128 through 1024; and every position, layout, and Q/K strategy exposed by the harness. The FP32 measurements used PyTorch's `highest` matrix-multiplication precision with TF32 disabled.
 
-The common self-attention case uses one shared sequence-position vector. Representative MHA results were:
+The first comprehensive sweep retained the harness's fixed case order. Sustained runs drove the laptop GPU from 78 °C to 89 °C. Its configured target temperature was 87 °C, and `nvidia-smi` reported accumulated software-thermal-slowdown time. Background GPU utilization also remained near 26--29 percent after the benchmark processes exited. Some late results consequently became non-monotonic. Post-run low clock readings were accompanied by NVIDIA's `Idle` reason and do not by themselves prove that those clocks applied inside timed kernels. Fixed-order measurements are therefore useful for parity, allocation, and large directional differences, but not for ranking close alternatives.
 
-| RoPE cache | Q/K execution | Activation layout | Forward (ms) | Forward + backward (ms) |
-|---|---|---|---:|---:|
-| matrix | zero-copy packed | head before sequence | 2.205 | **3.972** |
-| matrix | separate | head before sequence | 2.694 | 4.047 |
-| matrix | allocated stack | head before sequence | **1.903** | 6.559 |
-| matrix | zero-copy packed | head after sequence | 2.076 | 6.617 |
-| elementwise | zero-copy packed | head before sequence | 2.857 | 5.949 |
-| elementwise | separate | head before sequence | 3.323 | 6.770 |
-| elementwise | allocated stack | head before sequence | 2.675 | **5.916** |
-| elementwise | zero-copy packed | head after sequence | **2.562** | **5.894** |
-| elementwise | separate | head after sequence | 2.986 | 6.091 |
-| elementwise | allocated stack | head after sequence | 2.635 | 6.078 |
+Randomized controls reduced this ordering bias. Cases were shuffled for four rounds, with three warmup iterations and either ten MHA or twenty RoPE repetitions per round. The tables report medians of the four per-round means. For inferred positions and head-before-sequence RoPE, the isolated CUDA results were:
 
-Bold values are the best result within the same cache representation and measurement column. The matrix, head-before-sequence, zero-copy path was the best common training configuration in this run. Allocating a Q/K stack improved eager forward latency for matrix RoPE but increased forward-plus-backward latency substantially. This supports the current automatic policy: reuse a packed QK view when projection already provides one, without allocating a stack solely to combine the rotations. The head-after-sequence layout did not repay its forward benefit during backward for matrix RoPE on this workload.
+| Shape | Matrix separate (ms) | Elementwise separate (ms) | Matrix stacked (ms) | Elementwise stacked (ms) |
+|---|---:|---:|---:|---:|
+| $B=2,S=256$ | 0.929 | 0.648 | 0.953 | 0.447 |
+| $B=2,S=512$ | 1.869 | 0.699 | 1.900 | 0.477 |
+| $B=1,S=1024$ | 1.875 | 0.697 | 1.886 | 0.444 |
+| $B=4,S=512$ | 3.722 | 0.705 | 3.755 | 0.405 |
 
-An isolated RoPE forward comparison showed that the best elementwise stacked cases took approximately 0.50--0.65 ms, while matrix/separate cases were approximately 0.94--1.03 ms. The representative head-before-sequence results were 0.942 ms for matrix/separate, 0.960 ms for matrix/stacked, 0.949 ms for elementwise/separate, and 0.620 ms for elementwise/stacked. Forced stacking added roughly 3--8 MiB of peak allocation in nearby comparisons. For head-dependent position tensors, some MHA cases diverged much more sharply: matrix automatic execution reached 7.197 ms while elementwise automatic execution took 2.191 ms. That uncommon path warrants profiling before its difference is attributed to cache representation alone.
+Matrix-form latency grew approximately with the number of rotated values. Elementwise execution remained much cheaper over this range, with allocated stacking helping the CUDA elementwise kernel further. The result held for inferred, explicit one-dimensional, singleton-head, and per-head positions and for both activation layouts. On CPU at $B=4,H=8,S=512,D=64$, matrix RoPE took approximately 11.5--15.0 ms while elementwise RoPE took approximately 2.1--3.7 ms. Unlike CUDA, CPU generally favored separate elementwise execution over an allocated stack.
 
-`torch.compile` was verified on the same CUDA installation after configuring the Windows C++ toolchain and Triton. A single process compiling all twelve cache, execution, and layout combinations reached Dynamo's recompilation limit because the private strategy values participate in guards. Later cases were therefore not guaranteed to have comparable compilation status. Clean compiled comparisons should isolate cases in separate processes, or reset compiler state between cases, before those timings are used to choose an implementation. The peak-memory numbers also include parity-reference tensors retained by the harness, so their absolute values are not comparable across distant rows; the nearby stacking deltas above are the safer directional observation.
+The RoPE difference is partially hidden by projections and quadratic attention. Randomized FP32 MHA medians at $B=2,H=8,S=256,D=64$ for the zero-copy automatic path were:
 
-CPU observations are useful for finding accidental copies and gross overhead, but they do not establish CUDA policy. Results must be interpreted with their exact hardware, backend, dtype, shape, compilation state, and input strides. In particular, an allocated stack may win a small eager microbenchmark while still being undesirable as an automatic path because it adds memory traffic, changes backward behavior, and may lose once the producer or consumer is fused. The automatic implementation consequently combines Q/K only when that view already exists.
+| Positions | Matrix, head before (ms) | Elementwise, head before (ms) | Matrix, head after (ms) | Elementwise, head after (ms) |
+|---|---:|---:|---:|---:|
+| inferred | 1.905 | 2.051 | 2.044 | 2.034 |
+| explicit one-dimensional | 1.999 | 2.072 | 1.841 | 2.073 |
+| singleton head | 1.964 | 2.127 | 1.873 | 2.238 |
+
+At this moderate shape, complete-MHA differences were small enough that the projection and attention work obscured the isolated RoPE ranking. Neither activation layout won consistently. Allocated stacking sometimes improved forward latency by a small amount, but it materialized Q/K storage and was less consistent in backward and on CPU. Separate execution was usually slower than the automatic zero-copy packed path. These observations support retaining automatic zero-copy Q/K execution and keeping activation layout as a private experimental control.
+
+Elementwise caches also reduced memory. Representative eager FP32 MHA peaks at $B=2,S=512$ were approximately 89--94 MiB for elementwise RoPE and 97--102 MiB for matrix RoPE. FP16 peaks were approximately 57--59 MiB and 61--63 MiB respectively. The harness stores parity snapshots on CPU and discards the duplicate GPU reference module, so these figures no longer include retained validation outputs and parameter gradients.
+
+Real `torch.compile` runs completed for RoPE and MHA, and every compiled forward and gradient parity check passed. Compiler state was reset between cases. At $B=2,H=8,S=256,D=64$, compiled FP16 elementwise MHA cases took approximately 1.18--1.61 ms, while compiled matrix cases ranged from approximately 2.76--5.22 ms. FP32 compilation results were more mixed and remained sensitive to thermal and ordering effects. Compilation time itself was excluded from the timed region.
+
+Taken together, the smaller cache, lower isolated latency, better scaling, lower observed memory, and strong CPU behavior make elementwise cosine/sine rotation the implementation default. Matrix form remains available for comparison and for studying the direct $2\times2$ formulation. The benchmark does not justify automatically allocating a Q/K stack or exposing activation layout as a stable public option.
+
+For more reproducible future measurements, the harness should randomize case order, report distributions over multiple rounds, expose inferred positions directly, and sample temperature, clock-event reasons, P-state, clocks, and background utilization during rather than after timed execution.
 
 ## Initialization follows logical boundaries
 
@@ -332,4 +340,4 @@ The logical attention weights admit explicit head structure, unequal Q/K and V w
 
 Locality is an end-to-end property. Projection segmentation determines the strides of Q/K/V views; RoPE determines whether selected cache data or Q/K activations are materialized; attention determines its preferred layout; and the output projection benefits when $(H,D)$ can be joined as a view. A contiguous BSHD tensor already has the desired head-feature locality whether those axes are written separately or grouped.
 
-The implementation keeps these choices observable: packed self-projection is retained, Q/K selection is shared, automatic combination requires an existing zero-copy view, both activation orders are benchmarkable, and matrix versus elementwise RoPE is selectable. None of those representation choices settles the later initialization question. Whole-projection, per-head, and attention-specific scaling remain separate hypotheses to test.
+The implementation keeps these choices observable: packed self-projection is retained, Q/K selection is shared, automatic combination requires an existing zero-copy view, both activation orders are benchmarkable, and matrix versus elementwise RoPE is selectable. Elementwise RoPE is the default on the accumulated benchmark evidence, while matrix form remains an explicit comparison path. None of those representation choices settles the later initialization question. Whole-projection, per-head, and attention-specific scaling remain separate hypotheses to test.
