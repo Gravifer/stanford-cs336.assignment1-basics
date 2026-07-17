@@ -231,8 +231,8 @@ def _attention_weights(
             attn_bias: _Bias = attn_bias.to(dtype=scores.dtype)
 
     if is_causal:
-        query_positions = torch.arange(seq_q, device=scores.device).unsqueeze(-1)
-        key_positions = torch.arange(seq_k, device=scores.device).unsqueeze(0)
+        query_positions = einx.id("query -> query 1", torch.arange(seq_q, device=scores.device))
+        key_positions = einx.id("key -> 1 key", torch.arange(seq_k, device=scores.device))
         causal_mask: _Mask = key_positions <= query_positions
         if attn_bias is None:
             attn_bias: _Mask = causal_mask
