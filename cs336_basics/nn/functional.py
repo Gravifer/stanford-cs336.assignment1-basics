@@ -199,7 +199,6 @@ def _attention_weights(
     *,
     attn_mask: torch.Tensor | None,
     attn_bias: torch.Tensor | None,
-    enable_gqa: bool,
 ) -> torch.Tensor:
     """Apply mask composition, softmax, and dropout to precomputed scores."""
     type _Mask = Bool[torch.Tensor, "*slew query_len key_len"]
@@ -243,11 +242,6 @@ def _attention_weights(
             # Clone attn_bias to avoid mutating the caller's tensor
             attn_bias: _Bias = attn_bias.clone().masked_fill_(~causal_mask, float("-inf"))
 
-    if enable_gqa:
-        # Grouped query attention: average the attention scores across the query dimension.
-        # scores = einx.mean("... q k -> ... k", scores)
-        ...  # TODO
-
     if attn_bias is not None:
         # Support both boolean masks and additive numeric biases.
         if attn_bias.dtype == torch.bool:
@@ -268,7 +262,6 @@ def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled
     dropout_p: float = 0.0,
     is_causal: bool | Literal["torch"] | Literal["compose"] | Literal["noclone"] = False,
     scale: float | None = None,
-    enable_gqa: bool = False,
     *,
     attn_mask: MaskBias[torch.Tensor, "*slew query_len key_len"] | None = None,  # ty:ignore[invalid-syntax-in-forward-annotation]
     attn_bias: Float[torch.Tensor, "*slew query_len key_len"] | None = None,
@@ -294,8 +287,6 @@ def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled
         is_causal: Whether to apply causal masking.
             when set to "torch", the passed mask will be rejected.
         scale: Scaling factor for the attention scores; default to 1 / √d_k.
-        enable_gqa: Whether to enable grouped query attention.
-
     Returns:
         Output tensor of shape (*batch, query_len, d_v).
     """
@@ -313,9 +304,151 @@ def scaled_dot_product_attention(  # mimicking :func:`torch.nn.functional.scaled
         is_causal,
         attn_mask=attn_mask,
         attn_bias=attn_bias,
-        enable_gqa=enable_gqa,
     )
     return einx.dot("... q k, ... k d_v -> ... q d_v", attn_weights, value)
+
+
+def _grouped_attention_dimensions(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    *,
+    layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
+) -> tuple[int, int, int, int]:
+    """Validate explicitly headed GQA inputs and return ``(group, seq_q, seq_k, d_k)``."""
+    if query.ndim < 3 or key.ndim < 3 or value.ndim < 3:
+        raise ValueError("grouped query attention inputs must include sequence, head, and feature dimensions")
+    if query.shape[:-3] != key.shape[:-3] or key.shape[:-3] != value.shape[:-3]:
+        raise ValueError("grouped query attention inputs must have identical leading batch shapes")
+
+    if layout_strategy == "head_before_sequence":
+        query_heads, seq_q = query.shape[-3:-1]
+        key_heads, seq_k = key.shape[-3:-1]
+        value_heads, value_seq = value.shape[-3:-1]
+    else:
+        seq_q, query_heads = query.shape[-3:-1]
+        seq_k, key_heads = key.shape[-3:-1]
+        value_seq, value_heads = value.shape[-3:-1]
+
+    if query.shape[-1] != key.shape[-1]:
+        raise ValueError(
+            f"query and key head widths must match, got {query.shape[-1]} and {key.shape[-1]}"
+        )
+    if key_heads != value_heads:
+        raise ValueError(f"key and value head counts must match, got {key_heads} and {value_heads}")
+    if seq_k != value_seq:
+        raise ValueError(f"key and value sequence lengths must match, got {seq_k} and {value_seq}")
+    if key_heads <= 0 or query_heads % key_heads != 0:
+        raise ValueError(
+            f"query head count {query_heads} must be divisible by key/value head count {key_heads}"
+        )
+    return query_heads // key_heads, seq_q, seq_k, query.shape[-1]
+
+
+def _grouped_scaled_dot_product_attention_head_before_sequence(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    mask: torch.Tensor | None = None,
+    dropout_p: float = 0.0,
+    is_causal: bool | Literal["torch", "compose", "noclone"] = False,
+    scale: float | None = None,
+    *,
+    attn_mask: torch.Tensor | None = None,
+    attn_bias: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Internal GQA for ``(*batch, head, sequence, feature)`` activations."""
+    group, seq_q, seq_k, d_k = _grouped_attention_dimensions(
+        query,
+        key,
+        value,
+        layout_strategy="head_before_sequence",
+    )
+    grouped_query = einx.id(
+        "batch... (kv_head group) query d_k -> batch... kv_head group query d_k",
+        query,
+        group=group,
+    )
+    scores = einx.dot(
+        "batch... kv_head group query [d_k], batch... kv_head key [d_k] "
+        "-> batch... (kv_head group) query key",
+        grouped_query,
+        key,
+    ) * (1 / d_k**0.5 if scale is None else scale)
+    attn_weights = _attention_weights(
+        scores,
+        seq_q,
+        seq_k,
+        mask,
+        dropout_p,
+        is_causal,
+        attn_mask=attn_mask,
+        attn_bias=attn_bias,
+    )
+    grouped_weights = einx.id(
+        "batch... (kv_head group) query key -> batch... kv_head group query key",
+        attn_weights,
+        group=group,
+    )
+    return einx.dot(
+        "batch... kv_head group query key, batch... kv_head key d_v "
+        "-> batch... (kv_head group) query d_v",
+        grouped_weights,
+        value,
+    )
+
+
+def _grouped_scaled_dot_product_attention_head_after_sequence(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    mask: torch.Tensor | None = None,
+    dropout_p: float = 0.0,
+    is_causal: bool | Literal["torch", "compose", "noclone"] = False,
+    scale: float | None = None,
+    *,
+    attn_mask: torch.Tensor | None = None,
+    attn_bias: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Internal GQA for ``(*batch, sequence, head, feature)`` activations."""
+    group, seq_q, seq_k, d_k = _grouped_attention_dimensions(
+        query,
+        key,
+        value,
+        layout_strategy="head_after_sequence",
+    )
+    grouped_query = einx.id(
+        "batch... query (kv_head group) d_k -> batch... kv_head group query d_k",
+        query,
+        group=group,
+    )
+    scores = einx.dot(
+        "batch... kv_head group query [d_k], batch... key kv_head [d_k] "
+        "-> batch... (kv_head group) query key",
+        grouped_query,
+        key,
+    ) * (1 / d_k**0.5 if scale is None else scale)
+    attn_weights = _attention_weights(
+        scores,
+        seq_q,
+        seq_k,
+        mask,
+        dropout_p,
+        is_causal,
+        attn_mask=attn_mask,
+        attn_bias=attn_bias,
+    )
+    grouped_weights = einx.id(
+        "batch... (kv_head group) query key -> batch... kv_head group query key",
+        attn_weights,
+        group=group,
+    )
+    return einx.dot(
+        "batch... kv_head group query key, batch... key kv_head d_v "
+        "-> batch... query (kv_head group) d_v",
+        grouped_weights,
+        value,
+    )
 
 
 def _scaled_dot_product_attention_head_after_sequence(
@@ -347,6 +480,5 @@ def _scaled_dot_product_attention_head_after_sequence(
         is_causal,
         attn_mask=attn_mask,
         attn_bias=attn_bias,
-        enable_gqa=False,
     )
     return einx.dot("... head q k, ... k head d_v -> ... q head d_v", attn_weights, value)

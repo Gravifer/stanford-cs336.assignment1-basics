@@ -330,9 +330,18 @@ class MultiheadAttention(nn.Module):
 
     ``kdim`` and ``vdim`` describe the raw key and value input widths. The
     projected per-head widths are ``qk_head_dim`` and ``value_head_dim``.
-    These pairs are independent: the K projection has shape
-    ``(num_heads * qk_head_dim, kdim)``, while the V projection has shape
-    ``(num_heads * value_head_dim, vdim)``.
+    These pairs are independent. ``num_heads`` is the query-head count and
+    ``num_kv_heads`` is the shared key/value-head count. The K projection has
+    shape ``(num_kv_heads * qk_head_dim, kdim)``, while the V projection has
+    shape ``(num_kv_heads * value_head_dim, vdim)``.
+
+    Omitting ``num_kv_heads`` gives ordinary MHA. For eight query heads,
+    ``num_kv_heads=2`` gives GQA and ``num_kv_heads=1`` gives MQA::
+
+        MultiheadAttention(512, 8)
+        MultiheadAttention(512, 8, num_kv_heads=2)
+        MultiheadAttention(512, num_q_heads=8, num_kv_heads=1)
+
     Boolean masks follow :func:`cs336_basics.nn.functional.scaled_dot_product_attention`:
     ``True`` permits attention and ``False`` masks it.
     """
@@ -340,6 +349,7 @@ class MultiheadAttention(nn.Module):
     __constants__ = [
         "embed_dim",
         "num_heads",
+        "num_kv_heads",
         "kdim",
         "vdim",
         "qk_head_dim",
@@ -358,12 +368,70 @@ class MultiheadAttention(nn.Module):
     type ValueVec = Float[torch.Tensor, "{self.vdim}"]  # noqa: F821
     type OutputVec = Float[torch.Tensor, "{self.embed_dim}"]  # noqa: F821
 
+    @property
+    def num_q_heads(self) -> int:
+        """Query-head count, exposed as an explicit alias for ``num_heads``."""
+        return self.num_heads
+
+    @staticmethod
+    def _coalesce_alias(
+        canonical_name: str,
+        canonical_value: int | None,
+        alias_name: str,
+        alias_value: int | None,
+    ) -> int | None:
+        if canonical_value is not None and alias_value is not None:
+            raise ValueError(f"{canonical_name} and {alias_name} are mutually exclusive")
+        return canonical_value if canonical_value is not None else alias_value
+
+    @overload
     def __init__(
         self,
         embed_dim: int,
         num_heads: int,
         dropout: float = 0.0,
         *,
+        num_q_heads: None = None,
+        num_kv_heads: int | None = None,
+        kdim: int | None = None,
+        vdim: int | None = None,
+        qk_head_dim: int | None = None,
+        value_head_dim: int | None = None,
+        rope: RotaryPositionalEmbedding | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+        _layout_strategy: Literal["head_before_sequence", "head_after_sequence"] = "head_before_sequence",
+        _qk_execution_strategy: Literal["auto", "separate", "stacked"] = "auto",
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: None = None,
+        dropout: float = 0.0,
+        *,
+        num_q_heads: int,
+        num_kv_heads: int | None = None,
+        kdim: int | None = None,
+        vdim: int | None = None,
+        qk_head_dim: int | None = None,
+        value_head_dim: int | None = None,
+        rope: RotaryPositionalEmbedding | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+        _layout_strategy: Literal["head_before_sequence", "head_after_sequence"] = "head_before_sequence",
+        _qk_execution_strategy: Literal["auto", "separate", "stacked"] = "auto",
+    ) -> None: ...
+
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int | None = None,
+        dropout: float = 0.0,
+        *,
+        num_q_heads: int | None = None,
+        num_kv_heads: int | None = None,
         kdim: int | None = None,
         vdim: int | None = None,
         qk_head_dim: int | None = None,
@@ -374,10 +442,22 @@ class MultiheadAttention(nn.Module):
         _layout_strategy: Literal["head_before_sequence", "head_after_sequence"] = "head_before_sequence",
         _qk_execution_strategy: Literal["auto", "separate", "stacked"] = "auto",
     ) -> None:
+        resolved_num_heads = self._coalesce_alias("num_heads", num_heads, "num_q_heads", num_q_heads)
+        if resolved_num_heads is None:
+            raise TypeError("missing query-head count: supply num_heads or num_q_heads")
+        num_heads = resolved_num_heads
+        num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
+
         if embed_dim <= 0 or num_heads <= 0:
             raise ValueError(
                 "embed_dim and num_heads must be greater than 0, "
                 f"got embed_dim={embed_dim} and num_heads={num_heads} instead"
+            )
+        if num_kv_heads <= 0:
+            raise ValueError(f"num_kv_heads must be greater than 0, got {num_kv_heads}")
+        if num_heads % num_kv_heads != 0:
+            raise ValueError(
+                f"num_heads must be divisible by num_kv_heads, got {num_heads} and {num_kv_heads}"
             )
         if not 0.0 <= dropout <= 1.0:
             raise ValueError(f"dropout must be between 0 and 1, got {dropout}")
@@ -408,6 +488,7 @@ class MultiheadAttention(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
         self.kdim = kdim
         self.vdim = vdim
         self.qk_head_dim = qk_head_dim
@@ -415,8 +496,8 @@ class MultiheadAttention(nn.Module):
         self.dropout = dropout
         self.rope = rope
         self.q_proj_dim = num_heads * qk_head_dim
-        self.k_proj_dim = num_heads * qk_head_dim
-        self.v_proj_dim = num_heads * value_head_dim
+        self.k_proj_dim = num_kv_heads * qk_head_dim
+        self.v_proj_dim = num_kv_heads * value_head_dim
         self._qkv_same_input_dim = kdim == embed_dim and vdim == embed_dim
         self._layout_strategy = _layout_strategy
         self._qk_execution_strategy = _qk_execution_strategy
@@ -455,6 +536,8 @@ class MultiheadAttention(nn.Module):
         )
         return self.q_proj_weight, self.k_proj_weight, self.v_proj_weight
 
+    # Public and complete by design: unlike torch.nn.MultiheadAttention's private
+    # helper, this resets both the input projections and the delegated output projection.
     def reset_parameters(self) -> None:
         """Reset all projection parameters."""
         if self.in_proj_weight is not None:
@@ -505,7 +588,12 @@ class MultiheadAttention(nn.Module):
                 q=self.q_proj_dim,
                 k=self.k_proj_dim,
             )
-            return projected_q, projected_k, projected_v, projected_qk
+            return (
+                projected_q,
+                projected_k,
+                projected_v,
+                projected_qk if self.num_heads == self.num_kv_heads else None,
+            )
 
         if key is value:
             q_weight, kv_weight = einx.id(
@@ -541,15 +629,15 @@ class MultiheadAttention(nn.Module):
         projected_qk: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
         if self._layout_strategy == "head_before_sequence":
-            q_description = "batch... query (head d_k) -> batch... head query d_k"
-            k_description = "batch... key (head d_k) -> batch... head key d_k"
-            v_description = "batch... key (head d_v) -> batch... head key d_v"
-            qk_description = "batch... query (qk head d_k) -> qk batch... head query d_k"
+            q_description = "batch... query (query_head d_k) -> batch... query_head query d_k"
+            k_description = "batch... key (kv_head d_k) -> batch... kv_head key d_k"
+            v_description = "batch... key (kv_head d_v) -> batch... kv_head key d_v"
+            qk_description = "batch... query (qk query_head d_k) -> qk batch... query_head query d_k"
         else:
-            q_description = "batch... query (head d_k) -> batch... query head d_k"
-            k_description = "batch... key (head d_k) -> batch... key head d_k"
-            v_description = "batch... key (head d_v) -> batch... key head d_v"
-            qk_description = "batch... query (qk head d_k) -> qk batch... query head d_k"
+            q_description = "batch... query (query_head d_k) -> batch... query query_head d_k"
+            k_description = "batch... key (kv_head d_k) -> batch... key kv_head d_k"
+            v_description = "batch... key (kv_head d_v) -> batch... key kv_head d_v"
+            qk_description = "batch... query (qk query_head d_k) -> qk batch... query query_head d_k"
 
         qk = None
         if projected_qk is not None:
@@ -557,7 +645,7 @@ class MultiheadAttention(nn.Module):
                 qk_description,
                 projected_qk,
                 qk=2,
-                head=self.num_heads,
+                query_head=self.num_heads,
                 d_k=self.qk_head_dim,
             )
             q, k = qk[0], qk[1]
@@ -565,19 +653,19 @@ class MultiheadAttention(nn.Module):
             q = einx.id(
                 q_description,
                 projected_q,
-                head=self.num_heads,
+                query_head=self.num_heads,
                 d_k=self.qk_head_dim,
             )
             k = einx.id(
                 k_description,
                 projected_k,
-                head=self.num_heads,
+                kv_head=self.num_kv_heads,
                 d_k=self.qk_head_dim,
             )
         v = einx.id(
             v_description,
             projected_v,
-            head=self.num_heads,
+            kv_head=self.num_kv_heads,
             d_v=self.value_head_dim,
         )
         return q, k, v, qk
@@ -665,11 +753,18 @@ class MultiheadAttention(nn.Module):
         if self.rope is not None:
             q, k = self._apply_rope(q, k, packed_qk, query_positions, key_positions)
 
-        attention = (
-            F.scaled_dot_product_attention
-            if self._layout_strategy == "head_before_sequence"
-            else F._scaled_dot_product_attention_head_after_sequence
-        )
+        if self.num_heads == self.num_kv_heads:
+            attention = (
+                F.scaled_dot_product_attention
+                if self._layout_strategy == "head_before_sequence"
+                else F._scaled_dot_product_attention_head_after_sequence
+            )
+        else:
+            attention = (
+                F._grouped_scaled_dot_product_attention_head_before_sequence
+                if self._layout_strategy == "head_before_sequence"
+                else F._grouped_scaled_dot_product_attention_head_after_sequence
+            )
         attended = attention(
             q,
             k,
@@ -681,23 +776,23 @@ class MultiheadAttention(nn.Module):
         )
         if self._layout_strategy == "head_before_sequence":
             joined = einx.id(
-                "batch... head query d_v -> batch... query (head d_v)",
+                "batch... query_head query d_v -> batch... query (query_head d_v)",
                 attended,
-                head=self.num_heads,
+                query_head=self.num_heads,
                 d_v=self.value_head_dim,
             )
         else:
             joined = einx.id(
-                "batch... query head d_v -> batch... query (head d_v)",
+                "batch... query query_head d_v -> batch... query (query_head d_v)",
                 attended,
-                head=self.num_heads,
+                query_head=self.num_heads,
                 d_v=self.value_head_dim,
             )
         return self.output_proj(joined)
 
     def extra_repr(self) -> str:
         return (
-            f"embed_dim={self.embed_dim}, num_heads={self.num_heads}, "
+            f"embed_dim={self.embed_dim}, num_heads={self.num_heads}, num_kv_heads={self.num_kv_heads}, "
             f"kdim={self.kdim}, vdim={self.vdim}, qk_head_dim={self.qk_head_dim}, "
             f"value_head_dim={self.value_head_dim}, dropout={self.dropout}, rope={self.rope is not None}, "
             f"packed={self.in_proj_weight is not None}, layout={self._layout_strategy}, "
@@ -774,6 +869,8 @@ class MultiheadSelfAttention(MultiheadAttention):
     ``d_model`` is the input and output width. ``d_k`` and ``d_v`` are the
     projected per-head query/key and value widths. The corresponding
     :class:`MultiheadAttention` names are available as keyword-only aliases.
+    ``num_kv_heads`` selects ordinary MHA, GQA, or MQA in the same way as on
+    :class:`MultiheadAttention`.
 
     Note:
         This class inherits from :class:`MultiheadAttention` to reuse its
@@ -797,17 +894,6 @@ class MultiheadSelfAttention(MultiheadAttention):
     def d_v(self) -> int:
         return self.value_head_dim
 
-    @staticmethod
-    def _coalesce_dimension_alias(
-        course_name: str,
-        course_value: int | None,
-        mha_name: str,
-        mha_value: int | None,
-    ) -> int | None:
-        if course_value is not None and mha_value is not None:
-            raise ValueError(f"{course_name} and {mha_name} are mutually exclusive")
-        return course_value if course_value is not None else mha_value
-
     @overload
     def __init__(
         self,
@@ -817,6 +903,28 @@ class MultiheadSelfAttention(MultiheadAttention):
         d_v: int | None = None,
         dropout: float = 0.0,
         *,
+        num_q_heads: None = None,
+        num_kv_heads: int | None = None,
+        embed_dim: int | None = None,
+        qk_head_dim: int | None = None,
+        value_head_dim: int | None = None,
+        rope: RotaryPositionalEmbedding | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+        _layout_strategy: Literal["head_before_sequence", "head_after_sequence"] = "head_before_sequence",
+        _qk_execution_strategy: Literal["auto", "separate", "stacked"] = "auto",
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        d_model: int,
+        *,
+        num_q_heads: int,
+        num_kv_heads: int | None = None,
+        d_k: int | None = None,
+        d_v: int | None = None,
+        dropout: float = 0.0,
         embed_dim: int | None = None,
         qk_head_dim: int | None = None,
         value_head_dim: int | None = None,
@@ -833,6 +941,27 @@ class MultiheadSelfAttention(MultiheadAttention):
         *,
         embed_dim: int,
         num_heads: int,
+        num_q_heads: None = None,
+        num_kv_heads: int | None = None,
+        d_k: int | None = None,
+        d_v: int | None = None,
+        qk_head_dim: int | None = None,
+        value_head_dim: int | None = None,
+        dropout: float = 0.0,
+        rope: RotaryPositionalEmbedding | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+        _layout_strategy: Literal["head_before_sequence", "head_after_sequence"] = "head_before_sequence",
+        _qk_execution_strategy: Literal["auto", "separate", "stacked"] = "auto",
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        *,
+        embed_dim: int,
+        num_q_heads: int,
+        num_kv_heads: int | None = None,
         d_k: int | None = None,
         d_v: int | None = None,
         qk_head_dim: int | None = None,
@@ -853,6 +982,8 @@ class MultiheadSelfAttention(MultiheadAttention):
         d_v: int | None = None,
         dropout: float = 0.0,
         *,
+        num_q_heads: int | None = None,
+        num_kv_heads: int | None = None,
         embed_dim: int | None = None,
         qk_head_dim: int | None = None,
         value_head_dim: int | None = None,
@@ -862,17 +993,19 @@ class MultiheadSelfAttention(MultiheadAttention):
         _layout_strategy: Literal["head_before_sequence", "head_after_sequence"] = "head_before_sequence",
         _qk_execution_strategy: Literal["auto", "separate", "stacked"] = "auto",
     ) -> None:
-        model_dim = self._coalesce_dimension_alias("d_model", d_model, "embed_dim", embed_dim)
-        projected_qk_dim = self._coalesce_dimension_alias("d_k", d_k, "qk_head_dim", qk_head_dim)
-        projected_value_dim = self._coalesce_dimension_alias("d_v", d_v, "value_head_dim", value_head_dim)
+        model_dim = self._coalesce_alias("d_model", d_model, "embed_dim", embed_dim)
+        query_heads = self._coalesce_alias("num_heads", num_heads, "num_q_heads", num_q_heads)
+        projected_qk_dim = self._coalesce_alias("d_k", d_k, "qk_head_dim", qk_head_dim)
+        projected_value_dim = self._coalesce_alias("d_v", d_v, "value_head_dim", value_head_dim)
         if model_dim is None:
             raise TypeError("missing model width: supply d_model or embed_dim")
-        if num_heads is None:
-            raise TypeError("missing required argument: num_heads")
+        if query_heads is None:
+            raise TypeError("missing query-head count: supply num_heads or num_q_heads")
 
         super().__init__(
             embed_dim=model_dim,
-            num_heads=num_heads,
+            num_heads=query_heads,
+            num_kv_heads=num_kv_heads,
             dropout=dropout,
             kdim=model_dim,
             vdim=model_dim,
