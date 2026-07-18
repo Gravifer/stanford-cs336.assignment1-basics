@@ -9,6 +9,18 @@ from cs336_basics.nn import functional as F
 from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 
 
+class _AttentionLayer(torch.nn.Module):
+    def __init__(self, attention: MultiheadAttention) -> None:
+        super().__init__()
+        self.attention = attention
+
+
+class _AttentionStack(torch.nn.Module):
+    def __init__(self, attention: MultiheadAttention) -> None:
+        super().__init__()
+        self.layers = torch.nn.ModuleList([_AttentionLayer(attention)])
+
+
 def test_mha_matches_torch_with_distinct_input_widths() -> None:
     torch.manual_seed(0)
     actual = MultiheadAttention(embed_dim=12, num_heads=3, kdim=5, vdim=7)
@@ -460,6 +472,83 @@ def test_load_state_dict_rejects_incomplete_compatibility_layout_for_packed_stor
 
     with pytest.raises(ValueError, match="incomplete"):
         module.load_state_dict({key: torch.randn(8, 8)}, strict=False)
+
+
+def test_load_state_dict_translation_composes_through_module_list_without_mutating_input() -> None:
+    module = MultiheadAttention(embed_dim=8, num_heads=2)
+    stack = _AttentionStack(module)
+    q_weight = torch.full((8, 8), 1.0)
+    k_weight = torch.full((8, 8), 2.0)
+    v_weight = torch.full((8, 8), 3.0)
+    output_weight = torch.full((8, 8), 4.0)
+    state_dict = {
+        "layers.0.attention.q_proj.weight": q_weight,
+        "layers.0.attention.k_proj.weight": k_weight,
+        "layers.0.attention.v_proj.weight": v_weight,
+        "layers.0.attention.output_proj.weight": output_weight,
+    }
+    original_items = tuple(state_dict.items())
+
+    result = stack.load_state_dict(state_dict)
+
+    assert result.missing_keys == []
+    assert result.unexpected_keys == []
+    assert tuple(state_dict.items()) == original_items
+    assert module.in_proj_weight is not None
+    torch.testing.assert_close(module.in_proj_weight, torch.cat((q_weight, k_weight, v_weight)))
+    torch.testing.assert_close(module.output_proj.weight, output_weight)
+
+
+def test_nested_load_state_dict_preserves_partial_separate_storage_loading() -> None:
+    module = MultiheadAttention(embed_dim=8, num_heads=2, kdim=5, vdim=7)
+    stack = _AttentionStack(module)
+    q_weight = torch.randn(8, 8)
+
+    result = stack.load_state_dict({"layers.0.attention.q_proj.weight": q_weight}, strict=False)
+
+    assert result.missing_keys == [
+        "layers.0.attention.k_proj_weight",
+        "layers.0.attention.v_proj_weight",
+        "layers.0.attention.output_proj.weight",
+    ]
+    assert result.unexpected_keys == []
+    assert module.q_proj_weight is not None
+    torch.testing.assert_close(module.q_proj_weight, q_weight)
+
+
+def test_nested_native_load_state_dict_preserves_assign_behavior() -> None:
+    source = _AttentionStack(MultiheadAttention(embed_dim=8, num_heads=2))
+    target_attention = MultiheadAttention(embed_dim=8, num_heads=2)
+    target = _AttentionStack(target_attention)
+    state_dict = source.state_dict()
+    old_parameter = target_attention.in_proj_weight
+
+    result = target.load_state_dict(state_dict, assign=True)
+
+    assert result.missing_keys == []
+    assert result.unexpected_keys == []
+    assert target_attention.in_proj_weight is not old_parameter
+    assert target_attention.in_proj_weight is not None
+    assert target_attention.in_proj_weight.data_ptr() == state_dict["layers.0.attention.in_proj_weight"].data_ptr()
+
+
+@pytest.mark.parametrize(
+    "state_dict",
+    [
+        {
+            "layers.0.attention.in_proj_weight": torch.randn(24, 8),
+            "layers.0.attention.q_proj.weight": torch.randn(8, 8),
+        },
+        {"layers.0.attention.q_proj.weight": torch.randn(8, 8)},
+    ],
+)
+def test_nested_load_state_dict_rejects_conflicting_or_incomplete_layouts(
+    state_dict: dict[str, torch.Tensor],
+) -> None:
+    stack = _AttentionStack(MultiheadAttention(embed_dim=8, num_heads=2))
+
+    with pytest.raises(ValueError, match="conflicting|incomplete"):
+        stack.load_state_dict(state_dict, strict=False)
 
 
 @pytest.mark.parametrize("use_rope", [False, True])

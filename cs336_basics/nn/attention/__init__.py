@@ -1,5 +1,4 @@
 import warnings
-from collections.abc import Mapping
 from typing import Any, Literal, overload
 
 import einops
@@ -7,7 +6,6 @@ import einx
 import torch
 from jaxtyping import Float, Int, Shaped
 from torch import nn
-from torch.nn.modules.module import _IncompatibleKeys
 
 from cs336_basics.nn import functional as F
 
@@ -529,6 +527,7 @@ class MultiheadAttention(nn.Module):
             self.k_proj_weight = nn.Parameter(torch.empty((self.k_proj_dim, kdim), device=device, dtype=dtype))
             self.v_proj_weight = nn.Parameter(torch.empty((self.v_proj_dim, vdim), device=device, dtype=dtype))
         self.output_proj = Linear(num_heads * value_head_dim, embed_dim, device=device, dtype=dtype)
+        self.register_load_state_dict_pre_hook(self._translate_projection_state_dict)
         self.reset_parameters()
 
     def _separate_projection_weights(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -977,29 +976,35 @@ class MultiheadAttention(nn.Module):
             f"qk_execution={self._qk_execution_strategy}"
         )
 
-    def load_state_dict(
+    def _translate_projection_state_dict(
         self,
-        state_dict: Mapping[str, Any],
-        strict: bool = True,
-        assign: bool = False,
-    ) -> _IncompatibleKeys:
-        """Load native weights or translate the earlier delegated projection layout."""
-        delegated_keys = ("q_proj.weight", "k_proj.weight", "v_proj.weight")
-        separate_keys = ("q_proj_weight", "k_proj_weight", "v_proj_weight")
+        module: nn.Module,
+        state_dict: dict[str, Any],
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        """Translate compatible projection layouts before PyTorch loads this module."""
+        del module, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        delegated_keys = tuple(prefix + key for key in ("q_proj.weight", "k_proj.weight", "v_proj.weight"))
+        separate_keys = tuple(prefix + key for key in ("q_proj_weight", "k_proj_weight", "v_proj_weight"))
+        packed_key = prefix + "in_proj_weight"
         has_delegated = any(key in state_dict for key in delegated_keys)
         has_separate = any(key in state_dict for key in separate_keys)
-        has_packed = "in_proj_weight" in state_dict
+        has_packed = packed_key in state_dict
         if sum((has_delegated, has_separate, has_packed)) > 1:
             raise ValueError("state_dict contains conflicting packed and unpacked Q/K/V weight layouts")
 
-        translated: dict[str, Any] = {}
         if has_delegated:
             present = [key in state_dict for key in delegated_keys]
             if self.in_proj_weight is not None:
                 if not all(present):
                     raise ValueError("delegated Q/K/V weight layout is incomplete")
                 q_weight, k_weight, v_weight = (state_dict[key] for key in delegated_keys)
-                translated["in_proj_weight"] = einx.id(
+                state_dict[packed_key] = einx.id(
                     "q input, k input, v input -> (q + k + v) input",
                     q_weight,
                     k_weight,
@@ -1008,21 +1013,19 @@ class MultiheadAttention(nn.Module):
                     k=self.k_proj_dim,
                     v=self.v_proj_dim,
                 )
+                for key in delegated_keys:
+                    del state_dict[key]
             else:
-                translated.update(
-                    (target, state_dict[source])
-                    for source, target in zip(delegated_keys, separate_keys, strict=True)
-                    if source in state_dict
-                )
+                for source, target in zip(delegated_keys, separate_keys, strict=True):
+                    if source in state_dict:
+                        state_dict[target] = state_dict.pop(source)
         elif has_separate:
             present = [key in state_dict for key in separate_keys]
-            if self.in_proj_weight is None:
-                translated.update((key, state_dict[key]) for key in separate_keys if key in state_dict)
-            else:
+            if self.in_proj_weight is not None:
                 if not all(present):
                     raise ValueError("separate Q/K/V weight layout is incomplete for packed storage")
                 q_weight, k_weight, v_weight = (state_dict[key] for key in separate_keys)
-                translated["in_proj_weight"] = einx.id(
+                state_dict[packed_key] = einx.id(
                     "q input, k input, v input -> (q + k + v) input",
                     q_weight,
                     k_weight,
@@ -1031,14 +1034,11 @@ class MultiheadAttention(nn.Module):
                     k=self.k_proj_dim,
                     v=self.v_proj_dim,
                 )
+                for key in separate_keys:
+                    del state_dict[key]
         elif has_packed:
             if self.in_proj_weight is None:
                 raise ValueError("cannot load packed Q/K/V weights when key or value input widths differ")
-            translated["in_proj_weight"] = state_dict["in_proj_weight"]
-
-        known_projection_keys = {"in_proj_weight", *delegated_keys, *separate_keys}
-        translated.update((key, value) for key, value in state_dict.items() if key not in known_projection_keys)
-        return super().load_state_dict(translated, strict, assign)
 
 
 class MultiheadSelfAttention(MultiheadAttention):
