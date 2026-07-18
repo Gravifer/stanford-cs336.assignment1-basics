@@ -1,16 +1,149 @@
-from collections.abc import Mapping
-from typing import Any
+import warnings
+from pathlib import Path
+from typing import Any, Literal
 
 import einx
 import torch
 from jaxtyping import Float, Shaped
 from torch import dtype, nn
-from torch.nn.modules.module import _IncompatibleKeys
 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
 
 from .modules import Linear, ModelVec
+
+
+_COURSE_SWIGLU_KEY_TO_ROLE = {
+    "w1.weight": "gate",
+    "w2.weight": "output",
+    "w3.weight": "value",
+}
+_COURSE_SWIGLU_WARNING = (
+    "loading course SwiGLU keys: w1.weight maps to gate, w2.weight maps to output, "
+    "and w3.weight maps to value"
+)
+_SWIGLU_WARNING_SKIP_PREFIXES = (str(Path(__file__).parent), str(Path(torch.__path__[0])))
+
+
+def _translate_swiglu_state_dict(
+    state_dict: dict[str, Any],
+    prefix: str,
+    d_ff: int,
+    destination: Literal["delegate", "owned", "packed"],
+) -> None:
+    """Translate one compatible SwiGLU representation into native destination keys."""
+    course_keys = {role: prefix + key for key, role in _COURSE_SWIGLU_KEY_TO_ROLE.items()}
+    semantic_keys = {
+        "value": prefix + "value_weight",
+        "gate": prefix + "gate_weight",
+        "output": prefix + "out_weight",
+    }
+    packed_key = prefix + "in_weight"
+    delegate_keys = {
+        "value": prefix + "value_linear.weight",
+        "gate": prefix + "gate_linear.weight",
+        "output": prefix + "out_linear.weight",
+    }
+
+    has_course = any(key in state_dict for key in course_keys.values())
+    has_semantic_input = any(semantic_keys[role] in state_dict for role in ("value", "gate"))
+    has_packed_input = packed_key in state_dict
+    has_delegate_native = destination == "delegate" and any(key in state_dict for key in delegate_keys.values())
+    has_semantic_output = semantic_keys["output"] in state_dict
+
+    if has_course:
+        non_course_keys = {packed_key, *semantic_keys.values()}
+        if destination == "delegate":
+            non_course_keys.update(delegate_keys.values())
+        if any(key in state_dict for key in non_course_keys):
+            raise ValueError("state_dict contains both course and another SwiGLU weight layout")
+    if has_delegate_native and (has_semantic_input or has_packed_input or has_semantic_output):
+        raise ValueError("state_dict contains both native and compatibility SwiGLU weight layouts")
+    if has_packed_input and has_semantic_input:
+        raise ValueError("state_dict contains both 'in_weight' and 'value_weight'/'gate_weight'; cannot load")
+
+    if has_course:
+        logical = {
+            role: state_dict.pop(key)
+            for role, key in course_keys.items()
+            if key in state_dict
+        }
+        if destination == "packed" and (("value" in logical) != ("gate" in logical)):
+            raise ValueError("unpacked SwiGLU input weight layout is incomplete for packed storage")
+        warnings.warn(
+            _COURSE_SWIGLU_WARNING,
+            UserWarning,
+            stacklevel=2,
+            skip_file_prefixes=_SWIGLU_WARNING_SKIP_PREFIXES,
+        )
+        _store_logical_swiglu_weights(state_dict, prefix, d_ff, destination, logical)
+        return
+
+    if has_delegate_native:
+        return
+
+    if has_packed_input:
+        if destination == "packed":
+            return
+        value_weight, gate_weight = einx.id(
+            "(value + gate) d_model -> value d_model, gate d_model",
+            state_dict.pop(packed_key),
+            value=d_ff,
+            gate=d_ff,
+        )
+        logical = {"value": value_weight, "gate": gate_weight}
+        if has_semantic_output:
+            logical["output"] = state_dict.pop(semantic_keys["output"])
+        _store_logical_swiglu_weights(state_dict, prefix, d_ff, destination, logical)
+        return
+
+    if destination == "owned":
+        return
+
+    logical = {
+        role: state_dict.pop(key)
+        for role, key in semantic_keys.items()
+        if key in state_dict
+    }
+    _store_logical_swiglu_weights(state_dict, prefix, d_ff, destination, logical)
+
+
+def _store_logical_swiglu_weights(
+    state_dict: dict[str, Any],
+    prefix: str,
+    d_ff: int,
+    destination: Literal["delegate", "owned", "packed"],
+    logical: dict[str, Any],
+) -> None:
+    """Store semantic weights under one module's native keys."""
+    if destination == "packed":
+        has_value = "value" in logical
+        has_gate = "gate" in logical
+        if has_value != has_gate:
+            raise ValueError("unpacked SwiGLU input weight layout is incomplete for packed storage")
+        if has_value:
+            state_dict[prefix + "in_weight"] = einx.id(
+                "value d_model, gate d_model -> (value + gate) d_model",
+                logical["value"],
+                logical["gate"],
+                value=d_ff,
+                gate=d_ff,
+            )
+        if "output" in logical:
+            state_dict[prefix + "out_weight"] = logical["output"]
+        return
+
+    suffixes = (
+        {
+            "value": "value_linear.weight",
+            "gate": "gate_linear.weight",
+            "output": "out_linear.weight",
+        }
+        if destination == "delegate"
+        else {"value": "value_weight", "gate": "gate_weight", "output": "out_weight"}
+    )
+    for role, weight in logical.items():
+        state_dict[prefix + suffixes[role]] = weight
 
 
 class SwiGLU_delegate(nn.Module):
@@ -48,6 +181,7 @@ class SwiGLU_delegate(nn.Module):
         self.value_linear = Linear(d_model, d_ff, device=device, dtype=dtype)
         self.gate_linear = Linear(d_model, d_ff, device=device, dtype=dtype)
         self.out_linear = Linear(d_ff, d_model, device=device, dtype=dtype)
+        self.register_load_state_dict_pre_hook(self._translate_state_dict)
 
     def reset_parameters(self) -> None:
         """Reset the parameters of the module."""
@@ -66,35 +200,19 @@ class SwiGLU_delegate(nn.Module):
     def extra_repr(self) -> str:
         return f"d_model={self.d_model}, d_ff={self.d_ff}"
 
-    def load_state_dict(
-        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
-    ) -> _IncompatibleKeys:
-        """Load the state dict into the module.
-
-        We need to load into the Linear members
-        """
-        translated: dict[str, Any] = {}
-        if "in_weight" in state_dict:
-            if "value_weight" in state_dict or "gate_weight" in state_dict:
-                raise ValueError("state_dict contains both 'in_weight' and 'value_weight'/'gate_weight'; cannot load")
-            in_weight = state_dict["in_weight"]
-            # unpack in_weight into value_weight and gate_weight; we'll let errors propagate, if any
-            value_weight, gate_weight = einx.id(
-                "(v + g) d_model -> v d_model, g d_model", in_weight, v=self.d_ff, g=self.d_ff
-            )
-            translated["value_linear.weight"] = value_weight
-            translated["gate_linear.weight"] = gate_weight
-        else:
-            if "value_weight" in state_dict:
-                translated["value_linear.weight"] = state_dict["value_weight"]
-            if "gate_weight" in state_dict:
-                translated["gate_linear.weight"] = state_dict["gate_weight"]
-        if "out_weight" in state_dict:
-            translated["out_linear.weight"] = state_dict["out_weight"]
-
-        known_keys = {"in_weight", "value_weight", "gate_weight", "out_weight"}
-        translated.update((key, value) for key, value in state_dict.items() if key not in known_keys)
-        return super().load_state_dict(translated, strict, assign)
+    def _translate_state_dict(
+        self,
+        module: nn.Module,
+        state_dict: dict[str, Any],
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        del module, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        _translate_swiglu_state_dict(state_dict, prefix, self.d_ff, "delegate")
 
 
 class SwiGLU_own_weights(nn.Module):
@@ -132,6 +250,7 @@ class SwiGLU_own_weights(nn.Module):
         self.value_weight = nn.Parameter(torch.empty((d_ff, d_model), device=device, dtype=dtype))
         self.gate_weight = nn.Parameter(torch.empty((d_ff, d_model), device=device, dtype=dtype))
         self.out_weight = nn.Parameter(torch.empty((d_model, d_ff), device=device, dtype=dtype))
+        self.register_load_state_dict_pre_hook(self._translate_state_dict)
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -151,35 +270,19 @@ class SwiGLU_own_weights(nn.Module):
     def extra_repr(self) -> str:
         return f"d_model={self.d_model}, d_ff={self.d_ff}; weights owned"
 
-    def load_state_dict(
-        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
-    ) -> _IncompatibleKeys:
-        """Load the state dict into the module.
-
-        We need to load into the Linear members
-        """
-        translated: dict[str, Any] = {}
-        if "in_weight" in state_dict:
-            if "value_weight" in state_dict or "gate_weight" in state_dict:
-                raise ValueError("state_dict contains both 'in_weight' and 'value_weight'/'gate_weight'; cannot load")
-            in_weight = state_dict["in_weight"]
-            # unpack in_weight into value_weight and gate_weight; we'll let errors propagate, if any
-            value_weight, gate_weight = einx.id(
-                "(v + g) d_model -> v d_model, g d_model", in_weight, v=self.d_ff, g=self.d_ff
-            )
-            translated["value_weight"] = value_weight
-            translated["gate_weight"] = gate_weight
-        else:
-            if "value_weight" in state_dict:
-                translated["value_weight"] = state_dict["value_weight"]
-            if "gate_weight" in state_dict:
-                translated["gate_weight"] = state_dict["gate_weight"]
-        if "out_weight" in state_dict:
-            translated["out_weight"] = state_dict["out_weight"]
-
-        known_keys = {"in_weight", "value_weight", "gate_weight", "out_weight"}
-        translated.update((key, value) for key, value in state_dict.items() if key not in known_keys)
-        return super().load_state_dict(translated, strict, assign)
+    def _translate_state_dict(
+        self,
+        module: nn.Module,
+        state_dict: dict[str, Any],
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        del module, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        _translate_swiglu_state_dict(state_dict, prefix, self.d_ff, "owned")
 
 
 class SwiGLU_packed_input(nn.Module):
@@ -215,6 +318,7 @@ class SwiGLU_packed_input(nn.Module):
         self.d_model = d_model
         self.in_weight = nn.Parameter(torch.empty((2 * d_ff, d_model), device=device, dtype=dtype))
         self.out_weight = nn.Parameter(torch.empty((d_model, d_ff), device=device, dtype=dtype))
+        self.register_load_state_dict_pre_hook(self._translate_state_dict)
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -233,33 +337,19 @@ class SwiGLU_packed_input(nn.Module):
     def extra_repr(self) -> str:
         return f"d_model={self.d_model}, d_ff={self.d_ff}; value and gate weights packed"
 
-    def load_state_dict(
-        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
-    ) -> _IncompatibleKeys:
-        """Load the state dict into the module.
-
-        We need to pack the value and gate weights
-        """
-        translated: dict[str, Any] = {}
-        if "in_weight" not in state_dict:
-            if "value_weight" in state_dict and "gate_weight" in state_dict:
-                translated["in_weight"] = einx.id(
-                    "v d_model, g d_model -> (v + g) d_model",
-                    state_dict["value_weight"],
-                    state_dict["gate_weight"],
-                    v=self.d_ff,
-                    g=self.d_ff,
-                )
-        else:
-            if "value_weight" in state_dict or "gate_weight" in state_dict:
-                raise ValueError("state_dict contains both 'in_weight' and 'value_weight'/'gate_weight'; cannot load")
-            translated["in_weight"] = state_dict["in_weight"]
-        if "out_weight" in state_dict:
-            translated["out_weight"] = state_dict["out_weight"]
-
-        known_keys = {"in_weight", "value_weight", "gate_weight", "out_weight"}
-        translated.update((key, value) for key, value in state_dict.items() if key not in known_keys)
-        return super().load_state_dict(translated, strict, assign)
+    def _translate_state_dict(
+        self,
+        module: nn.Module,
+        state_dict: dict[str, Any],
+        prefix: str,
+        local_metadata: dict[str, Any],
+        strict: bool,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
+    ) -> None:
+        del module, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        _translate_swiglu_state_dict(state_dict, prefix, self.d_ff, "packed")
 
 
 SwiGLU = SwiGLU_packed_input
