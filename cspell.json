@@ -18,6 +18,7 @@
         "kdim",
         "keepdim",
         "majorize",
+        "matmul",
         "namedtensor",
         "noclone",
         "nonblocking",
