@@ -118,7 +118,7 @@ W_{QKV}^{\mathrm{registered}}
 \mathbb{R}^{(2h d_k+h d_v)\times d_{\mathrm{model}}}.
 $$
 
-This gives stable linear-weight and checkpoint conventions, makes each complete Q, K, and V projection a view, and still permits grouped `einx` descriptions. When raw input widths differ, the implementation owns three separate two-dimensional parameters because no single rectangular linear operator can consume all three inputs. This storage decision is implemented by [`MultiheadAttention.__init__`](nn/attention/__init__.py#sym:MultiheadAttention.__init__) and compatible checkpoint layouts are translated by a prefix-aware public Torch load pre-hook.
+This gives stable linear-weight and checkpoint conventions, makes each complete Q, K, and V projection a view, and still permits grouped `einx` descriptions. When raw input widths differ, the implementation owns three separate two-dimensional parameters because no single rectangular linear operator can consume all three inputs. This storage decision is implemented by [`MultiheadAttention.__init__`](nn/attention/modules.py#sym:MultiheadAttention.__init__) and compatible checkpoint layouts are translated by a prefix-aware public Torch load pre-hook.
 
 ## Activation lifetimes determine locality
 
@@ -166,7 +166,7 @@ Q and K share positional selection whenever their shapes and positions permit it
 - **Separate:** the rotation cache is selected once, then applied independently to Q and K. This is the automatic fallback for cross-attention or incompatible positions.
 - **Allocated stack:** Q and K are stacked into a new tensor and rotated once. This path exists only as an explicit benchmark control; local timing does not promote it into automatic production behavior.
 
-The paired behavior is exposed by [`RotaryPositionalEmbedding.apply_qk`](nn/attention/__init__.py#sym:RotaryPositionalEmbedding.apply_qk), while cache selection and application remain separate protected operations. Matrix and elementwise implementations have the same position contract, output dtype, shape, and gradients.
+The paired behavior is exposed by [`RotaryPositionalEmbedding.apply_qk`](nn/attention/rope.py#sym:RotaryPositionalEmbedding.apply_qk), while cache selection and application remain separate protected operations. Matrix and elementwise implementations have the same position contract, output dtype, shape, and gradients.
 
 ## Projection count under course assumptions
 
@@ -249,7 +249,7 @@ $$
 
 Because of truncation, the realized variance is slightly below the nominal variance of the corresponding untruncated normal distribution. The implementation is [`starter_trunc_normal_for_linear_`](nn/initializer.py#sym:starter_trunc_normal_for_linear_).
 
-Packed storage does not cause the complete width $2h d_k+h d_v$ to be treated as one undifferentiated fan-out. [`MultiheadAttention.reset_parameters`](nn/attention/__init__.py#sym:MultiheadAttention.reset_parameters) obtains Q, K, and V views and applies the starter recipe using
+Packed storage does not cause the complete width $2h d_k+h d_v$ to be treated as one undifferentiated fan-out. [`MultiheadAttention.reset_parameters`](nn/attention/modules.py#sym:MultiheadAttention.reset_parameters) obtains Q, K, and V views and applies the starter recipe using
 
 $$
 d_{\mathrm{out},Q}=h d_k,

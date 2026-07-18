@@ -34,7 +34,7 @@ The one-head case $H_q=H_{kv}=1$ follows the ordinary MHA path because no sharin
 
 ## Module interface
 
-[`MultiheadAttention`](nn/attention/__init__.py#sym:MultiheadAttention) keeps `num_heads` as the canonical query-head count. The keyword-only `num_q_heads` is a mutually exclusive, read-only alias that makes the distinction explicit at call sites. `num_kv_heads=None` resolves to the query-head count.
+[`MultiheadAttention`](nn/attention/modules.py#sym:MultiheadAttention) keeps `num_heads` as the canonical query-head count. The keyword-only `num_q_heads` is a mutually exclusive, read-only alias that makes the distinction explicit at call sites. `num_kv_heads=None` resolves to the query-head count.
 
 ```python
 # Eight query heads and eight key/value heads: ordinary MHA
@@ -47,7 +47,7 @@ MultiheadAttention(512, 8, num_kv_heads=2)
 MultiheadAttention(512, num_q_heads=8, num_kv_heads=1)
 ```
 
-[`MultiheadSelfAttention`](nn/attention/__init__.py#sym:MultiheadSelfAttention) exposes the same head-count controls. Its course-native positional arguments remain `d_model`, `num_heads`, `d_k`, `d_v`, and `dropout`. Calls using the `num_q_heads` alias keep the remaining dimensions keyword-only, avoiding an ambiguous positional gap where `num_heads` would otherwise appear.
+[`MultiheadSelfAttention`](nn/attention/modules.py#sym:MultiheadSelfAttention) exposes the same head-count controls. Its course-native positional arguments remain `d_model`, `num_heads`, `d_k`, `d_v`, and `dropout`. Calls using the `num_q_heads` alias keep the remaining dimensions keyword-only, avoiding an ambiguous positional gap where `num_heads` would otherwise appear.
 
 The head counts are constructor state because they determine parameter shapes. A forward-time Boolean switch would not say how many key/value heads the module owns.
 
