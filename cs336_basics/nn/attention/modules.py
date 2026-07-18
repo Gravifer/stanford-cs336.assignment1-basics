@@ -10,6 +10,7 @@ from cs336_basics.nn import functional as F
 from .. import initializer as init
 from .._typing import MaskBias
 from ..modules import Linear
+from . import _head_layout
 from .rope import RotaryPositionalEmbedding
 
 
@@ -616,19 +617,7 @@ class MultiheadAttention(nn.Module):
                 key_position_layout=resolved_key_layout,
             )
 
-        if self.num_heads == self.num_kv_heads:
-            attention = (
-                F.scaled_dot_product_attention
-                if self._layout_strategy == "head_before_sequence"
-                else F._scaled_dot_product_attention_head_after_sequence
-            )
-        else:
-            attention = (
-                F._grouped_scaled_dot_product_attention_head_before_sequence
-                if self._layout_strategy == "head_before_sequence"
-                else F._grouped_scaled_dot_product_attention_head_after_sequence
-            )
-        attended = attention(
+        attended = _head_layout.scaled_dot_product_attention(
             q,
             k,
             v,
@@ -636,6 +625,7 @@ class MultiheadAttention(nn.Module):
             dropout_p=self.dropout if self.training else 0.0,
             is_causal=is_causal,
             scale=self.qk_head_dim**-0.5,
+            layout_strategy=self._layout_strategy,
         )
         if self._layout_strategy == "head_before_sequence":
             joined = einx.id(
@@ -904,4 +894,3 @@ class MultiheadSelfAttention(MultiheadAttention):
             key_positions=token_positions,
             position_layout=position_layout,
         )
-
