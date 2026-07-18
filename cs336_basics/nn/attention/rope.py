@@ -1,3 +1,5 @@
+"""Rotary positional embeddings for headed attention activations."""
+
 import warnings
 from typing import Literal
 
@@ -33,6 +35,7 @@ class RotaryPositionalEmbedding(nn.Module):
 
     @property
     def d_k(self) -> int:
+        """Query/key feature width rotated by this module."""
         return 2 * self.d_pair
 
     def __init__(
@@ -94,6 +97,7 @@ class RotaryPositionalEmbedding(nn.Module):
         *,
         layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
     ) -> tuple[int, ...]:
+        """Return logical position axes for the selected head layout."""
         if layout_strategy == "head_before_sequence":
             return tuple(x.shape[:-1])
         if layout_strategy == "head_after_sequence":
@@ -110,6 +114,7 @@ class RotaryPositionalEmbedding(nn.Module):
         broadcast_positions: bool,
         layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
     ) -> tuple[torch.Tensor, tuple[int, ...]]:
+        """Validate positions while retaining their smallest broadcastable view."""
         target_shape = self._position_target_shape(x, layout_strategy=layout_strategy)
         token_positions = token_positions.to(x.device)
         if token_positions.ndim == 0:
@@ -147,6 +152,7 @@ class RotaryPositionalEmbedding(nn.Module):
         broadcast_positions: bool,
         layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """Select cached rotations without duplicating broadcastable indices."""
         target_shape = self._position_target_shape(x, layout_strategy=layout_strategy)
         if token_positions is None:
             seq_len = target_shape[-1]
@@ -184,6 +190,7 @@ class RotaryPositionalEmbedding(nn.Module):
         *,
         layout_strategy: Literal["head_before_sequence", "head_after_sequence"],
     ) -> torch.Tensor:
+        """Apply selected matrix or cosine/sine rotations in a stable dtype."""
         in_dtype = x.dtype
         cache = selection if isinstance(selection, torch.Tensor) else selection[0]
         op_dtype = torch.promote_types(in_dtype, cache.dtype)
@@ -241,6 +248,7 @@ class RotaryPositionalEmbedding(nn.Module):
         selection: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
         size: int,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """Share selected rotation data across a newly stacked Q/K axis."""
         def prepend(x: torch.Tensor) -> torch.Tensor:
             return x.unsqueeze(0).expand((size, *x.shape))
 

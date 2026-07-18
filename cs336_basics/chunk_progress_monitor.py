@@ -1,4 +1,5 @@
 #! /usr/bin/env python3
+"""Concurrent terminal progress display for independently processed chunks."""
 
 import shutil
 import sys
@@ -36,11 +37,13 @@ class ChunkedProgressBar:
         self.title: str = title
 
     def start(self) -> None:
+        """Start the background renderer and print the progress title."""
         self._thread.start()
         self._stream.write(f"{self.title}\n")
         self._stream.flush()
 
     def stop(self) -> None:
+        """Stop rendering, drain pending updates, and print the final frame."""
         self._stop_event.set()
         self._thread.join()
         # Drain any messages that arrived after the last render loop iteration

@@ -1,3 +1,5 @@
+"""SwiGLU feed-forward modules and compatible checkpoint translation."""
+
 import warnings
 from pathlib import Path
 from typing import Any, Literal
@@ -198,6 +200,7 @@ class SwiGLU_delegate(nn.Module):
         return self.out_linear(gated)
 
     def extra_repr(self) -> str:
+        """Return model and hidden widths for module repr."""
         return f"d_model={self.d_model}, d_ff={self.d_ff}"
 
     def _translate_state_dict(
@@ -268,6 +271,7 @@ class SwiGLU_own_weights(nn.Module):
         return F.linear(F.swiglu(value, gate), self.out_weight)
 
     def extra_repr(self) -> str:
+        """Return widths and owned-storage information for module repr."""
         return f"d_model={self.d_model}, d_ff={self.d_ff}; weights owned"
 
     def _translate_state_dict(
@@ -335,6 +339,7 @@ class SwiGLU_packed_input(nn.Module):
         return F.linear(F.swiglu(value, gate), self.out_weight)
 
     def extra_repr(self) -> str:
+        """Return widths and packed-input storage information for module repr."""
         return f"d_model={self.d_model}, d_ff={self.d_ff}; value and gate weights packed"
 
     def _translate_state_dict(

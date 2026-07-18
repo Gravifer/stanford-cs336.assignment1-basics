@@ -1,3 +1,5 @@
+"""Multi-head, grouped-query, and multi-query attention modules."""
+
 from typing import Any, Literal, overload
 
 import einx
@@ -75,6 +77,7 @@ class MultiheadAttention(nn.Module):
         alias_name: str,
         alias_value: int | None,
     ) -> int | None:
+        """Resolve mutually exclusive course and Torch-style argument names."""
         if canonical_value is not None and alias_value is not None:
             raise ValueError(f"{canonical_name} and {alias_name} are mutually exclusive")
         return canonical_value if canonical_value is not None else alias_value
@@ -218,6 +221,7 @@ class MultiheadAttention(nn.Module):
         self.reset_parameters()
 
     def _separate_projection_weights(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return logical Q/K/V weights from separate physical storage."""
         assert self.q_proj_weight is not None, (
             "projection storage invariant broken: in_proj_weight is None but q_proj_weight is also None; "
             f"the separate Q weight should have shape ({self.q_proj_dim}, {self.embed_dim})"
@@ -324,6 +328,7 @@ class MultiheadAttention(nn.Module):
         projected_v: torch.Tensor,
         projected_qk: torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """Expose projected Q/K/V head axes in the configured activation layout."""
         if self._layout_strategy == "head_before_sequence":
             q_description = "batch... query (query_head d_k) -> batch... query_head query d_k"
             k_description = "batch... key (kv_head d_k) -> batch... kv_head key d_k"
@@ -373,6 +378,7 @@ class MultiheadAttention(nn.Module):
         *,
         position_layout: _PositionLayout,
     ) -> torch.Tensor | None:
+        """Align batch-oriented positions with one projected head tensor."""
         if token_positions is None or position_layout == "head":
             return token_positions
 
@@ -409,6 +415,7 @@ class MultiheadAttention(nn.Module):
         *,
         position_layout: _PositionLayout,
     ) -> torch.Tensor:
+        """Apply RoPE to one projected tensor under its position-layout contract."""
         assert self.rope is not None, "RoPE application requires a registered RotaryPositionalEmbedding"
         token_positions = self._prepare_rope_positions(x, token_positions, position_layout=position_layout)
         selection = self.rope._select_rotations(
@@ -430,6 +437,7 @@ class MultiheadAttention(nn.Module):
         query_position_layout: _PositionLayout,
         key_position_layout: _PositionLayout,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Rotate Q/K together when their storage and position contracts permit."""
         assert self.rope is not None, "Q/K RoPE application requires a registered RotaryPositionalEmbedding"
         shared_positions = q.shape == k.shape and (
             (query_positions is None and key_positions is None)
@@ -467,6 +475,7 @@ class MultiheadAttention(nn.Module):
         )
 
     def _validate_inputs(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> None:
+        """Validate raw Q/K/V batch, sequence, and feature dimensions."""
         if query.shape[:-2] != key.shape[:-2] or key.shape[:-2] != value.shape[:-2]:
             raise ValueError(
                 "query, key, and value must have identical batch shapes, "
@@ -487,6 +496,7 @@ class MultiheadAttention(nn.Module):
         *,
         mask_layout: _MaskLayout,
     ) -> torch.Tensor | None:
+        """Insert a singleton head axis for batch-aligned masks."""
         if mask_layout not in ("batch", "head"):
             raise ValueError(f"mask_layout must be 'batch' or 'head', got {mask_layout!r}")
         if mask is None or mask_layout == "head":
@@ -520,6 +530,7 @@ class MultiheadAttention(nn.Module):
         query_position_layout: _PositionLayout | None,
         key_position_layout: _PositionLayout | None,
     ) -> tuple[_PositionLayout, _PositionLayout]:
+        """Resolve the shared position-layout alias or independent Q/K layouts."""
         if position_layout is not None and (query_position_layout is not None or key_position_layout is not None):
             raise ValueError(
                 "position_layout is mutually exclusive with query_position_layout and key_position_layout"
@@ -644,6 +655,7 @@ class MultiheadAttention(nn.Module):
         return self.output_proj(joined)
 
     def extra_repr(self) -> str:
+        """Return constructor-relevant attention settings for module repr."""
         return (
             f"embed_dim={self.embed_dim}, num_heads={self.num_heads}, num_kv_heads={self.num_kv_heads}, "
             f"kdim={self.kdim}, vdim={self.vdim}, qk_head_dim={self.qk_head_dim}, "
@@ -738,14 +750,17 @@ class MultiheadSelfAttention(MultiheadAttention):
 
     @property
     def d_model(self) -> int:
+        """Model input and output width."""
         return self.embed_dim
 
     @property
     def d_k(self) -> int:
+        """Projected query/key width per head."""
         return self.qk_head_dim
 
     @property
     def d_v(self) -> int:
+        """Projected value width per head."""
         return self.value_head_dim
 
     @overload

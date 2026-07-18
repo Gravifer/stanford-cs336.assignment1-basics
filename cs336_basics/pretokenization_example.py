@@ -1,3 +1,5 @@
+"""Reference helper for splitting a corpus at special-token boundaries."""
+
 import os
 from typing import BinaryIO
 

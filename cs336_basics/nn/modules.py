@@ -1,3 +1,5 @@
+"""Core neural-network modules used by the course implementations."""
+
 from typing import Never, NoReturn
 
 import einx
@@ -19,6 +21,8 @@ type ModelVec = Float[torch.Tensor, "{self.d_model}"]  # ruff takes issue with t
 
 
 class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torch.nn.sparse`
+    """Lookup table mapping token IDs to learned embedding vectors."""
+
     __constants__ = ["num_embeddings", "embedding_dim"]
     num_embeddings: int  # vocab_size
     embedding_dim: int  # d_model
@@ -60,6 +64,7 @@ class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`t
         return F.embedding(token_ids, self.weight)
 
     def extra_repr(self) -> str:
+        """Return vocabulary size and embedding width for module repr."""
         return f"num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim}"
 
     @classmethod
@@ -135,10 +140,12 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
             nn.init.ones_(self.weight)
 
     def forward(self, x: Shaped[ModelVec, "*batch sequence_length"]) -> Shaped[ModelVec, "*batch sequence_length"]:
+        """Normalize the final model-width axis and preserve the input dtype."""
         in_dtype = x.dtype
         return self.rms_norm(x, (self.d_model,), self.weight, self.eps).to(in_dtype)
 
     def extra_repr(self) -> str:
+        """Return width, epsilon, and affine configuration for module repr."""
         return f"d_model={self.d_model}, eps={self.eps}, elementwise_affine={self.elementwise_affine}"
 
     @staticmethod
@@ -358,6 +365,7 @@ class SoftMax(nn.Module):  # mimicking :cls:`torch.nn.Softmax`
         return F.softmax(in_features, dim=self.dim, _stacklevel=5)  # pytorch sets an extra high stacklevel for this
 
     def extra_repr(self) -> str:
+        """Return the configured softmax dimension for module repr."""
         return f"dim={self.dim}"
 
     @staticmethod
@@ -409,19 +417,24 @@ class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
         return F.linear(x, self.weight)
 
     def extra_repr(self) -> str:
+        """Return input/output widths and the bias-free contract for module repr."""
         return f"in_features={self.in_features}, out_features={self.out_features}, NO bias"
 
     @property
     def shape(self) -> tuple[int, ...]:
+        """Shape of the underlying weight matrix."""
         return self.weight.shape
 
     @property
     def dtype(self) -> dtype:
+        """Dtype of the underlying weight matrix."""
         return self.weight.dtype
 
 
 @deprecated("we won't have a SiLU module; without the in-place option, not using the functional version is moot.")
 class SiLU(nn.Module):
+    """Deprecated module placeholder; use the functional SiLU operation."""
+
     def __init__(self, inplace: bool = False) -> NoReturn:
         raise NotImplementedError(
             "we won't have a SiLU module; without the in-place option, not using the functional version is moot."

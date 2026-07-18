@@ -1,3 +1,5 @@
+"""Functional neural-network primitives with named tensor transformations."""
+
 import warnings
 from typing import Literal
 

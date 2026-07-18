@@ -1,3 +1,5 @@
+"""Course implementations for the CS336 assignment basics."""
+
 import importlib.metadata
 
 try:

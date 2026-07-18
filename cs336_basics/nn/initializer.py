@@ -1,3 +1,5 @@
+"""Course initialization recipes for linear and embedding weights."""
+
 import warnings
 
 import torch
