@@ -41,7 +41,8 @@ class SwiGLU_delegate(nn.Module):
     ):
         super().__init__()
         # if no d_ff supplied use 8/3 * d_model rounded to the nearest multiple of 64
-        d_ff = d_ff or (int(8 * d_model / 3.0) >> 6) << 6
+        if d_ff is None:
+            d_ff = 64 * max(1, (d_model + 12) // 24)
         self.d_ff = d_ff
         self.d_model = d_model
         self.value_linear = Linear(d_model, d_ff, device=device, dtype=dtype)
@@ -124,12 +125,14 @@ class SwiGLU_own_weights(nn.Module):
     ):
         super().__init__()
         # if no d_ff supplied use 8/3 * d_model rounded to the nearest multiple of 64
-        d_ff = d_ff or (int(8 * d_model / 3.0) >> 6) << 6
+        if d_ff is None:
+            d_ff = 64 * max(1, (d_model + 12) // 24)
         self.d_ff = d_ff
         self.d_model = d_model
         self.value_weight = nn.Parameter(torch.empty((d_ff, d_model), device=device, dtype=dtype))
         self.gate_weight = nn.Parameter(torch.empty((d_ff, d_model), device=device, dtype=dtype))
         self.out_weight = nn.Parameter(torch.empty((d_model, d_ff), device=device, dtype=dtype))
+        self.reset_parameters()
 
     def reset_parameters(self) -> None:
         """Reset the parameters of the module."""
@@ -206,11 +209,13 @@ class SwiGLU_packed_input(nn.Module):
     ):
         super().__init__()
         # if no d_ff supplied use 8/3 * d_model rounded to the nearest multiple of 64
-        d_ff = d_ff or (int(8 * d_model / 3.0) >> 6) << 6
+        if d_ff is None:
+            d_ff = 64 * max(1, (d_model + 12) // 24)
         self.d_ff = d_ff
         self.d_model = d_model
         self.in_weight = nn.Parameter(torch.empty((2 * d_ff, d_model), device=device, dtype=dtype))
         self.out_weight = nn.Parameter(torch.empty((d_model, d_ff), device=device, dtype=dtype))
+        self.reset_parameters()
 
     def reset_parameters(self) -> None:
         """Reset the parameters of the module."""
