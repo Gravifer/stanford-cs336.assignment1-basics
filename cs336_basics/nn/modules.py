@@ -14,7 +14,7 @@ from typing_extensions import deprecated  # ? ruff doesn't see that python 3.13 
 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
-from cs336_basics.nn.analytics import Module
+from cs336_basics.nn.analytics import CostRepr, Module, TensorRepr, _CostScope
 
 # from .feed_forward import SwiGLU  # ! would be circular
 
@@ -416,6 +416,22 @@ class Linear(Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
         """Apply the linear transformation to the input."""
         # return torch.nn.functional.linear(x, self.weight)
         return F.linear(x, self.weight)
+
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Describe the backend contraction used by this linear projection."""
+        tokens = scope.symbol("tokens")
+        d_in = scope.symbol("d_in", self.in_features)
+        d_out = scope.symbol("d_out", self.out_features)
+        return (
+            CostRepr(
+                name="linear projection",
+                operation=torch.ops.aten.bmm.default,
+                arguments={
+                    "self": TensorRepr((1, tokens, d_in), self.weight.dtype),
+                    "mat2": TensorRepr((1, d_in, d_out), self.weight.dtype),
+                },
+            ),
+        )
 
     def extra_repr(self) -> str:
         """Return input/output widths and the bias-free contract for module repr."""
