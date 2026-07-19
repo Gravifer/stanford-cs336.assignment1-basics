@@ -11,7 +11,7 @@ from torch import dtype, nn
 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
-from cs336_basics.nn.analytics import Module
+from cs336_basics.nn.analytics import CostRepr, Module, TensorRepr, _CostChild, _CostScope
 
 from .modules import Linear, ModelVec
 
@@ -20,6 +20,26 @@ _COURSE_SWIGLU_KEY_TO_ROLE = {
     "w2.weight": "output",
     "w3.weight": "value",
 }
+
+
+def _projection_cost(
+    name: str,
+    tokens: object,
+    d_in: object,
+    d_out: object,
+    dtype: torch.dtype,
+) -> CostRepr:
+    """Describe one bias-free projection using the repository's ATen lowering."""
+    return CostRepr(
+        name=name,
+        operation=torch.ops.aten.bmm.default,
+        arguments={
+            "self": TensorRepr((1, tokens, d_in), dtype),
+            "mat2": TensorRepr((1, d_in, d_out), dtype),
+        },
+    )
+
+
 _COURSE_SWIGLU_WARNING = (
     "loading course SwiGLU keys: w1.weight maps to gate, w2.weight maps to output, and w3.weight maps to value"
 )
@@ -193,6 +213,34 @@ class SwiGLU_delegate(Module):
         gated: Shaped[HiddenVec, "*mapped"] = F.swiglu(value, gate)
         return self.out_linear(gated)
 
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Classify all local work as non-matmul and delegate projections."""
+        del scope
+        return ()
+
+    def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
+        """Bind all delegated projections to one SwiGLU invocation shape."""
+        tokens = scope.symbol("tokens")
+        d_model = scope.symbol("d_model", self.d_model)
+        d_ff = scope.symbol("d_ff", self.d_ff)
+        return (
+            scope.child(
+                "value_linear",
+                self.value_linear,
+                bindings={"tokens": tokens, "d_in": d_model, "d_out": d_ff},
+            ),
+            scope.child(
+                "gate_linear",
+                self.gate_linear,
+                bindings={"tokens": tokens, "d_in": d_model, "d_out": d_ff},
+            ),
+            scope.child(
+                "out_linear",
+                self.out_linear,
+                bindings={"tokens": tokens, "d_in": d_ff, "d_out": d_model},
+            ),
+        )
+
     def extra_repr(self) -> str:
         """Return model and hidden widths for module repr."""
         return f"d_model={self.d_model}, d_ff={self.d_ff}"
@@ -264,6 +312,17 @@ class SwiGLU_own_weights(Module):
         gate = F.linear(x, self.gate_weight)
         return F.linear(F.swiglu(value, gate), self.out_weight)
 
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Describe the three independently stored SwiGLU projections."""
+        tokens = scope.symbol("tokens")
+        d_model = scope.symbol("d_model", self.d_model)
+        d_ff = scope.symbol("d_ff", self.d_ff)
+        return (
+            _projection_cost("SwiGLU value projection", tokens, d_model, d_ff, self.value_weight.dtype),
+            _projection_cost("SwiGLU gate projection", tokens, d_model, d_ff, self.gate_weight.dtype),
+            _projection_cost("SwiGLU output projection", tokens, d_ff, d_model, self.out_weight.dtype),
+        )
+
     def extra_repr(self) -> str:
         """Return widths and owned-storage information for module repr."""
         return f"d_model={self.d_model}, d_ff={self.d_ff}; weights owned"
@@ -331,6 +390,22 @@ class SwiGLU_packed_input(Module):
         vg = F.linear(x, self.in_weight)
         value, gate = einx.id("mapped... (v + g) -> mapped... v, mapped... g", vg, v=self.d_ff, g=self.d_ff)
         return F.linear(F.swiglu(value, gate), self.out_weight)
+
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Describe the packed gate/value and output projections."""
+        tokens = scope.symbol("tokens")
+        d_model = scope.symbol("d_model", self.d_model)
+        d_ff = scope.symbol("d_ff", self.d_ff)
+        return (
+            _projection_cost(
+                "SwiGLU packed gate/value projection",
+                tokens,
+                d_model,
+                2 * d_ff,
+                self.in_weight.dtype,
+            ),
+            _projection_cost("SwiGLU output projection", tokens, d_ff, d_model, self.out_weight.dtype),
+        )
 
     def extra_repr(self) -> str:
         """Return widths and packed-input storage information for module repr."""

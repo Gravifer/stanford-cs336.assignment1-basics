@@ -7,6 +7,7 @@ from torch import nn
 from torch.utils.flop_counter import FlopCounterMode
 
 from cs336_basics.nn.analytics import CostRepr, Module, TensorRepr, cost_repr, matmul_flops
+from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
 from cs336_basics.nn.modules import Linear
 
 
@@ -119,3 +120,26 @@ def test_unsupported_operations_and_external_modules_remain_visible() -> None:
     assert any("has no static local-cost provider" in message for message in external_report.unsupported)
     with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
         matmul_flops(Unsupported().cost_repr(), strict=True)
+
+
+@pytest.mark.parametrize(
+    ("module_type", "term_count"),
+    [
+        (SwiGLU_delegate, 3),
+        (SwiGLU_own_weights, 3),
+        (SwiGLU_packed_input, 2),
+    ],
+)
+def test_swiglu_variants_preserve_distinct_operations_and_equal_totals(module_type, term_count) -> None:
+    module = module_type(4, 7, device=torch.device("meta"))
+    tree = module.cost_repr()
+    tokens = tree.find_symbols("tokens")[0]
+    report = matmul_flops(tree, substitutions={tokens: 6}, strict=True)
+    counter = FlopCounterMode(display=False)
+
+    with counter:
+        module(torch.empty((2, 3, 4), device="meta"))
+
+    assert len(report.terms) == term_count
+    assert report.bound_total == counter.get_total_flops()
+    assert set(counter.get_flop_counts()["Global"]) == {torch.ops.aten.bmm}
