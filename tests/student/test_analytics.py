@@ -7,6 +7,7 @@ from torch import nn
 from torch.utils.flop_counter import FlopCounterMode
 
 from cs336_basics.nn.analytics import CostRepr, Module, TensorRepr, cost_repr, matmul_flops
+from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
 from cs336_basics.nn.modules import Linear
 
@@ -116,7 +117,9 @@ def test_unsupported_operations_and_external_modules_remain_visible() -> None:
 
     assert report.symbolic_total == 0
     assert "no matmul policy for aten.sin.default" in report.unsupported[0]
-    assert any("has not classified its static local matmul work" in message for message in unclassified_report.unsupported)
+    assert any(
+        "has not classified its static local matmul work" in message for message in unclassified_report.unsupported
+    )
     assert any("has no static local-cost provider" in message for message in external_report.unsupported)
     with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
         matmul_flops(Unsupported().cost_repr(), strict=True)
@@ -143,3 +146,50 @@ def test_swiglu_variants_preserve_distinct_operations_and_equal_totals(module_ty
     assert len(report.terms) == term_count
     assert report.bound_total == counter.get_total_flops()
     assert set(counter.get_flop_counts()["Global"]) == {torch.ops.aten.bmm}
+
+
+@pytest.mark.parametrize("num_kv_heads", [4, 2, 1])
+def test_self_attention_symbolic_cost_matches_meta_flop_counter(num_kv_heads: int) -> None:
+    module = MultiheadSelfAttention(
+        d_model=8,
+        num_heads=4,
+        num_kv_heads=num_kv_heads,
+        d_k=2,
+        d_v=2,
+        rope=RotaryPositionalEmbedding(10_000.0, 2, 8, device=torch.device("meta")),
+        device=torch.device("meta"),
+    )
+    tree = module.cost_repr()
+    substitutions = {
+        tree.find_symbols("batch")[0]: 2,
+        tree.find_symbols("sequence")[0]: 3,
+    }
+    report = matmul_flops(tree, substitutions=substitutions, strict=True)
+    counter = FlopCounterMode(display=False)
+
+    with counter:
+        module(torch.empty((2, 3, 8), device="meta"))
+
+    assert len(report.terms) == 4
+    assert report.bound_total == counter.get_total_flops()
+    assert set(counter.get_flop_counts()["Global"]) == {torch.ops.aten.bmm}
+
+
+def test_grouped_attention_encodes_batching_and_heads_in_operands() -> None:
+    tree = MultiheadSelfAttention(8, 4, num_kv_heads=2, d_k=2, d_v=2).cost_repr()
+    scores = tree.costs[1]
+    batch = tree.find_symbols("batch")[0]
+    sequence = tree.find_symbols("sequence")[0]
+
+    bound_shape = tuple(axis.subs(tree.bindings) for axis in _tensor(scores.arguments["self"]).shape)
+    assert bound_shape == (2 * batch, 2 * sequence, 2)
+    assert scores.repetitions == 1
+
+
+def test_generic_attention_remains_visible_as_invocation_dependent() -> None:
+    tree = MultiheadAttention(8, 4).cost_repr()
+    report = matmul_flops(tree)
+
+    assert any("has not classified its static local matmul work" in message for message in report.unsupported)
+    with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
+        matmul_flops(tree, strict=True)

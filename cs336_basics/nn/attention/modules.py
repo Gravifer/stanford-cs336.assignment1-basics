@@ -8,7 +8,7 @@ from jaxtyping import Float, Int, Shaped
 from torch import nn
 
 from cs336_basics.nn import functional as F
-from cs336_basics.nn.analytics import Module
+from cs336_basics.nn.analytics import CostRepr, Module, TensorRepr, _CostChild, _CostScope
 
 from .. import initializer as init
 from .._typing import MaskBias
@@ -155,9 +155,7 @@ class MultiheadAttention(Module):
         if num_kv_heads <= 0:
             raise ValueError(f"num_kv_heads must be greater than 0, got {num_kv_heads}")
         if num_heads % num_kv_heads != 0:
-            raise ValueError(
-                f"num_heads must be divisible by num_kv_heads, got {num_heads} and {num_kv_heads}"
-            )
+            raise ValueError(f"num_heads must be divisible by num_kv_heads, got {num_heads} and {num_kv_heads}")
         if not 0.0 <= dropout <= 1.0:
             raise ValueError(f"dropout must be between 0 and 1, got {dropout}")
 
@@ -533,9 +531,7 @@ class MultiheadAttention(Module):
     ) -> tuple[_PositionLayout, _PositionLayout]:
         """Resolve the shared position-layout alias or independent Q/K layouts."""
         if position_layout is not None and (query_position_layout is not None or key_position_layout is not None):
-            raise ValueError(
-                "position_layout is mutually exclusive with query_position_layout and key_position_layout"
-            )
+            raise ValueError("position_layout is mutually exclusive with query_position_layout and key_position_layout")
         valid_layouts = ("batch", "head")
         for name, layout in (
             ("position_layout", position_layout),
@@ -910,3 +906,66 @@ class MultiheadSelfAttention(MultiheadAttention):
             key_positions=token_positions,
             position_layout=position_layout,
         )
+
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Describe packed projection and grouped attention at symbolic shapes."""
+        batch = scope.symbol("batch")
+        sequence = scope.symbol("sequence")
+        d_model = scope.symbol("d_model", self.d_model)
+        query_heads = scope.symbol("query_heads", self.num_heads)
+        kv_heads = scope.symbol("kv_heads", self.num_kv_heads)
+        d_k = scope.symbol("d_k", self.d_k)
+        d_v = scope.symbol("d_v", self.d_v)
+
+        tokens = batch * sequence
+        group = query_heads / kv_heads
+        projected_width = query_heads * d_k + kv_heads * d_k + kv_heads * d_v
+        dtype = self.output_proj.weight.dtype
+        return (
+            CostRepr(
+                "packed query, key, and value projection",
+                torch.ops.aten.bmm.default,
+                {
+                    "self": TensorRepr((1, tokens, d_model), dtype),
+                    "mat2": TensorRepr((1, d_model, projected_width), dtype),
+                },
+            ),
+            CostRepr(
+                "grouped query-key scores",
+                torch.ops.aten.bmm.default,
+                {
+                    "self": TensorRepr((batch * kv_heads, group * sequence, d_k), dtype),
+                    "mat2": TensorRepr((batch * kv_heads, d_k, sequence), dtype),
+                },
+            ),
+            CostRepr(
+                "grouped attention-value product",
+                torch.ops.aten.bmm.default,
+                {
+                    "self": TensorRepr((batch * kv_heads, group * sequence, sequence), dtype),
+                    "mat2": TensorRepr((batch * kv_heads, sequence, d_v), dtype),
+                },
+            ),
+        )
+
+    def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
+        """Bind the output projection and retain optional RoPE as a child."""
+        batch = scope.symbol("batch")
+        sequence = scope.symbol("sequence")
+        query_heads = scope.symbol("query_heads", self.num_heads)
+        d_v = scope.symbol("d_v", self.d_v)
+        d_model = scope.symbol("d_model", self.d_model)
+        children = [
+            scope.child(
+                "output_proj",
+                self.output_proj,
+                bindings={
+                    "tokens": batch * sequence,
+                    "d_in": query_heads * d_v,
+                    "d_out": d_model,
+                },
+            )
+        ]
+        if self.rope is not None:
+            children.append(scope.child("rope", self.rope))
+        return tuple(children)
