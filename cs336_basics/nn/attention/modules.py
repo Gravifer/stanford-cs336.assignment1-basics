@@ -8,6 +8,7 @@ from jaxtyping import Float, Int, Shaped
 from torch import nn
 
 from cs336_basics.nn import functional as F
+from cs336_basics.nn.analytics import Module
 
 from .. import initializer as init
 from .._typing import MaskBias
@@ -20,7 +21,7 @@ type _PositionLayout = Literal["batch", "head"]
 type _MaskLayout = Literal["batch", "head"]
 
 
-class MultiheadAttention(nn.Module):
+class MultiheadAttention(Module):
     """Multi-head attention over tensors shaped ``(*batch, sequence, features)``.
 
     ``kdim`` and ``vdim`` describe the raw key and value input widths. The

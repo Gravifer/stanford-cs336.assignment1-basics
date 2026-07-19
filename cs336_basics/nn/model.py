@@ -9,6 +9,7 @@ from jaxtyping import Float, Int
 from torch import nn
 
 from cs336_basics.nn.attention import MultiheadSelfAttention, RotaryPositionalEmbedding
+from cs336_basics.nn.analytics import Module
 from cs336_basics.nn.feed_forward import SwiGLU
 from cs336_basics.nn.modules import Embedding, Linear, RMSNorm
 
@@ -62,11 +63,11 @@ _COURSE_BLOCK_KEY_TRANSLATION = {
 }
 
 
-class GPTDecoderLayer(nn.Module):
+class GPTDecoderLayer(Module):
     """Pre-norm GPT decoder layer composed of two additive updates."""
 
     @DeltaLayer
-    class Attention(nn.Module):
+    class Attention(Module):
         """Normalized causal self-attention update."""
 
         def __init__(self, norm: RMSNorm, update: MultiheadSelfAttention) -> None:
@@ -79,7 +80,7 @@ class GPTDecoderLayer(nn.Module):
             return self.update(self.norm(x))
 
     @DeltaLayer
-    class FeedForward(nn.Module):
+    class FeedForward(Module):
         """Normalized position-wise SwiGLU update."""
 
         def __init__(self, norm: RMSNorm, update: SwiGLU) -> None:
@@ -162,7 +163,7 @@ class GPTDecoderLayer(nn.Module):
 TransformerBlock = GPTDecoderLayer
 
 
-class TransformerLM(nn.Module):
+class TransformerLM(Module):
     """Decoder-only Transformer language model."""
 
     def __init__(

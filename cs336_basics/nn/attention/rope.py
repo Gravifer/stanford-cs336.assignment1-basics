@@ -7,10 +7,11 @@ import einops
 import einx
 import torch
 from jaxtyping import Float, Int, Shaped
-from torch import nn
+
+from cs336_basics.nn.analytics import Module
 
 
-class RotaryPositionalEmbedding(nn.Module):
+class RotaryPositionalEmbedding(Module):
     """RoPE for attention, with cached rotation data.
 
     Elementwise cosine/sine rotation is the default. Optional matrix-form

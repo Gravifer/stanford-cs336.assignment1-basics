@@ -11,6 +11,7 @@ from torch import dtype, nn
 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
+from cs336_basics.nn.analytics import Module
 
 from .modules import Linear, ModelVec
 
@@ -141,7 +142,7 @@ def _store_logical_swiglu_weights(
         state_dict[prefix + suffixes[role]] = weight
 
 
-class SwiGLU_delegate(nn.Module):
+class SwiGLU_delegate(Module):
     """SwiGLU module made of :cls:`Linear`s and functional SiLU.
 
     Given a value tensor :math:`𝑥`,
@@ -211,7 +212,7 @@ class SwiGLU_delegate(nn.Module):
         _translate_swiglu_state_dict(state_dict, prefix, self.d_ff, "delegate")
 
 
-class SwiGLU_own_weights(nn.Module):
+class SwiGLU_own_weights(Module):
     """SwiGLU feed-forward layer.
 
     Given a value tensor :math:`𝑥`,
@@ -282,7 +283,7 @@ class SwiGLU_own_weights(nn.Module):
         _translate_swiglu_state_dict(state_dict, prefix, self.d_ff, "owned")
 
 
-class SwiGLU_packed_input(nn.Module):
+class SwiGLU_packed_input(Module):
     """SwiGLU feed-forward layer.
 
     Given a value tensor :math:`𝑥`,

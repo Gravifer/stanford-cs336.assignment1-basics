@@ -14,13 +14,14 @@ from typing_extensions import deprecated  # ? ruff doesn't see that python 3.13 
 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
+from cs336_basics.nn.analytics import Module
 
 # from .feed_forward import SwiGLU  # ! would be circular
 
 type ModelVec = Float[torch.Tensor, "{self.d_model}"]  # ruff takes issue with this # noqa: F821
 
 
-class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torch.nn.sparse`
+class Embedding(Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torch.nn.sparse`
     """Lookup table mapping token IDs to learned embedding vectors."""
 
     __constants__ = ["num_embeddings", "embedding_dim"]
@@ -93,7 +94,7 @@ class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`t
         return embedding
 
 
-class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer normalization
+class RMSNorm(Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer normalization
     """RMSNorm (B. Zhang et al. NeurIPS 2019 <https://arxiv.org/abs/1910.07467>, eq 4) for layer normalization.
 
     Given a vector :math:`𝑎 ∈ ℝ^{𝑑_model}` of activations,
@@ -340,7 +341,7 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         return normed
 
 
-class SoftMax(nn.Module):  # mimicking :cls:`torch.nn.Softmax`
+class SoftMax(Module):  # mimicking :cls:`torch.nn.Softmax`
     """Applies softmax to the input along dim.
 
     the static method softmax_einx allows more flexible operation.
@@ -383,7 +384,7 @@ class SoftMax(nn.Module):  # mimicking :cls:`torch.nn.Softmax`
         return einx.softmax(desc, in_features, **kwargs)
 
 
-class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
+class Linear(Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
     """Applies a linear transformation to the incoming data: :math:`y = x A^T` where :math:`A` is the learnable weight matrix."""
 
     __constants__ = ["in_features", "out_features"]
@@ -432,7 +433,7 @@ class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
 
 
 @deprecated("we won't have a SiLU module; without the in-place option, not using the functional version is moot.")
-class SiLU(nn.Module):
+class SiLU(Module):
     """Deprecated module placeholder; use the functional SiLU operation."""
 
     def __init__(self, inplace: bool = False) -> NoReturn:
