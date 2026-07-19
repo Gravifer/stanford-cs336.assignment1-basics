@@ -64,6 +64,11 @@ class Embedding(Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torc
         """Apply the embedding transformation to the input."""
         return F.embedding(token_ids, self.weight)
 
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Classify embedding lookup as containing no matrix products."""
+        del scope
+        return ()
+
     def extra_repr(self) -> str:
         """Return vocabulary size and embedding width for module repr."""
         return f"num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim}"
@@ -144,6 +149,11 @@ class RMSNorm(Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer norm
         """Normalize the final model-width axis and preserve the input dtype."""
         in_dtype = x.dtype
         return self.rms_norm(x, (self.d_model,), self.weight, self.eps).to(in_dtype)
+
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Classify RMS normalization as containing no matrix products."""
+        del scope
+        return ()
 
     def extra_repr(self) -> str:
         """Return width, epsilon, and affine configuration for module repr."""
@@ -364,6 +374,11 @@ class SoftMax(Module):  # mimicking :cls:`torch.nn.Softmax`
     def forward(self, in_features: Float[torch.Tensor, "*batch shape"]) -> Float[torch.Tensor, "*batch shape"]:
         """Apply the softmax transformation to the input."""
         return F.softmax(in_features, dim=self.dim, _stacklevel=5)  # pytorch sets an extra high stacklevel for this
+
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Classify softmax as containing no matrix products."""
+        del scope
+        return ()
 
     def extra_repr(self) -> str:
         """Return the configured softmax dimension for module repr."""

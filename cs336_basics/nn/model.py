@@ -9,7 +9,7 @@ from jaxtyping import Float, Int
 from torch import nn
 
 from cs336_basics.nn.attention import MultiheadSelfAttention, RotaryPositionalEmbedding
-from cs336_basics.nn.analytics import Module
+from cs336_basics.nn.analytics import CostRepr, Module, _CostChild, _CostScope
 from cs336_basics.nn.feed_forward import SwiGLU
 from cs336_basics.nn.modules import Embedding, Linear, RMSNorm
 
@@ -79,6 +79,25 @@ class GPTDecoderLayer(Module):
             """Compute the normalized attention update."""
             return self.update(self.norm(x))
 
+        def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+            """Classify residual addition and delegate normalized attention."""
+            del scope
+            return ()
+
+        def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
+            """Bind self-attention to this sublayer's invocation shape."""
+            batch = scope.symbol("batch")
+            sequence = scope.symbol("sequence")
+            d_model = scope.symbol("d_model", self.update.d_model)
+            return (
+                scope.child("norm", self.norm),
+                scope.child(
+                    "update",
+                    self.update,
+                    bindings={"batch": batch, "sequence": sequence, "d_model": d_model},
+                ),
+            )
+
     @DeltaLayer
     class FeedForward(Module):
         """Normalized position-wise SwiGLU update."""
@@ -91,6 +110,25 @@ class GPTDecoderLayer(Module):
         def forward(self, x: ModelActivations) -> ModelActivations:
             """Compute the normalized feed-forward update."""
             return self.update(self.norm(x))
+
+        def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+            """Classify residual addition and delegate normalized SwiGLU."""
+            del scope
+            return ()
+
+        def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
+            """Bind SwiGLU to this sublayer's invocation shape."""
+            batch = scope.symbol("batch")
+            sequence = scope.symbol("sequence")
+            d_model = scope.symbol("d_model", self.update.d_model)
+            return (
+                scope.child("norm", self.norm),
+                scope.child(
+                    "update",
+                    self.update,
+                    bindings={"tokens": batch * sequence, "d_model": d_model, "d_ff": self.update.d_ff},
+                ),
+            )
 
     def __init__(
         self,
@@ -133,6 +171,22 @@ class GPTDecoderLayer(Module):
     def forward(self, x: ModelActivations) -> ModelActivations:
         """Pass the attention result directly into the feed-forward layer."""
         return self.ffn(self.attn(x))
+
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Classify block orchestration and delegate its two sublayers."""
+        del scope
+        return ()
+
+    def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
+        """Bind attention and feed-forward to one shared block shape."""
+        batch = scope.symbol("batch")
+        sequence = scope.symbol("sequence")
+        d_model = scope.symbol("d_model", self.attn.update.d_model)
+        bindings = {"batch": batch, "sequence": sequence, "d_model": d_model}
+        return (
+            scope.child("attn", self.attn, bindings=bindings),
+            scope.child("ffn", self.ffn, bindings=bindings),
+        )
 
     def _translate_course_state_dict(
         self,
@@ -213,3 +267,37 @@ class TransformerLM(Module):
         for layer in self.layers:
             x = layer(x)
         return self.lm_head(self.ln_final(x))
+
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Classify model orchestration and delegate its numerical work."""
+        del scope
+        return ()
+
+    def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
+        """Summarize identical blocks while traversing other children normally."""
+        batch = scope.symbol("batch")
+        sequence = scope.symbol("sequence")
+        d_model = scope.symbol("d_model", self.d_model)
+        num_layers = scope.symbol("num_layers", self.num_layers)
+        vocab_size = scope.symbol("vocab_size", self.vocab_size)
+        children = [scope.child("token_embeddings", self.token_embeddings)]
+        if self.layers:
+            children.append(
+                scope.child(
+                    "layers",
+                    self.layers[0],
+                    repetitions=num_layers,
+                    bindings={"batch": batch, "sequence": sequence, "d_model": d_model},
+                )
+            )
+        children.extend(
+            (
+                scope.child("ln_final", self.ln_final),
+                scope.child(
+                    "lm_head",
+                    self.lm_head,
+                    bindings={"tokens": batch * sequence, "d_in": d_model, "d_out": vocab_size},
+                ),
+            )
+        )
+        return tuple(children)

@@ -9,6 +9,7 @@ from torch.utils.flop_counter import FlopCounterMode
 from cs336_basics.nn.analytics import CostRepr, Module, TensorRepr, cost_repr, matmul_flops
 from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
+from cs336_basics.nn.model import TransformerLM
 from cs336_basics.nn.modules import Linear
 
 
@@ -193,3 +194,43 @@ def test_generic_attention_remains_visible_as_invocation_dependent() -> None:
     assert any("has not classified its static local matmul work" in message for message in report.unsupported)
     with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
         matmul_flops(tree, strict=True)
+
+
+def test_transformer_lm_summarizes_authored_layers_and_matches_meta_flop_counter() -> None:
+    model = TransformerLM(
+        vocab_size=17,
+        context_length=8,
+        d_model=8,
+        num_layers=3,
+        num_heads=4,
+        d_ff=12,
+        rope_theta=10_000.0,
+        device=torch.device("meta"),
+    )
+    tree = model.cost_repr()
+    batch = tree.find_symbols("batch")[0]
+    sequence = tree.find_symbols("sequence")[0]
+    num_layers = tree.find_symbols("num_layers")[0]
+    report = matmul_flops(tree, substitutions={batch: 2, sequence: 5}, strict=True)
+    counter = FlopCounterMode(display=False)
+
+    with counter:
+        model(torch.empty((2, 5), device="meta", dtype=torch.long))
+
+    assert tuple(child.name for child in tree.children) == ("token_embeddings", "layers", "ln_final", "lm_head")
+    assert tree.children[1].repetitions == num_layers
+    assert tree.bindings[num_layers] == 3
+    assert len(report.terms) == 7
+    assert report.bound_total == counter.get_total_flops()
+    assert report.unsupported == ()
+
+
+def test_transformer_lm_keeps_invocation_shape_symbolic_until_bound() -> None:
+    tree = TransformerLM(17, 8, 8, 2, 4, 12, 10_000.0, device=torch.device("meta")).cost_repr()
+    report = matmul_flops(tree, strict=True)
+    batch = tree.find_symbols("batch")[0]
+    sequence = tree.find_symbols("sequence")[0]
+
+    assert batch in report.bound_total.free_symbols
+    assert sequence in report.bound_total.free_symbols
+    assert report.substitute({batch: 1, sequence: 8}).bound_total.is_Integer
