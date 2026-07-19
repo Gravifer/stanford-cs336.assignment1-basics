@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CostReport",
     "CostRepr",
+    "CostTerm",
     "CostTree",
     "Module",
     "TensorRepr",
@@ -34,8 +35,7 @@ def _sympy() -> Any:
         import sympy
     except ModuleNotFoundError as error:
         raise ModuleNotFoundError(
-            "symbolic model analytics requires the development dependency; "
-            "install the project's dev dependency group"
+            "symbolic model analytics requires the development dependency; install the project's dev dependency group"
         ) from error
     return sympy
 
@@ -195,7 +195,7 @@ class CostTree:
 
 
 @dataclass(frozen=True)
-class _CostTerm:
+class CostTerm:
     """One policy result attributed to a module path and source representation."""
 
     path: str
@@ -207,7 +207,7 @@ class _CostTerm:
 class CostReport:
     """Structured symbolic result of applying one policy to a cost tree."""
 
-    terms: tuple[_CostTerm, ...]
+    terms: tuple[CostTerm, ...]
     symbolic_total: Any
     bound_total: Any
     bindings: Mapping[Any, Any]
@@ -361,7 +361,7 @@ def matmul_flops(
 ) -> CostReport:
     """Apply the course's conventional matrix-operation FLOP policy."""
     sympy = _sympy()
-    terms: list[_CostTerm] = []
+    terms: list[CostTerm] = []
     unsupported: list[str] = []
 
     def visit(node: CostTree, path: str, repetition: Any) -> None:
@@ -373,7 +373,7 @@ def matmul_flops(
                 unsupported.append(f"{path}: no matmul policy for {cost.operation} ({cost.name})")
                 continue
             expression = sympy.expand(effective_repetition * policy(cost))
-            terms.append(_CostTerm(path, cost, expression))
+            terms.append(CostTerm(path, cost, expression))
         for child in node.children:
             visit(child, f"{path}.{child.name}", effective_repetition)
 

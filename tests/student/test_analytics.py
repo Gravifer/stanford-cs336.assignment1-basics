@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.utils.flop_counter import FlopCounterMode
 
-from cs336_basics.nn.analytics import CostRepr, Module, TensorRepr, cost_repr, matmul_flops
+from cs336_basics.nn.analytics import CostRepr, CostTerm, Module, TensorRepr, cost_repr, matmul_flops
 from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
 from cs336_basics.nn.model import TransformerLM
@@ -85,6 +85,7 @@ def test_course_policy_keeps_symbolic_and_bound_views() -> None:
     assert report.bound_total == 30 * tokens
     assert report.substitute({tokens: 7}).bound_total == 210
     assert report.unsupported == ()
+    assert isinstance(report.terms[0], CostTerm)
 
 
 def test_linear_symbolic_cost_matches_meta_flop_counter() -> None:
