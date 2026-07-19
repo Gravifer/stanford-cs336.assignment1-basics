@@ -2,11 +2,7 @@
 
 ## Scope
 
-The course's Transformer accounting exercise can be answered directly with algebra, and the repository's
-[`transformer_accounting.py`](../scripts/transformer_accounting.py) already does so with concrete figures. That script is
-a finished reference, not a prototype that this note proposes to replace.
-
-This note instead records how PyTorch represents and observes computation, which parts can support a reusable symbolic
+This note records how PyTorch represents and observes computation, which parts can support a reusable symbolic
 description, and which semantic information still has to come from the model author. It is a research memo and a set of
 refined minutes. Names and interfaces mentioned here are not stability promises.
 
