@@ -173,7 +173,7 @@ useful quantities differ:
 | one tensor footprint | `numel * element_size` for a known logical tensor | real, fake, or meta tensor metadata |
 | operator allocation traffic | bytes allocated or released by individual executed operators | [`torch.profiler`](https://docs.pytorch.org/tutorials/recipes/recipes/profiler_recipe.html) with `profile_memory=True` |
 | saved-for-backward tensors | tensors autograd explicitly packs for a later backward | [`saved_tensors_hooks`](https://docs.pytorch.org/docs/stable/notes/autograd.html#hooks-for-saved-tensors) |
-| allocator peak | maximum PyTorch tensor bytes allocated on one concrete allocator/device run | [`max_memory_allocated`](https://docs.pytorch.org/docs/stable/generated/torch.cuda.max_memory_allocated.html) after resetting peak statistics |
+| allocator peak | maximum bytes reported as occupied by PyTorch's allocator on one concrete device run | [`max_memory_allocated`](https://docs.pytorch.org/docs/stable/generated/torch.cuda.max_memory_allocated.html) after resetting peak statistics |
 
 Here registered state means all tensors registered as parameters or buffers. It includes nonpersistent buffers that
 `state_dict()` deliberately omits, so it is not synonymous with serialized checkpoint state.
@@ -188,6 +188,11 @@ before a later output exists, remain live because the caller retains it, or be s
 allocator may also round requests, cache freed blocks, and report allocated versus reserved bytes separately. The
 profiler records allocation and release events, then its tables attribute or aggregate their memory effects across
 executed operators; those tables are not by themselves an architectural peak formula.
+
+Allocator observations can also include library workspaces rather than model tensors. In particular, Torch's
+[CUDA semantics](https://docs.pytorch.org/docs/stable/notes/cuda.html#cublas-workspaces) explain that cuBLAS workspaces
+are allocated per handle-and-stream combination and retained for reuse. A stable allocation left after an output is
+released is therefore not sufficient evidence of a retained activation or a leak.
 
 Meta and fake tensors can supply logical shapes and dtypes, so their tensor footprints remain meaningful. They allocate
 no ordinary tensor storage and therefore cannot validate an allocator peak. Conversely, a concrete CUDA peak is useful
