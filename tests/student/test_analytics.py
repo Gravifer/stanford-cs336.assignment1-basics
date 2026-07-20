@@ -467,6 +467,31 @@ def test_torch_registered_dense_product_policies_match_flop_counter(cost, invoke
     assert set(counter.get_flop_counts()["Global"]) == {packet}
 
 
+def test_dense_product_policy_preserves_symbolic_dimensions_and_operation_repetition() -> None:
+    class SymbolicProduct(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("rows", "inner", "columns", "calls")
+            return (
+                CostRepr(
+                    "repeated matrix product",
+                    torch.ops.aten.mm.default,
+                    {
+                        "self": TensorRepr((s.rows, s.inner)),
+                        "mat2": TensorRepr((s.inner, s.columns)),
+                    },
+                    repetitions=s.calls,
+                ),
+            )
+
+    tree = SymbolicProduct().cost_repr()
+    rows, inner, columns, calls = (tree.find_symbols(name)[0] for name in ("rows", "inner", "columns", "calls"))
+    report = matmul_flops(tree, strict=True)
+
+    assert sympy.simplify(report.symbolic_total - 2 * calls * rows * inner * columns) == 0
+    assert report.substitute({rows: 3, inner: 0, columns: 5, calls: 7}).bound_total == 0
+
+
 @pytest.mark.parametrize(
     "cost",
     [
