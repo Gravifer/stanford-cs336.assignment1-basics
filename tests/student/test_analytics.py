@@ -116,12 +116,14 @@ def test_module_state_footprint_uses_torch_registered_state_traversal() -> None:
 
 
 def test_module_state_footprint_works_for_meta_models_and_rejects_nonmodules() -> None:
-    report = module_state_footprint(Linear(3, 5, device=torch.device("meta"), dtype=torch.float16))
+    module = Linear(3, 5, device=torch.device("meta"), dtype=torch.float16)
+    report = module_state_footprint(module)
 
     assert report.parameter_numel == 15
     assert report.parameter_bytes == 30
     assert report.trainable_parameter_numel == 15
     assert report.buffer_numel == 0
+    assert module.state_footprint() == report
     with pytest.raises(TypeError, match="torch.nn.Module"):
         module_state_footprint(object())  # ty: ignore[invalid-argument-type]
 
