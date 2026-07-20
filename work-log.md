@@ -171,3 +171,6 @@ or source of repository policy.
 - Post-fix broad student regression: 350 passed and 6 skipped, with only the same three intentionally disarmed SwiGLU
   warning assertions failing. Independent review reported no remaining concrete defect in analytics composition,
   state loading, model folding, tensor footprints, or DeltaLayer behavior.
+- A deterministic randomized meta probe varied Transformer layer count (including zero), vocabulary, width, head count,
+  feed-forward width, batch, and sequence across twelve cases. Every authored matrix total exactly matched Torch's
+  `FlopCounterMode`; the temporary probe was removed rather than retained as a randomized student test.
