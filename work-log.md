@@ -127,3 +127,9 @@ or source of repository policy.
 - Reassessed activation-memory terminology against Torch's profiler, CUDA allocator peaks, meta/fake tensors, and
   autograd saved-tensor hooks. The memo now keeps registered state, logical tensor footprints, operator allocation
   traffic, training retention, and concrete allocator peaks distinct; no output-volume proxy is labeled as peak memory.
+- Broad student regression after observation work: 333 passed and 6 skipped. The only three failures remain the
+  deliberately disarmed SwiGLU course-key warnings from `cb9dc06`; translation, loading, analytics, model, attention,
+  adapter, and typing coverage otherwise passed.
+- Independent final audit found no concrete analytics/observation gaps. Additional probes confirmed forward and
+  gradient transparency, complete hook removal, unchanged native state-dict keys, and `load_state_dict(assign=True)`
+  behavior during an active session. Documented non-thread-safety and deferred recursive/SymInt work remain explicit.
