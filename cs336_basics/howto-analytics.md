@@ -157,6 +157,10 @@ hooks and `ModuleTracker` can associate a successful call with that hierarchy. T
 for an authored symbolic cost description, so a small protected provider remains necessary. Official hooks should still
 transport future invocation information; the provider need not reinvent execution interception.
 
+Container registration is not always execution. `Sequential` defines a chained forward and can be interpreted directly;
+`ModuleList` and `ModuleDict` only register slots. Their children may be displayed as an inventory, but a strict static
+cost report remains unresolved until an authored parent states which slots are invoked and with what repetition.
+
 [`torch.fx`](https://docs.pytorch.org/docs/stable/fx.html) represents executable dataflow as a graph of calls and values.
 [`torch.export`](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/export.html) captures an ahead-of-time
 `ExportedProgram` backed by FX. It lifts parameters and buffers into a graph signature, records shape constraints, and

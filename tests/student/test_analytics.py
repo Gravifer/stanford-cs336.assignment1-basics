@@ -137,6 +137,23 @@ def test_structural_container_subclasses_must_classify_custom_local_work() -> No
         matmul_flops(tree, strict=True)
 
 
+@pytest.mark.parametrize(
+    "container",
+    [
+        nn.ModuleList([Linear(3, 4), Linear(4, 5)]),
+        nn.ModuleDict({"input": Linear(3, 4), "output": Linear(4, 5)}),
+    ],
+)
+def test_registration_only_torch_containers_do_not_imply_invocation(container: nn.Module) -> None:
+    tree = cost_repr(container)
+
+    assert len(tree.children) == 2
+    assert len(tree.unresolved) == 1
+    assert "has no static local-cost provider" in tree.unresolved[0]
+    with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
+        matmul_flops(tree, strict=True)
+
+
 def test_directed_cost_child_graph_rejects_active_ancestor_cycles() -> None:
     class Cyclic(Module):
         def _cost_repr(self, scope):

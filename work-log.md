@@ -101,3 +101,6 @@ or source of repository policy.
   model-architecture suites: 91 passed; Ruff/`ty` clean.
 - Broadened the nondegenerate attention oracle across MHA/GQA/MQA, unequal QK/value widths, both retained private layout
   strategies, and two leading batch axes represented by their product. Focused analytics: 90 passed; Ruff/`ty` clean.
+- Distinguished execution containers from registration-only containers. Exact `Sequential` supplies a known chained
+  execution; `ModuleList` and `ModuleDict` expose inventory slots but remain unresolved under strict cost reporting until
+  an authored parent directs invocation. Focused analytics: 92 passed; Ruff/`ty` clean.

@@ -557,12 +557,13 @@ class _CostProvider(Protocol):
     def _cost_children(self, scope: _CostScope) -> Iterable[_CostChild]: ...
 
 
-_STRUCTURAL_TORCH_MODULES = (nn.ModuleDict, nn.ModuleList, nn.Sequential)
+_REGISTERED_SLOT_CONTAINERS = (nn.ModuleDict, nn.ModuleList, nn.Sequential)
+_EXECUTING_TORCH_CONTAINERS = (nn.Sequential,)
 
 
 def _structural_children(module: nn.Module) -> tuple[tuple[str, nn.Module], ...]:
     """Preserve every registered slot in Torch's public structural containers."""
-    if isinstance(module, _STRUCTURAL_TORCH_MODULES):
+    if isinstance(module, _REGISTERED_SLOT_CONTAINERS):
         return tuple((name, child) for name, child in module._modules.items() if child is not None)
     return tuple(module.named_children())
 
@@ -591,7 +592,7 @@ def _collect_cost_tree(
     else:
         costs = ()
         child_specs = tuple(scope.child(child_name, child) for child_name, child in _structural_children(module))
-        if type(module) not in _STRUCTURAL_TORCH_MODULES:
+        if type(module) not in _EXECUTING_TORCH_CONTAINERS:
             unresolved = (f"{type(module).__qualname__} has no static local-cost provider",)
 
     child_names = tuple(child_spec.name for child_spec in child_specs)
