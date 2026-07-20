@@ -89,6 +89,27 @@ def test_structural_containers_preserve_authored_slot_names() -> None:
     assert tuple(child.name for child in cost_repr(module).children) == ("attention", "feed_forward")
 
 
+def test_structural_container_cycles_reach_the_collector_guard() -> None:
+    module = nn.Sequential()
+    module.add_module("loop", module)
+
+    with pytest.raises(ValueError, match="child graph contains a module cycle"):
+        cost_repr(module)
+
+
+def test_structural_container_subclasses_must_classify_custom_local_work() -> None:
+    class SpecializedSequential(nn.Sequential):
+        pass
+
+    tree = cost_repr(SpecializedSequential(Linear(3, 3)))
+
+    assert tuple(child.name for child in tree.children) == ("0",)
+    assert len(tree.unresolved) == 1
+    assert "SpecializedSequential has no static local-cost provider" in tree.unresolved[0]
+    with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
+        matmul_flops(tree, strict=True)
+
+
 def test_directed_cost_child_graph_rejects_active_ancestor_cycles() -> None:
     class Cyclic(Module):
         def _cost_repr(self, scope):

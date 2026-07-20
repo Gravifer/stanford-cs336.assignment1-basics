@@ -476,11 +476,7 @@ _STRUCTURAL_TORCH_MODULES = (nn.ModuleDict, nn.ModuleList, nn.Sequential)
 def _structural_children(module: nn.Module) -> tuple[tuple[str, nn.Module], ...]:
     """Preserve every registered slot in Torch's public structural containers."""
     if isinstance(module, _STRUCTURAL_TORCH_MODULES):
-        return tuple(
-            (name, child)
-            for name, child in module.named_modules(remove_duplicate=False)
-            if name and "." not in name
-        )
+        return tuple((name, child) for name, child in module._modules.items() if child is not None)
     return tuple(module.named_children())
 
 
@@ -508,7 +504,7 @@ def _collect_cost_tree(
     else:
         costs = ()
         child_specs = tuple(scope.child(child_name, child) for child_name, child in _structural_children(module))
-        if not isinstance(module, _STRUCTURAL_TORCH_MODULES):
+        if type(module) not in _STRUCTURAL_TORCH_MODULES:
             unresolved = (f"{type(module).__qualname__} has no static local-cost provider",)
 
     child_names = tuple(child_spec.name for child_spec in child_specs)

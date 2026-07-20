@@ -69,3 +69,7 @@ or source of repository policy.
 - Wider student regression after the robustness commits: 281 passed and 6 skipped. The only three failures remain the
   course-key SwiGLU warning assertions; translation works, while `cb9dc06` deliberately disabled the warning to avoid a
   submission flag. No analytics, attention, adapter-device, benchmark, tokenizer, or typing regression appeared.
+- API audit found that recursive `named_modules()` could itself recurse through a cyclic structural container before the
+  collector's guard ran. Direct registered-slot traversal now puts every edge through that guard. Only exact official
+  `ModuleList`, `ModuleDict`, and `Sequential` types receive known-zero-local-work classification; subclasses without a
+  provider remain visibly unsupported because they may override `forward`. Focused analytics: 64 passed; Ruff/`ty` clean.
