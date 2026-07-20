@@ -133,6 +133,17 @@ def test_symbolic_tensor_and_arguments_are_immutable_copies() -> None:
     with pytest.raises(TypeError):
         cost.arguments["self"] = TensorRepr((1, 9, 3), torch.float32)  # ty: ignore[invalid-assignment]
 
+    tensors = [TensorRepr((2, 3)), TensorRepr((2, 4))]
+    concatenation = CostRepr("concatenation", torch.ops.aten.cat.default, {"tensors": tensors})
+    tensors.append(TensorRepr((2, 5)))
+
+    assert concatenation.arguments["tensors"] == (TensorRepr((2, 3)), TensorRepr((2, 4)))
+
+
+def test_symbolic_tensor_requires_a_torch_dtype() -> None:
+    with pytest.raises(TypeError, match="torch.dtype or None"):
+        TensorRepr((2, 3), "float32")  # ty: ignore[invalid-argument-type]
+
 
 def test_cost_repr_requires_exact_overload_and_schema_arguments() -> None:
     operands = {

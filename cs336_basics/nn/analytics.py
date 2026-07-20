@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import keyword
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Protocol, overload, runtime_checkable
@@ -12,7 +13,7 @@ from torch import nn
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Mapping
+    from collections.abc import Iterable, Iterator
 
 
 __all__ = [
@@ -40,9 +41,20 @@ def _sympy() -> Any:
     return sympy
 
 
+def _immutable_value(value: Any) -> Any:
+    """Copy and freeze standard containers used in symbolic metadata."""
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _immutable_value(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_immutable_value(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_immutable_value(item) for item in value)
+    return value
+
+
 def _immutable_mapping(mapping: Mapping[Any, Any]) -> Mapping[Any, Any]:
-    """Copy a mapping before exposing an immutable view of it."""
-    return MappingProxyType(dict(mapping))
+    """Recursively copy a mapping before exposing an immutable view of it."""
+    return MappingProxyType({key: _immutable_value(value) for key, value in mapping.items()})
 
 
 def _expression(value: object) -> Any:
@@ -68,6 +80,8 @@ class TensorRepr:
     dtype: torch.dtype | None = None
 
     def __post_init__(self) -> None:
+        if self.dtype is not None and not isinstance(self.dtype, torch.dtype):
+            raise TypeError(f"tensor metadata dtype must be a torch.dtype or None, got {self.dtype!r}")
         object.__setattr__(self, "shape", tuple(_expression(axis) for axis in self.shape))
 
 
