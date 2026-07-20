@@ -31,6 +31,10 @@ PyTorch also has a separate build-time parser in
 entries into immutable, semantic dataclasses used by code generation. Torchgen's preference for immutable records and
 lossless round trips is instructive, but Torchgen is not a runtime API on which this package should depend.
 
+Python's exact overload objects do not currently provide a comparably public schema accessor. The initial record
+validation reads `OpOverload._schema`, a narrow version-sensitive dependency kept behind the repository's pinned Torch
+version and direct schema-validation tests; it should not be mistaken for a settled third-party extension contract.
+
 An operator schema does not contain an analytical cost formula. Nor does it preserve a human reason such as "attention
 packed QKV projection." The useful division is consequently:
 
