@@ -1,5 +1,7 @@
 """Tests for static symbolic model analytics."""
 
+from collections import OrderedDict
+
 import pytest
 import sympy
 import torch
@@ -64,6 +66,59 @@ def test_external_torch_module_can_implement_cost_provider_structurally() -> Non
 
     assert tree.costs[0].name == "external projection"
     assert matmul_flops(tree, substitutions={tree.find_symbols("tokens")[0]: 5}, strict=True).bound_total == 120
+
+
+def test_structural_containers_preserve_repeated_shared_module_invocations() -> None:
+    shared = Linear(3, 3, device=torch.device("meta"))
+    module = nn.Sequential(shared, shared)
+    tree = cost_repr(module)
+    counter = FlopCounterMode(display=False)
+
+    with counter:
+        module(torch.empty((5, 3), device="meta"))
+
+    assert tuple(child.name for child in tree.children) == ("0", "1")
+    assert tree.children[0].module_type == tree.children[1].module_type == "Linear"
+    substitutions = {symbol: 5 for symbol in tree.find_symbols("tokens")}
+    assert matmul_flops(tree, substitutions=substitutions, strict=True).bound_total == counter.get_total_flops()
+
+
+def test_structural_containers_preserve_authored_slot_names() -> None:
+    module = nn.Sequential(OrderedDict((name, Linear(3, 3)) for name in ("attention", "feed_forward")))
+
+    assert tuple(child.name for child in cost_repr(module).children) == ("attention", "feed_forward")
+
+
+def test_directed_cost_child_graph_rejects_active_ancestor_cycles() -> None:
+    class Cyclic(Module):
+        def _cost_repr(self, scope):
+            return ()
+
+        def _cost_children(self, scope):
+            return (scope.child("self", self),)
+
+    with pytest.raises(ValueError, match="child graph contains a module cycle"):
+        Cyclic().cost_repr()
+
+
+def test_directed_cost_children_require_unambiguous_paths() -> None:
+    child = Linear(3, 4)
+
+    class InvalidChildren(Module):
+        def __init__(self, names: tuple[str, ...]) -> None:
+            super().__init__()
+            self.names = names
+
+        def _cost_repr(self, scope):
+            return ()
+
+        def _cost_children(self, scope):
+            return tuple(scope.child(name, child) for name in self.names)
+
+    with pytest.raises(ValueError, match="without dots"):
+        InvalidChildren(("nested.child",)).cost_repr()
+    with pytest.raises(ValueError, match="duplicate directed cost child names"):
+        InvalidChildren(("child", "child")).cost_repr()
 
 
 def test_symbolic_tensor_and_arguments_are_immutable_copies() -> None:

@@ -145,8 +145,12 @@ class _CostChild:
     arguments: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("a directed cost child requires a non-empty name")
+        if not isinstance(self.name, str) or not self.name or "." in self.name:
+            raise ValueError("a directed cost child name must be a non-empty string without dots")
+        if not isinstance(self.module, nn.Module):
+            raise TypeError(f"a directed cost child must be a torch.nn.Module, got {type(self.module).__qualname__}")
+        if any(not isinstance(name, str) for name in self.arguments):
+            raise TypeError("directed cost child argument names must be strings")
         object.__setattr__(self, "repetitions", _expression(self.repetitions))
         object.__setattr__(
             self,
@@ -434,13 +438,29 @@ class _CostProvider(Protocol):
 _STRUCTURAL_TORCH_MODULES = (nn.ModuleDict, nn.ModuleList, nn.Sequential)
 
 
+def _structural_children(module: nn.Module) -> tuple[tuple[str, nn.Module], ...]:
+    """Preserve every registered slot in Torch's public structural containers."""
+    if isinstance(module, _STRUCTURAL_TORCH_MODULES):
+        return tuple(
+            (name, child)
+            for name, child in module.named_modules(remove_duplicate=False)
+            if name and "." not in name
+        )
+    return tuple(module.named_children())
+
+
 def _collect_cost_tree(
     module: nn.Module,
     name: str,
     *,
     repetitions: Any = 1,
     parent_arguments: Mapping[str, Any] | None = None,
+    ancestors: frozenset[int] = frozenset(),
 ) -> CostTree:
+    module_identity = id(module)
+    if module_identity in ancestors:
+        raise ValueError("the directed symbolic cost child graph contains a module cycle")
+    child_ancestors = ancestors | {module_identity}
     scope = _CostScope()
     unresolved: tuple[str, ...] = ()
 
@@ -452,9 +472,13 @@ def _collect_cost_tree(
             unresolved = (f"{type(module).__qualname__} has not classified its static local matmul work",)
     else:
         costs = ()
-        child_specs = tuple(scope.child(child_name, child) for child_name, child in module.named_children())
+        child_specs = tuple(scope.child(child_name, child) for child_name, child in _structural_children(module))
         if not isinstance(module, _STRUCTURAL_TORCH_MODULES):
             unresolved = (f"{type(module).__qualname__} has no static local-cost provider",)
+
+    child_names = tuple(child_spec.name for child_spec in child_specs)
+    if len(set(child_names)) != len(child_names):
+        raise ValueError(f"{type(module).__qualname__} describes duplicate directed cost child names")
 
     symbol_records = scope.symbols._freeze()
     by_name = {record.local_name: record.symbol for record in symbol_records}
@@ -472,6 +496,7 @@ def _collect_cost_tree(
             child_spec.name,
             repetitions=child_spec.repetitions,
             parent_arguments=child_spec.arguments,
+            ancestors=child_ancestors,
         )
         for child_spec in child_specs
     ]
