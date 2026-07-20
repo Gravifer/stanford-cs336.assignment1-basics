@@ -161,3 +161,7 @@ or source of repository policy.
   deep-copy one prototype through a private `_get_clones()` helper into `ModuleList`, while the public generic choices
   remain `Sequential` and `ModuleList`. That same-initial-state policy differs from this model's independently
   constructed layers, so no generic cloned-stack abstraction was added during the audit.
+- Independent review found that dense-product policy checks compared scoped symbols before applying their definitions.
+  Matrix policies now consume tree and caller facts first, retain unresolved batch/contraction equalities as report
+  conditions, and compose through parent-shadowed child bindings. Direct aliases, caller substitutions, contradictory
+  shapes, and condition deduplication are covered; unresolved broadcast disjunction remains explicitly deferred.
