@@ -170,7 +170,7 @@ class ModuleStateFootprint:
 
 @dataclass(frozen=True)
 class CostRepr:
-    """One semantically named invocation of an exact ATen overload."""
+    """One semantically named invocation of an exact Torch operator overload."""
 
     name: str
     operation: torch._ops.OpOverload

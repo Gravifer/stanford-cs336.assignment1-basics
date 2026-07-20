@@ -133,3 +133,6 @@ or source of repository policy.
 - Independent final audit found no concrete analytics/observation gaps. Additional probes confirmed forward and
   gradient transparency, complete hook removal, unchanged native state-dict keys, and `load_state_dict(assign=True)`
   behavior during an active session. Documented non-thread-safety and deferred recursive/SymInt work remain explicit.
+- A follow-up public-API and memo audit found no code defect, but corrected five documentation boundaries: symbolic
+  `SymInt` remapping, root binding versus operator observation, exact Torch overload terminology, deferred observation
+  failures, and registered buffers versus serialized checkpoint state.
