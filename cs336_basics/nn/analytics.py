@@ -587,6 +587,14 @@ def _collect_cost_tree(
         local_costs = module._cost_repr(scope)
         costs = () if local_costs is None else tuple(local_costs)
         child_specs = tuple(module._cost_children(scope))
+        if any(not isinstance(cost, CostRepr) for cost in costs):
+            raise TypeError(
+                f"{type(module).__qualname__}._cost_repr() must return CostRepr values or None"
+            )
+        if any(not isinstance(child, _CostChild) for child in child_specs):
+            raise TypeError(
+                f"{type(module).__qualname__}._cost_children() must return directed cost children"
+            )
         if local_costs is None:
             unresolved = (f"{type(module).__qualname__} has not classified its static local matmul work",)
     else:

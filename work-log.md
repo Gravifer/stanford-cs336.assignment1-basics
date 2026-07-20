@@ -104,3 +104,5 @@ or source of repository policy.
 - Distinguished execution containers from registration-only containers. Exact `Sequential` supplies a known chained
   execution; `ModuleList` and `ModuleDict` expose inventory slots but remain unresolved under strict cost reporting until
   an authored parent directs invocation. Focused analytics: 92 passed; Ruff/`ty` clean.
+- Added caller-directed validation at the protected structural-provider boundary. Malformed `_cost_repr()` or
+  `_cost_children()` results now fail before the collector dereferences implementation details.

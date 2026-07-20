@@ -69,6 +69,19 @@ def test_external_torch_module_can_implement_cost_provider_structurally() -> Non
     assert matmul_flops(tree, substitutions={tree.find_symbols("tokens")[0]: 5}, strict=True).bound_total == 120
 
 
+@pytest.mark.parametrize("provider_method", ["_cost_repr", "_cost_children"])
+def test_structural_cost_providers_reject_malformed_results(provider_method: str) -> None:
+    class Malformed(nn.Module):
+        def _cost_repr(self, scope):
+            return (object(),) if provider_method == "_cost_repr" else ()
+
+        def _cost_children(self, scope):
+            return (object(),) if provider_method == "_cost_children" else ()
+
+    with pytest.raises(TypeError, match=provider_method):
+        cost_repr(Malformed())
+
+
 def test_structural_containers_preserve_repeated_shared_module_invocations() -> None:
     shared = Linear(3, 3, device=torch.device("meta"))
     module = nn.Sequential(shared, shared)
