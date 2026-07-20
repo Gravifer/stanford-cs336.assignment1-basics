@@ -1403,6 +1403,34 @@ def test_transformer_lm_keeps_invocation_shape_symbolic_until_bound() -> None:
     assert report.substitute({batch: 1, sequence: 8}).bound_total.is_Integer
 
 
+def test_transformer_lm_observer_binds_positional_and_keyword_call_shapes() -> None:
+    model = TransformerLM(
+        vocab_size=17,
+        context_length=8,
+        d_model=8,
+        num_layers=2,
+        num_heads=4,
+        d_ff=12,
+        rope_theta=10_000.0,
+        device=torch.device("meta"),
+    )
+    observer = model.observe_costs()
+    counter = FlopCounterMode(display=False)
+
+    with observer, counter:
+        positional = model(torch.empty((2, 3, 5), device="meta", dtype=torch.long))
+        keyword = model(token_ids=torch.empty((3, 4), device="meta", dtype=torch.long))
+
+    reports = observer.matmul_flops(strict=True)
+    assert positional.shape == (2, 3, 5, 17)
+    assert keyword.shape == (3, 4, 17)
+    assert len(reports) == 2
+    assert reports[0].symbolic_total == reports[1].symbolic_total
+    assert reports[0].bound_total != reports[1].bound_total
+    assert all(report.bound_total.is_Integer for report in reports)
+    assert sum(report.bound_total for report in reports) == counter.get_total_flops()
+
+
 def test_transformer_lm_folding_rejects_layer_count_drift() -> None:
     model = TransformerLM(17, 8, 8, 2, 4, 12, 10_000.0, device=torch.device("meta"))
     model.num_layers = 3

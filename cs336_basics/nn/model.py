@@ -1,5 +1,7 @@
 """Decoder-only Transformer language-model modules."""
 
+from collections.abc import Mapping
+from math import prod
 from typing import Any
 
 import torch
@@ -282,6 +284,24 @@ class TransformerLM(Module):
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Classify model orchestration and delegate its numerical work."""
         return ()
+
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]:
+        """Bind flattened batch and sequence dimensions from one token-ID call."""
+        del output
+        token_ids = args[0] if args else kwargs["token_ids"]
+        if not isinstance(token_ids, torch.Tensor):
+            raise TypeError("TransformerLM cost observation requires tensor token_ids")
+        if token_ids.ndim < 1:
+            raise ValueError("TransformerLM cost observation requires token_ids with a sequence axis")
+        return {
+            "batch": prod(token_ids.shape[:-1], start=1),
+            "sequence": token_ids.shape[-1],
+        }
 
     def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
         """Summarize identical blocks while traversing other children normally."""

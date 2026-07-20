@@ -238,6 +238,27 @@ arguments do not overwrite definitions contributed by the child instance. Instea
 equality: a definitely false equality is rejected, while one that still contains unbound symbols appears in the cost
 report as a condition. Caller substitutions are additional facts under the same rule rather than mutable overrides.
 
+Call-specific facts can be supplied by a root observation session without changing the authored tree:
+
+```python
+with model.observe_costs() as observation:
+    logits = model(token_ids)
+
+report, = observation.matmul_flops(strict=True)
+```
+
+The session snapshots the static tree on entry and uses an ordinary per-module Torch forward hook with keyword support.
+After each root forward reaches the hook, the concrete class maps its interface arguments to its own local symbolic
+names. `TransformerLM`, for example, binds `sequence` from the final token-ID axis and binds `batch` to the product of
+all preceding axes. The generic observer then converts those names to the root's identity-distinct symbols and applies
+the same report policy used for explicit substitutions. Each report consequently retains its symbolic total alongside
+the total bound for that call.
+
+Only normalized scalar facts are retained; argument and output tensors are not. Multiple root calls remain separate in
+forward-hook completion order. The session is single-use and not thread-safe, so forwards must not overlap context exit
+or report generation. It is deliberately a root-binding facility, not yet a recursive runtime trace: static authored
+parent-child arguments continue to propagate the root facts through a Transformer model.
+
 The model author also owns recursion policy. Ordinary modules contribute only their local work and delegate to their
 children. A repeated Transformer stack may deliberately describe one representative block with symbolic `num_layers`
 repetition and avoid traversing the remaining concrete blocks; embeddings, final normalization, and logit emission are
@@ -272,9 +293,9 @@ changing the architectural formula.
 
 ## Deliberately deferred questions
 
-The following are not prerequisites for the current static work:
+The following are not prerequisites for the current authored and root-observed work:
 
-- binding call-specific variables with hooks or a context manager;
+- recursively observing and reconciling submodule invocations;
 - importing and remapping symbolic `ShapeEnv`/`SymInt` identities during observation;
 - training and backward-pass costs;
 - exact activation lifetime and peak-memory analysis;

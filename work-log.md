@@ -118,3 +118,6 @@ or source of repository policy.
   deferred until the lifecycle contract survives review.
 - Exposed the reviewed root-session surface as `CostObserver`, `observe_costs(module)`, and the repository `Module`
   convenience method. Concrete classes still opt into call bindings through the protected local-name mapping hook.
+- Added the first concrete invocation binding at the model interface. `TransformerLM` maps all leading token-ID axes to
+  flattened `batch` and the final axis to `sequence`; positional and keyword meta forwards produce separate fully bound
+  reports whose combined total matches Torch's observed FLOP counter.
