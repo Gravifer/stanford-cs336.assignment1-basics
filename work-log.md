@@ -151,3 +151,7 @@ or source of repository policy.
   longer satisfy their documented non-empty contracts.
 - Refined inventory semantics so ignored structural subtrees no longer leak symbols, bindings, or domain constraints
   into execution reports; full-tree validation still checks them when the static representation is collected.
+- A concrete CUDA probe separated logical model/output bytes from allocator observations. Repeated forwards retained a
+  stable 8,519,680-byte allocation; Torch's private diagnostic clear for cuBLAS workspaces returned allocated memory
+  exactly to the pre-forward level. This confirms why allocator peaks and persistent library workspaces must not be
+  reported as activation footprints; no private CUDA API enters the package implementation.
