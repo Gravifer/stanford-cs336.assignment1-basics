@@ -22,7 +22,7 @@ from cs336_basics.nn.analytics import (
 )
 from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
-from cs336_basics.nn.model import TransformerLM
+from cs336_basics.nn.model import GPTDecoderLayer, TransformerLM
 from cs336_basics.nn.modules import DeltaLayer as ModulesDeltaLayer
 from cs336_basics.nn.modules import Linear, Module as ModulesModule
 
@@ -1023,6 +1023,67 @@ def test_transformer_lm_keeps_invocation_shape_symbolic_until_bound() -> None:
     assert batch in report.bound_total.free_symbols
     assert sequence in report.bound_total.free_symbols
     assert report.substitute({batch: 1, sequence: 8}).bound_total.is_Integer
+
+
+def test_transformer_lm_folding_rejects_layer_count_drift() -> None:
+    model = TransformerLM(17, 8, 8, 2, 4, 12, 10_000.0, device=torch.device("meta"))
+    model.num_layers = 3
+
+    with pytest.raises(ValueError, match="num_layers to match the registered layer count"):
+        model.cost_repr()
+
+
+def test_transformer_lm_folding_requires_structure_not_weight_identity() -> None:
+    model = TransformerLM(17, 8, 8, 2, 4, 12, 10_000.0, device=torch.device("meta"))
+    model.layers[1] = GPTDecoderLayer(8, 4, 12, 8, 10_000.0, device=torch.device("meta"))
+
+    model.cost_repr()
+
+    model.layers[1] = GPTDecoderLayer(8, 4, 16, 8, 10_000.0, device=torch.device("meta"))
+    with pytest.raises(ValueError, match="requires homogeneous cost-driving configuration"):
+        model.cost_repr()
+
+
+def test_transformer_lm_folding_checks_same_shape_attention_configurations() -> None:
+    model = TransformerLM(17, 8, 4, 2, 2, 12, 10_000.0, device=torch.device("meta"))
+    configurations = ((1, 1, 2, 4), (2, 1, 2, 2))
+    for layer, (query_heads, kv_heads, d_k, d_v) in zip(model.layers, configurations, strict=True):
+        assert isinstance(layer, GPTDecoderLayer)
+        layer.attn.update = MultiheadSelfAttention(
+            d_model=4,
+            num_heads=query_heads,
+            num_kv_heads=kv_heads,
+            d_k=d_k,
+            d_v=d_v,
+            rope=RotaryPositionalEmbedding(10_000.0, d_k, 8, device=torch.device("meta")),
+            device=torch.device("meta"),
+        )
+
+    first_layer, second_layer = model.layers
+    assert isinstance(first_layer, GPTDecoderLayer)
+    assert isinstance(second_layer, GPTDecoderLayer)
+    first_state = tuple(parameter.shape for parameter in first_layer.attn.update.parameters())
+    second_state = tuple(parameter.shape for parameter in second_layer.attn.update.parameters())
+    assert first_state == second_state
+    with pytest.raises(ValueError, match="requires homogeneous cost-driving configuration"):
+        model.cost_repr()
+
+
+def test_transformer_lm_folding_ignores_rope_capacity_when_cost_is_unchanged() -> None:
+    model = TransformerLM(17, 8, 8, 2, 4, 12, 10_000.0, device=torch.device("meta"))
+    model.layers[1] = GPTDecoderLayer(8, 4, 12, 16, 10_000.0, device=torch.device("meta"))
+
+    model.cost_repr()
+
+
+def test_transformer_lm_folding_checks_delegated_module_types() -> None:
+    model = TransformerLM(17, 8, 8, 2, 4, 12, 10_000.0, device=torch.device("meta"))
+    second_layer = model.layers[1]
+    assert isinstance(second_layer, GPTDecoderLayer)
+    second_layer.attn.norm = Linear(8, 8, device=torch.device("meta"))
+
+    with pytest.raises(ValueError, match="requires homogeneous cost-driving configuration"):
+        model.cost_repr()
 
 
 def test_transformer_lm_state_footprint_matches_architectural_formula() -> None:

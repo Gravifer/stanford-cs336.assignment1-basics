@@ -148,6 +148,42 @@ class GPTDecoderLayer(Module):
         """Pass the attention result directly into the feed-forward layer."""
         return self.ffn(self.attn(x))
 
+    def _cost_fold_key(self) -> tuple[object, ...]:
+        """Describe the configuration read by this layer's symbolic cost hooks."""
+        attention = self.attn.update
+        feed_forward = self.ffn.update
+        rope = attention.rope
+        delegated_types = tuple(
+            (name, type(module)) for name, module in self.named_modules(remove_duplicate=False)
+        )
+        attention_state = tuple(
+            (name, tuple(parameter.shape), parameter.dtype)
+            for name, parameter in attention.named_parameters(remove_duplicate=False)
+        )
+        feed_forward_state = tuple(
+            (name, tuple(parameter.shape), parameter.dtype)
+            for name, parameter in feed_forward.named_parameters(remove_duplicate=False)
+        )
+        rope_form = None if rope is None else (type(rope), rope.use_matrix_form)
+        return (
+            delegated_types,
+            type(self),
+            type(self.attn),
+            type(attention),
+            attention.d_model,
+            attention.num_heads,
+            attention.num_kv_heads,
+            attention.d_k,
+            attention.d_v,
+            attention_state,
+            rope_form,
+            type(self.ffn),
+            type(feed_forward),
+            feed_forward.d_model,
+            feed_forward.d_ff,
+            feed_forward_state,
+        )
+
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Classify block orchestration and delegate its two sublayers."""
         return ()
@@ -249,6 +285,23 @@ class TransformerLM(Module):
 
     def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
         """Summarize identical blocks while traversing other children normally."""
+        if len(self.layers) != self.num_layers:
+            raise ValueError(
+                "TransformerLM symbolic layer folding requires num_layers to match the registered layer count, "
+                f"got num_layers={self.num_layers} and {len(self.layers)} registered layers"
+            )
+        if self.layers:
+            representative = self.layers[0]
+            if not isinstance(representative, GPTDecoderLayer):
+                raise ValueError("TransformerLM symbolic layer folding requires GPTDecoderLayer instances")
+            representative_signature = representative._cost_fold_key()
+            for index, layer in enumerate(list(self.layers)[1:], start=1):
+                if not isinstance(layer, GPTDecoderLayer) or layer._cost_fold_key() != representative_signature:
+                    raise ValueError(
+                        "TransformerLM symbolic layer folding requires homogeneous cost-driving configuration; "
+                        f"layer {index} differs from layer 0"
+                    )
+
         s = scope.symbols
         s.unbound("batch", "sequence")
         s.bind(d_model=self.d_model, num_layers=self.num_layers, vocab_size=self.vocab_size)

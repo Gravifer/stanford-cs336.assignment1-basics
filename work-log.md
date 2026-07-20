@@ -86,3 +86,8 @@ or source of repository policy.
 - Hardened exported record boundaries: names and member kinds are validated at construction, report conditions must be
   SymPy equalities, iterable fields are normalized without consuming generators twice, and `matmul_flops()` rejects a
   non-`CostTree` argument directly. Focused analytics: 77 passed; Ruff/`ty` clean.
+- Enforced `TransformerLM`'s authored layer-folding preconditions. Count drift is rejected, and an explicit decoder-layer
+  fold key covers delegated module types, query/KV cost configuration, RoPE execution form, feed-forward configuration,
+  and cost-owner parameter shape/dtype without comparing values or cost-irrelevant RoPE capacity. Two review rounds
+  supplied same-state-shape grouped-attention and delegated-norm counterexamples before approval. Model-focused suite:
+  102 passed; Ruff/`ty` clean.

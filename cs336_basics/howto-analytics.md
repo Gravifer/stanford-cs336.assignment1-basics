@@ -235,7 +235,9 @@ report as a condition. Caller substitutions are additional facts under the same 
 The model author also owns recursion policy. Ordinary modules contribute only their local work and delegate to their
 children. A repeated Transformer stack may deliberately describe one representative block with symbolic `num_layers`
 repetition and avoid traversing the remaining concrete blocks; embeddings, final normalization, and logit emission are
-still traversed normally. Automatically discovering and folding repeated siblings is a separate presentation problem.
+still traversed normally. Such authored folding must validate that the concrete layer count and cost-driving
+configuration still match the representative; independently initialized parameter values and cost-irrelevant buffer
+capacity need not match. Automatically discovering and folding repeated siblings is a separate presentation problem.
 
 The first representation is matmul-focused. Concrete parameter and buffer counts already come from Torch's module
 introspection. A unified resource record should not be introduced until at least an ordinary parameter, the RoPE
