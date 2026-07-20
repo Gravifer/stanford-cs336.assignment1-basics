@@ -415,6 +415,10 @@ def test_public_cost_records_reject_malformed_structure_at_the_boundary() -> Non
         matmul_flops(object())  # ty: ignore[invalid-argument-type]
     with pytest.raises(ValueError, match="edge role"):
         analytics.CostTree("tree", "Module", edge_role="unknown")  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValueError, match="cannot carry call arguments or repetitions"):
+        analytics.CostTree("tree", "Module", repetitions=2, edge_role="inventory")
+    with pytest.raises(ValueError, match="cannot carry call arguments or repetitions"):
+        analytics._CostChild("child", nn.Identity(), arguments={"tokens": 1}, edge_role="inventory")
 
 
 def test_public_cost_trees_preserve_unambiguous_child_paths_and_symbol_scopes() -> None:

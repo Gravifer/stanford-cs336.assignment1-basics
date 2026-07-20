@@ -223,7 +223,10 @@ class _CostChild:
             raise TypeError("directed cost child argument names must be strings")
         if self.edge_role not in ("call", "inventory"):
             raise ValueError(f"unknown directed cost child edge role: {self.edge_role!r}")
-        object.__setattr__(self, "repetitions", _expression(self.repetitions))
+        repetitions = _expression(self.repetitions)
+        if self.edge_role == "inventory" and (self.arguments or repetitions != 1):
+            raise ValueError("inventory edges cannot carry call arguments or repetitions")
+        object.__setattr__(self, "repetitions", repetitions)
         object.__setattr__(
             self,
             "arguments",
@@ -484,6 +487,10 @@ class CostTree:
             raise TypeError("cost tree unresolved messages must be strings")
         if self.edge_role not in ("call", "inventory"):
             raise ValueError(f"unknown cost tree edge role: {self.edge_role!r}")
+        repetitions = _expression(self.repetitions)
+        arguments = dict(self.arguments)
+        if self.edge_role == "inventory" and (arguments or repetitions != 1):
+            raise ValueError("inventory cost trees cannot carry call arguments or repetitions")
         child_names = tuple(child.name for child in children)
         if any("." in name for name in child_names):
             raise ValueError("cost tree child names must not contain dots")
@@ -523,13 +530,12 @@ class CostTree:
                 raise ValueError("cost tree child arguments must use parent-local identities")
             if _metadata_free_symbols(child.repetitions) - local_identity_set:
                 raise ValueError("cost tree child repetitions must use parent-local identities")
-        arguments = dict(self.arguments)
         unknown_arguments = arguments.keys() - set(identities)
         if unknown_arguments:
             raise ValueError("cost tree arguments must target locally declared symbol identities")
         object.__setattr__(self, "costs", costs)
         object.__setattr__(self, "children", children)
-        object.__setattr__(self, "repetitions", _expression(self.repetitions))
+        object.__setattr__(self, "repetitions", repetitions)
         object.__setattr__(self, "symbols", symbols)
         object.__setattr__(
             self,

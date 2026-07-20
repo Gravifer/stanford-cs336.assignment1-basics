@@ -139,3 +139,5 @@ or source of repository policy.
 - A registration-only container audit found that non-strict reports still summed every registered slot once. Directed
   cost edges now distinguish actual calls from structural inventory; inventory remains inspectable but contributes no
   execution terms until a model author declares the calls.
+- Tightened the new edge-role boundary: inventory cannot carry symbolic call arguments or repetitions, preventing an
+  extension provider or manually constructed public tree from smuggling invocation semantics into structural slots.
