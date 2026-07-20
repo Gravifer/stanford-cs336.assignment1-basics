@@ -150,6 +150,38 @@ Neither representation supplies the human semantics of an architectural formula.
 configured model executed. It does not by itself reconstruct the family expression containing symbols such as
 `num_layers`.
 
+## Memory quantities are not interchangeable
+
+"Activation memory" is ambiguous unless the report names both the lifetime model and the execution mode. At least five
+useful quantities differ:
+
+| Quantity | What it measures | Suitable Torch evidence |
+|---|---|---|
+| registered state | logical parameter and buffer elements or dtype-sized bytes | module parameter/buffer traversal |
+| one tensor footprint | `numel * element_size` for a known logical tensor | real, fake, or meta tensor metadata |
+| operator allocation traffic | bytes allocated or released by individual executed operators | [`torch.profiler`](https://docs.pytorch.org/tutorials/recipes/recipes/profiler_recipe.html) with `profile_memory=True` |
+| saved-for-backward tensors | tensors autograd explicitly packs for a later backward | [`saved_tensors_hooks`](https://docs.pytorch.org/docs/stable/notes/autograd.html#hooks-for-saved-tensors) |
+| allocator peak | maximum PyTorch tensor bytes allocated on one concrete allocator/device run | [`max_memory_allocated`](https://docs.pytorch.org/docs/stable/generated/torch.cuda.max_memory_allocated.html) after resetting peak statistics |
+
+The sum of operator output sizes is not generally any of these. An output may alias an input, be a view, be released
+before a later output exists, remain live because the caller retains it, or be saved specifically for backward. The CUDA
+allocator may also round requests, cache freed blocks, and report allocated versus reserved bytes separately. The
+profiler records allocation and release events, then its tables attribute or aggregate their memory effects across
+executed operators; those tables are not by themselves an architectural peak formula.
+
+Meta and fake tensors can supply logical shapes and dtypes, so their tensor footprints remain meaningful. They allocate
+no ordinary tensor storage and therefore cannot validate an allocator peak. Conversely, a concrete CUDA peak is useful
+systems evidence for one implementation, dtype, device, allocator configuration, and call shape, but it does not recover
+a symbolic family expression.
+
+Training retention is a separate plane again. Autograd saved-tensor hooks can inventory what a concrete forward saves
+for backward, but installing them can change Tensor-object packing behavior, and saved objects may share storage. They
+are an executable oracle for a later training analysis rather than a substitute for a module-authored retention formula.
+
+A symbolic peak requires an execution schedule, alias information, and liveness intervals. FX/export metadata may
+eventually provide an observed graph on which to perform that analysis. Until then, reports should keep registered state,
+logical tensor footprints, allocation traffic, saved-for-backward bytes, and allocator peaks as separately named results.
+
 ## Module structure, FX, and export
 
 Torch's module tree carries parameters, buffers, state-dict prefixes, and a useful semantic hierarchy. Official forward

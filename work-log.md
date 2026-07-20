@@ -124,3 +124,6 @@ or source of repository policy.
 - Extended the same interface-local binding to direct `Linear`, all three SwiGLU representations, self-attention, and
   decoder-layer roots. Multi-axis meta calls for each now resolve their authored symbols and agree with Torch's FLOP
   counter without recursive runtime tracing.
+- Reassessed activation-memory terminology against Torch's profiler, CUDA allocator peaks, meta/fake tensors, and
+  autograd saved-tensor hooks. The memo now keeps registered state, logical tensor footprints, operator allocation
+  traffic, training retention, and concrete allocator peaks distinct; no output-volume proxy is labeled as peak memory.
