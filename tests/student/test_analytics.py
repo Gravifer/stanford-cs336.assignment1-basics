@@ -395,6 +395,11 @@ def test_course_policy_keeps_symbolic_and_bound_views() -> None:
     assert report.unsupported == ()
     assert isinstance(report.terms[0], CostTerm)
 
+    resolved = report.substitute({tokens: 7})
+    assert sympy.simplify(resolved.terms[0].expression - 2 * tokens * d_in * d_out) == 0
+    assert resolved.bound_terms[0].expression == 210
+    assert sum(term.expression for term in resolved.bound_terms) == resolved.bound_total
+
 
 @pytest.mark.parametrize(
     ("cost", "invoke", "packet"),

@@ -410,6 +410,13 @@ class CostReport:
             conditions=conditions,
         )
 
+    @property
+    def bound_terms(self) -> tuple[CostTerm, ...]:
+        """Return component terms after applying this report's known bindings."""
+        return tuple(
+            replace(term, expression=_substitute(term.expression, self.bindings)) for term in self.terms
+        )
+
 
 @runtime_checkable
 class _CostProvider(Protocol):
