@@ -20,10 +20,12 @@ __all__ = [
     "CostRepr",
     "CostTerm",
     "CostTree",
+    "ModuleStateFootprint",
     "SymbolRepr",
     "TensorRepr",
     "cost_repr",
     "matmul_flops",
+    "module_state_footprint",
 ]
 
 
@@ -81,6 +83,18 @@ class SymbolRepr:
             raise ValueError("a symbolic dimension requires a non-empty display name")
         if self.binding is not None:
             object.__setattr__(self, "binding", _expression(self.binding))
+
+
+@dataclass(frozen=True)
+class ModuleStateFootprint:
+    """Logical element and byte counts for a module's registered tensor state."""
+
+    parameter_numel: int
+    parameter_bytes: int
+    trainable_parameter_numel: int
+    trainable_parameter_bytes: int
+    buffer_numel: int
+    buffer_bytes: int
 
 
 @dataclass(frozen=True)
@@ -446,6 +460,46 @@ def cost_repr(module: nn.Module) -> CostTree:
     definitions, relations, _ = _tree_facts(tree)
     _validate_relations(relations, definitions)
     return tree
+
+
+def _tensor_footprint_totals(tensors: Iterable[torch.Tensor]) -> tuple[int, int]:
+    """Count logical tensor elements and their dtype-sized bytes."""
+    count = 0
+    byte_count = 0
+    for tensor in tensors:
+        if torch.nn.parameter.is_lazy(tensor):
+            raise ValueError("module state footprint requires initialized parameters and buffers")
+        count += tensor.numel()
+        byte_count += tensor.numel() * tensor.element_size()
+    return count, byte_count
+
+
+def module_state_footprint(module: nn.Module) -> ModuleStateFootprint:
+    """Summarize registered parameters and buffers without allocating tensor data.
+
+    Byte counts are logical ``numel * element_size`` values aggregated across
+    devices and dtypes, not allocator peaks or sparse/compressed physical-storage
+    measurements. Torch suppresses duplicate identities within each parameter or
+    buffer traversal; distinct views sharing storage are counted separately, and
+    an object registered in both categories contributes to both.
+    """
+    if not isinstance(module, nn.Module):
+        raise TypeError(f"module_state_footprint expects a torch.nn.Module, got {type(module).__qualname__}")
+
+    parameters = tuple(module.parameters())
+    parameter_numel, parameter_bytes = _tensor_footprint_totals(parameters)
+    trainable_parameter_numel, trainable_parameter_bytes = _tensor_footprint_totals(
+        parameter for parameter in parameters if parameter.requires_grad
+    )
+    buffer_numel, buffer_bytes = _tensor_footprint_totals(module.buffers())
+    return ModuleStateFootprint(
+        parameter_numel=parameter_numel,
+        parameter_bytes=parameter_bytes,
+        trainable_parameter_numel=trainable_parameter_numel,
+        trainable_parameter_bytes=trainable_parameter_bytes,
+        buffer_numel=buffer_numel,
+        buffer_bytes=buffer_bytes,
+    )
 
 
 def _substitute(expression: Any, bindings: Mapping[Any, Any]) -> Any:

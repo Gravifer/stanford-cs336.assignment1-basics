@@ -8,7 +8,16 @@ from torch.utils.flop_counter import FlopCounterMode
 
 import cs336_basics.nn.analytics as analytics
 from cs336_basics.nn import DeltaLayer, Module
-from cs336_basics.nn.analytics import CostRepr, CostTerm, SymbolRepr, TensorRepr, cost_repr, matmul_flops
+from cs336_basics.nn.analytics import (
+    CostRepr,
+    CostTerm,
+    ModuleStateFootprint,
+    SymbolRepr,
+    TensorRepr,
+    cost_repr,
+    matmul_flops,
+    module_state_footprint,
+)
 from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
 from cs336_basics.nn.model import TransformerLM
@@ -82,6 +91,78 @@ def test_cost_repr_requires_exact_overload_and_schema_arguments() -> None:
         CostRepr("incomplete", torch.ops.aten.bmm.default, {"self": operands["self"]})
     with pytest.raises(ValueError, match="no schema arguments named: right"):
         CostRepr("conflict", torch.ops.aten.bmm.default, {**operands, "right": operands["mat2"]})
+
+
+def test_module_state_footprint_uses_torch_registered_state_traversal() -> None:
+    class MixedState(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.trainable = nn.Parameter(torch.empty((2, 3), dtype=torch.float32))
+            self.frozen = nn.Parameter(torch.empty(4, dtype=torch.float16), requires_grad=False)
+            self.register_buffer("persistent", torch.empty(5, dtype=torch.uint8))
+            self.register_buffer("temporary", torch.empty(2, dtype=torch.float64), persistent=False)
+
+    module = MixedState()
+    report = module_state_footprint(nn.ModuleList([module, module]))
+
+    assert report == ModuleStateFootprint(
+        parameter_numel=10,
+        parameter_bytes=32,
+        trainable_parameter_numel=6,
+        trainable_parameter_bytes=24,
+        buffer_numel=7,
+        buffer_bytes=21,
+    )
+
+
+def test_module_state_footprint_works_for_meta_models_and_rejects_nonmodules() -> None:
+    report = module_state_footprint(Linear(3, 5, device=torch.device("meta"), dtype=torch.float16))
+
+    assert report.parameter_numel == 15
+    assert report.parameter_bytes == 30
+    assert report.trainable_parameter_numel == 15
+    assert report.buffer_numel == 0
+    with pytest.raises(TypeError, match="torch.nn.Module"):
+        module_state_footprint(object())  # ty: ignore[invalid-argument-type]
+
+
+def test_module_state_footprint_counts_logical_views_and_deduplicates_tied_parameters() -> None:
+    class TiedAndViewed(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            shared = nn.Parameter(torch.empty((1, 6)))
+            self.first = nn.Linear(6, 1, bias=False)
+            self.second = nn.Linear(6, 1, bias=False)
+            self.first.weight = shared
+            self.second.weight = shared
+
+            storage = torch.empty(8)
+            self.register_buffer("left", storage[:6])
+            self.register_buffer("right", storage[2:])
+
+    report = module_state_footprint(TiedAndViewed())
+
+    assert report.parameter_numel == 6
+    assert report.parameter_bytes == 24
+    assert report.buffer_numel == 12
+    assert report.buffer_bytes == 48
+
+
+def test_module_state_footprint_counts_cross_category_registration_per_category() -> None:
+    module = nn.Module()
+    tensor = nn.Parameter(torch.empty(3, dtype=torch.float16))
+    module.register_parameter("weight", tensor)
+    module.register_buffer("mirror", tensor)
+
+    report = module_state_footprint(module)
+
+    assert report.parameter_numel == report.buffer_numel == 3
+    assert report.parameter_bytes == report.buffer_bytes == 6
+
+
+def test_module_state_footprint_rejects_uninitialized_lazy_state() -> None:
+    with pytest.raises(ValueError, match="requires initialized"):
+        module_state_footprint(nn.LazyLinear(4))
 
 
 def test_linear_cost_uses_symbolic_aten_operands() -> None:
