@@ -162,9 +162,9 @@ class SymbolRepr:
     binding: Any | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.local_name, str) or not self.local_name:
+        if not isinstance(self.local_name, str) or not self.local_name.strip():
             raise ValueError("a symbolic dimension requires a non-empty local name")
-        if not isinstance(self.display_name, str) or not self.display_name:
+        if not isinstance(self.display_name, str) or not self.display_name.strip():
             raise ValueError("a symbolic dimension requires a non-empty display name")
         if not isinstance(self.symbol, _sympy().Symbol):
             raise TypeError("a symbolic dimension identity must be a SymPy Symbol")
@@ -224,7 +224,7 @@ class CostRepr:
     repetitions: Any = 1
 
     def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or not self.name:
+        if not isinstance(self.name, str) or not self.name.strip():
             raise ValueError("a cost representation requires a non-empty semantic name")
         if not isinstance(self.operation, torch._ops.OpOverload):
             raise TypeError("operation must be an exact torch.ops overload, such as torch.ops.aten.bmm.default")
@@ -261,7 +261,7 @@ class _CostChild:
     edge_role: Literal["call", "inventory"] = "call"
 
     def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or not self.name or "." in self.name:
+        if not isinstance(self.name, str) or not self.name.strip() or "." in self.name:
             raise ValueError("a directed cost child name must be a non-empty string without dots")
         if not isinstance(self.module, nn.Module):
             raise TypeError(f"a directed cost child must be a torch.nn.Module, got {type(self.module).__qualname__}")
@@ -519,9 +519,9 @@ class CostTree:
         children = tuple(self.children)
         symbols = tuple(self.symbols)
         unresolved = tuple(self.unresolved)
-        if not isinstance(self.name, str) or not self.name:
+        if not isinstance(self.name, str) or not self.name.strip():
             raise ValueError("a cost tree requires a non-empty name")
-        if not isinstance(self.module_type, str) or not self.module_type:
+        if not isinstance(self.module_type, str) or not self.module_type.strip():
             raise ValueError("a cost tree requires a non-empty module type")
         if any(not isinstance(cost, CostRepr) for cost in costs):
             raise TypeError("cost tree costs must be CostRepr values")
@@ -531,6 +531,8 @@ class CostTree:
             raise TypeError("cost tree symbols must be SymbolRepr values")
         if any(not isinstance(message, str) for message in unresolved):
             raise TypeError("cost tree unresolved messages must be strings")
+        if any(not message.strip() for message in unresolved):
+            raise ValueError("cost tree unresolved messages must be non-empty")
         if self.edge_role not in ("call", "inventory"):
             raise ValueError(f"unknown cost tree edge role: {self.edge_role!r}")
         repetitions = _expression(self.repetitions)
@@ -612,7 +614,7 @@ class CostTerm:
     expression: Any
 
     def __post_init__(self) -> None:
-        if not isinstance(self.path, str) or not self.path:
+        if not isinstance(self.path, str) or not self.path.strip():
             raise ValueError("a cost term requires a non-empty module path")
         if not isinstance(self.source, CostRepr):
             raise TypeError("a cost term source must be CostRepr")
@@ -640,6 +642,8 @@ class CostReport:
             raise TypeError("cost report terms must be CostTerm values")
         if any(not isinstance(message, str) for message in unsupported):
             raise TypeError("cost report unsupported messages must be strings")
+        if any(not message.strip() for message in unsupported):
+            raise ValueError("cost report unsupported messages must be non-empty")
         if conditions:
             equality_type = _sympy().Equality
             if any(not isinstance(condition, equality_type) for condition in conditions):

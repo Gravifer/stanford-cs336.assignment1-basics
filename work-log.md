@@ -147,3 +147,5 @@ or source of repository policy.
   normal module traversal continues to produce the same values.
 - A Torch export probe confirmed that backed dynamic `SymInt` values still sympify to foreign `ShapeEnv` symbols while
   concrete hints and range constraints remain separate. The memo records the evidence; remapping remains deferred.
+- Aligned public analytics record boundaries so whitespace-only names, paths, module types, and diagnostic messages no
+  longer satisfy their documented non-empty contracts.
