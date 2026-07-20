@@ -137,6 +137,23 @@ def test_cost_observer_lifecycle_and_hook_isolation() -> None:
         observer.__enter__()
 
 
+def test_cost_observer_preserves_native_state_loading_and_assignment() -> None:
+    module = Linear(3, 4)
+    replacement = torch.full_like(module.weight, 2.0)
+    observer = module.observe_costs()
+
+    with observer:
+        assert module.state_dict().keys() == {"weight"}
+        incompatible = module.load_state_dict({"weight": replacement}, assign=True)
+        module(torch.ones((2, 3)))
+
+    assert incompatible.missing_keys == []
+    assert incompatible.unexpected_keys == []
+    assert module.weight.data_ptr() == replacement.data_ptr()
+    assert module.state_dict().keys() == {"weight"}
+    assert observer.matmul_flops(strict=True)[0].bound_total == 48
+
+
 def test_cost_observer_does_not_record_a_forward_without_output() -> None:
     class Fails(_ObservableProjection):
         def forward(self, x):
