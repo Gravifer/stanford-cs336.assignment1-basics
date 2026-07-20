@@ -306,6 +306,18 @@ def test_symbolic_dimensions_and_repetitions_reject_definite_negative_values() -
         )
 
 
+@pytest.mark.parametrize("value", [True, False, 1.0, 1.5, float("nan"), float("inf"), sympy.true])
+def test_symbolic_dimensions_reject_concrete_noninteger_values(value) -> None:
+    with pytest.raises(TypeError):
+        TensorRepr((value,))
+
+
+def test_symbolic_dimensions_retain_unresolved_symbolic_expressions() -> None:
+    dimension = sympy.Symbol("dimension")
+
+    assert TensorRepr((dimension,)).shape == (dimension,)
+
+
 class _DirectedLinearParent(Module):
     def __init__(self, width: int | None = None, *, argument_name: str = "d_in") -> None:
         super().__init__()

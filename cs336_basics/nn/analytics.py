@@ -49,6 +49,10 @@ def _expression(value: object) -> Any:
     """Normalize a nonnegative integer or symbolic value into a SymPy expression."""
     sympy = _sympy()
     expression = sympy.sympify(value)
+    if expression.is_Boolean:
+        raise TypeError(f"cost dimensions and repetitions cannot be booleans, got {value!r}")
+    if expression.is_number and expression.is_integer is not True:
+        raise TypeError(f"concrete cost dimensions and repetitions must be integers, got {value!r}")
     if expression.is_integer is False:
         raise TypeError(f"cost dimensions and repetitions must be integer expressions, got {value!r}")
     if expression.is_nonnegative is False:
