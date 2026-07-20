@@ -62,9 +62,14 @@ def _immutable_mapping(mapping: Mapping[Any, Any]) -> Mapping[Any, Any]:
 def _expression(value: object) -> Any:
     """Normalize a nonnegative integer or symbolic value into a SymPy expression."""
     sympy = _sympy()
-    expression = sympy.sympify(value)
-    if expression.is_Boolean:
+    try:
+        expression = sympy.sympify(value)
+    except (TypeError, sympy.SympifyError) as error:
+        raise TypeError(f"cost dimensions and repetitions must be scalar symbolic expressions, got {value!r}") from error
+    if getattr(expression, "is_Boolean", False):
         raise TypeError(f"cost dimensions and repetitions cannot be booleans, got {value!r}")
+    if not isinstance(expression, sympy.Expr):
+        raise TypeError(f"cost dimensions and repetitions must be scalar symbolic expressions, got {value!r}")
     if expression.is_number and expression.is_integer is not True:
         raise TypeError(f"concrete cost dimensions and repetitions must be integers, got {value!r}")
     if expression.is_integer is False:
@@ -143,6 +148,8 @@ class SymbolRepr:
             raise ValueError("a symbolic dimension requires a non-empty local name")
         if not isinstance(self.display_name, str) or not self.display_name:
             raise ValueError("a symbolic dimension requires a non-empty display name")
+        if not isinstance(self.symbol, _sympy().Symbol):
+            raise TypeError("a symbolic dimension identity must be a SymPy Symbol")
         if self.binding is not None:
             object.__setattr__(self, "binding", _expression(self.binding))
 
@@ -459,11 +466,58 @@ class CostTree:
             raise TypeError("cost tree symbols must be SymbolRepr values")
         if any(not isinstance(message, str) for message in unresolved):
             raise TypeError("cost tree unresolved messages must be strings")
+        child_names = tuple(child.name for child in children)
+        if any("." in name for name in child_names):
+            raise ValueError("cost tree child names must not contain dots")
+        if len(set(child_names)) != len(child_names):
+            raise ValueError("cost tree child names must be unique")
+        local_names = tuple(symbol.local_name for symbol in symbols)
+        display_names = tuple(symbol.display_name for symbol in symbols)
+        identities = tuple(symbol.symbol for symbol in symbols)
+        if len(set(local_names)) != len(local_names):
+            raise ValueError("cost tree local symbol names must be unique")
+        if len(set(display_names)) != len(display_names):
+            raise ValueError("cost tree display symbol names must be unique")
+        if len(set(identities)) != len(identities):
+            raise ValueError("cost tree symbol identities must be unique")
+        subtree_identities = list(identities)
+
+        def append_child_identities(child: CostTree) -> None:
+            subtree_identities.extend(symbol.symbol for symbol in child.symbols)
+            for descendant in child.children:
+                append_child_identities(descendant)
+
+        for child in children:
+            append_child_identities(child)
+        if len(set(subtree_identities)) != len(subtree_identities):
+            raise ValueError("cost tree symbol identities must be unique across the subtree")
+        local_identity_set = frozenset(identities)
+        for symbol in symbols:
+            if symbol.binding is not None and _metadata_free_symbols(symbol.binding) - local_identity_set:
+                raise ValueError("cost tree symbol bindings must use locally declared identities")
+        for cost in costs:
+            if _metadata_free_symbols(cost.arguments) - local_identity_set:
+                raise ValueError("cost tree local costs must use locally declared identities")
+            if _metadata_free_symbols(cost.repetitions) - local_identity_set:
+                raise ValueError("cost tree local cost repetitions must use locally declared identities")
+        for child in children:
+            if _metadata_free_symbols(child.arguments) - local_identity_set:
+                raise ValueError("cost tree child arguments must use parent-local identities")
+            if _metadata_free_symbols(child.repetitions) - local_identity_set:
+                raise ValueError("cost tree child repetitions must use parent-local identities")
+        arguments = dict(self.arguments)
+        unknown_arguments = arguments.keys() - set(identities)
+        if unknown_arguments:
+            raise ValueError("cost tree arguments must target locally declared symbol identities")
         object.__setattr__(self, "costs", costs)
         object.__setattr__(self, "children", children)
         object.__setattr__(self, "repetitions", _expression(self.repetitions))
         object.__setattr__(self, "symbols", symbols)
-        object.__setattr__(self, "arguments", _immutable_mapping(self.arguments))
+        object.__setattr__(
+            self,
+            "arguments",
+            _immutable_mapping({symbol: _expression(value) for symbol, value in arguments.items()}),
+        )
         object.__setattr__(self, "unresolved", unresolved)
 
     @property
@@ -492,6 +546,7 @@ class CostTerm:
             raise ValueError("a cost term requires a non-empty module path")
         if not isinstance(self.source, CostRepr):
             raise TypeError("a cost term source must be CostRepr")
+        object.__setattr__(self, "expression", _expression(self.expression))
 
 
 @dataclass(frozen=True)
@@ -519,12 +574,75 @@ class CostReport:
             equality_type = _sympy().Equality
             if any(not isinstance(condition, equality_type) for condition in conditions):
                 raise TypeError("cost report conditions must be SymPy equalities")
+        sympy = _sympy()
+        known_symbols = frozenset(self.known_symbols)
+        if any(not isinstance(symbol, _sympy().Symbol) for symbol in known_symbols):
+            raise TypeError("cost report known symbols must be SymPy Symbol identities")
+        bindings = dict(self.bindings)
+        if any(not isinstance(symbol, _sympy().Symbol) for symbol in bindings):
+            raise TypeError("cost report binding keys must be SymPy Symbol identities")
+        if bindings.keys() - known_symbols:
+            raise ValueError("cost report bindings must target known symbolic identities")
+        normalized_bindings = {symbol: _expression(value) for symbol, value in bindings.items()}
+        _check_definition_cycles(normalized_bindings)
+        symbolic_total = _expression(self.symbolic_total)
+        bound_total = _expression(self.bound_total)
+        source_domains = tuple(
+            expression
+            for term in terms
+            for expression in (
+                *_metadata_dimensions(term.source.arguments),
+                term.source.repetitions,
+            )
+        )
+        domain_expressions = tuple(
+            dict.fromkeys(
+                _expression(expression)
+                for expression in (
+                    *self._domain_expressions,
+                    *known_symbols,
+                    *normalized_bindings.values(),
+                    *source_domains,
+                )
+            )
+        )
+        report_metadata: tuple[Any, ...] = (
+            symbolic_total,
+            bound_total,
+            tuple(term.expression for term in terms),
+            tuple(term.source.arguments for term in terms),
+            tuple(term.source.repetitions for term in terms),
+            tuple(normalized_bindings.values()),
+            conditions,
+            domain_expressions,
+        )
+        foreign_symbols = _metadata_free_symbols(report_metadata) - known_symbols
+        if foreign_symbols:
+            names = ", ".join(sorted(map(str, foreign_symbols)))
+            raise ValueError(f"cost report expressions reference unknown symbolic identities: {names}")
+        expected_symbolic_total = sympy.expand(sum((term.expression for term in terms), sympy.Integer(0)))
+        if sympy.simplify(symbolic_total - expected_symbolic_total) != 0:
+            raise ValueError("cost report symbolic total must equal the sum of its terms")
+        expected_bound_total = _substitute(symbolic_total, normalized_bindings)
+        if sympy.simplify(bound_total - expected_bound_total) != 0:
+            raise ValueError("cost report bound total must equal its symbolic total under its bindings")
+        conditions = _validate_relations(
+            ((condition.lhs, condition.rhs) for condition in conditions),
+            normalized_bindings,
+        )
+        _validate_domains(domain_expressions, normalized_bindings)
         object.__setattr__(self, "terms", terms)
-        object.__setattr__(self, "bindings", _immutable_mapping(self.bindings))
+        object.__setattr__(self, "symbolic_total", symbolic_total)
+        object.__setattr__(self, "bound_total", bound_total)
+        object.__setattr__(
+            self,
+            "bindings",
+            _immutable_mapping(normalized_bindings),
+        )
         object.__setattr__(self, "unsupported", unsupported)
         object.__setattr__(self, "conditions", conditions)
-        object.__setattr__(self, "known_symbols", frozenset(self.known_symbols))
-        object.__setattr__(self, "_domain_expressions", tuple(self._domain_expressions))
+        object.__setattr__(self, "known_symbols", known_symbols)
+        object.__setattr__(self, "_domain_expressions", domain_expressions)
 
     def substitute(self, bindings: Mapping[Any, Any]) -> CostReport:
         """Return a report with additional symbolic bindings applied."""

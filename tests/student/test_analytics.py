@@ -248,12 +248,89 @@ def test_public_cost_records_reject_malformed_structure_at_the_boundary() -> Non
         CostRepr(1, torch.ops.aten.mm.default, cost.arguments)  # ty: ignore[invalid-argument-type]
     with pytest.raises(TypeError, match="costs must be CostRepr"):
         analytics.CostTree("tree", "Module", costs=(object(),))  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match="SymPy Symbol"):
+        SymbolRepr("width", "width", object())
     with pytest.raises(TypeError, match="source must be CostRepr"):
         CostTerm("tree", object(), sympy.Integer(1))  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match="scalar symbolic expressions"):
+        CostTerm("tree", cost, [])
     with pytest.raises(TypeError, match="conditions must be SymPy equalities"):
         analytics.CostReport((), 0, 0, {}, conditions=("invalid",))
     with pytest.raises(TypeError, match="expects a CostTree"):
         matmul_flops(object())  # ty: ignore[invalid-argument-type]
+
+
+def test_public_cost_trees_preserve_unambiguous_child_paths_and_symbol_scopes() -> None:
+    identity = sympy.Dummy("width", integer=True, nonnegative=True)
+    symbol = SymbolRepr("width", "width", identity)
+    child = analytics.CostTree("child", "Module")
+
+    with pytest.raises(ValueError, match="must not contain dots"):
+        analytics.CostTree("parent", "Module", children=(analytics.CostTree("nested.child", "Module"),))
+    with pytest.raises(ValueError, match="child names must be unique"):
+        analytics.CostTree("parent", "Module", children=(child, child))
+    with pytest.raises(ValueError, match="locally declared"):
+        analytics.CostTree("tree", "Module", symbols=(symbol,), arguments={sympy.Dummy("other"): 3})
+
+    shared_identity = sympy.Symbol("shared", integer=True, nonnegative=True)
+    first = analytics.CostTree(
+        "first",
+        "Module",
+        symbols=(SymbolRepr("width", "width", shared_identity, 2),),
+    )
+    second = analytics.CostTree(
+        "second",
+        "Module",
+        symbols=(SymbolRepr("width", "width", shared_identity, 3),),
+    )
+    with pytest.raises(ValueError, match="unique across the subtree"):
+        analytics.CostTree("parent", "Module", children=(first, second))
+
+
+def test_public_cost_reports_validate_closed_consistent_symbolic_results() -> None:
+    identity = sympy.Dummy("tokens", integer=True, nonnegative=True)
+    foreign = sympy.Dummy("foreign", integer=True, nonnegative=True)
+    cost = CostRepr(
+        "projection",
+        torch.ops.aten.mm.default,
+        {"self": TensorRepr((identity, 3)), "mat2": TensorRepr((3, 4))},
+    )
+    term = CostTerm("model", cost, 24 * identity)
+
+    with pytest.raises(ValueError, match="symbolic total"):
+        analytics.CostReport((term,), 25 * identity, 50, {identity: 2}, known_symbols=frozenset({identity}))
+    with pytest.raises(ValueError, match="bound total"):
+        analytics.CostReport((term,), 24 * identity, 999, {identity: 2}, known_symbols=frozenset({identity}))
+    with pytest.raises(ValueError, match="unknown symbolic identities"):
+        analytics.CostReport((term,), 24 * identity, 24 * foreign, {}, known_symbols=frozenset({identity}))
+    with pytest.raises(ValueError, match="definitions contain a cycle"):
+        analytics.CostReport(
+            (term,),
+            24 * identity,
+            24 * identity,
+            {identity: foreign, foreign: identity},
+            known_symbols=frozenset({identity, foreign}),
+        )
+    with pytest.raises(ValueError, match="symbolic facts are inconsistent"):
+        analytics.CostReport(
+            (term,),
+            24 * identity,
+            48,
+            {identity: 2},
+            conditions=(sympy.Eq(identity, 3, evaluate=False),),
+            known_symbols=frozenset({identity}),
+        )
+
+    dependent = sympy.Dummy("dependent", integer=True, nonnegative=True)
+    deferred_domain = analytics.CostReport(
+        (),
+        0,
+        0,
+        {identity: dependent - 1},
+        known_symbols=frozenset({identity, dependent}),
+    )
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        deferred_domain.substitute({dependent: 0})
 
 
 def test_cost_repr_requires_symbolic_metadata_for_tensor_schema_arguments() -> None:

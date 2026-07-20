@@ -109,3 +109,6 @@ or source of repository policy.
 - Corrected `addmm`/`baddbmm` addend validation to follow Torch's directional expansion contract. A source addend may
   expand to the fixed product shape, but the product is not symmetrically broadcast with it; CPU Torch oracles cover the
   cases where meta dispatch is overly permissive.
+- Hardened the exported analytics records as construction boundaries. Symbol identities and expressions are normalized
+  eagerly, reports validate known binding identities, and directly assembled trees preserve local symbol and child-path
+  uniqueness rather than failing later inside aggregation.
