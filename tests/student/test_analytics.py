@@ -1224,6 +1224,146 @@ def test_dense_product_policy_preserves_symbolic_dimensions_and_operation_repeti
     assert report.substitute({rows: 3, inner: 0, columns: 5, calls: 7}).bound_total == 0
 
 
+def test_dense_product_shape_checks_apply_known_symbol_bindings() -> None:
+    class AliasedProducts(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("batch", "rows", "inner", "columns")
+            s.bind(
+                same_batch=s.batch,
+                same_rows=s.rows,
+                same_inner=s.inner,
+                same_columns=s.columns,
+            )
+            return (
+                CostRepr(
+                    "aliased matrix product",
+                    torch.ops.aten.mm.default,
+                    {
+                        "self": TensorRepr((s.rows, s.inner)),
+                        "mat2": TensorRepr((s.same_inner, s.columns)),
+                    },
+                ),
+                CostRepr(
+                    "aliased added matrix product",
+                    torch.ops.aten.addmm.default,
+                    {
+                        "self": TensorRepr((s.same_rows, s.same_columns)),
+                        "mat1": TensorRepr((s.rows, s.inner)),
+                        "mat2": TensorRepr((s.same_inner, s.columns)),
+                    },
+                ),
+                CostRepr(
+                    "aliased batched matrix product",
+                    torch.ops.aten.bmm.default,
+                    {
+                        "self": TensorRepr((s.batch, s.rows, s.inner)),
+                        "mat2": TensorRepr((s.same_batch, s.same_inner, s.columns)),
+                    },
+                ),
+                CostRepr(
+                    "aliased added batched matrix product",
+                    torch.ops.aten.baddbmm.default,
+                    {
+                        "self": TensorRepr((s.same_batch, s.same_rows, s.same_columns)),
+                        "batch1": TensorRepr((s.batch, s.rows, s.inner)),
+                        "batch2": TensorRepr((s.same_batch, s.same_inner, s.columns)),
+                    },
+                ),
+            )
+
+    tree = AliasedProducts().cost_repr()
+    batch, rows, inner, columns = (
+        tree.find_symbols(name)[0] for name in ("batch", "rows", "inner", "columns")
+    )
+    report = matmul_flops(tree, strict=True)
+
+    assert sympy.simplify(report.symbolic_total - 4 * rows * inner * columns * (1 + batch)) == 0
+    assert report.conditions == ()
+
+
+def test_dense_product_shape_checks_apply_caller_substitutions() -> None:
+    class SeparatelyNamedProduct(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("left_inner", "right_inner")
+            return (
+                CostRepr(
+                    "separately named matrix product",
+                    torch.ops.aten.mm.default,
+                    {
+                        "self": TensorRepr((2, s.left_inner)),
+                        "mat2": TensorRepr((s.right_inner, 4)),
+                    },
+                ),
+            )
+
+    tree = SeparatelyNamedProduct().cost_repr()
+    left_inner = tree.find_symbols("left_inner")[0]
+    right_inner = tree.find_symbols("right_inner")[0]
+
+    symbolic_report = matmul_flops(tree, strict=True)
+    assert symbolic_report.conditions == (sympy.Eq(left_inner, right_inner),)
+    report = matmul_flops(
+        tree,
+        substitutions={left_inner: 3, right_inner: 3},
+        strict=True,
+    )
+    assert report.bound_total == 48
+    assert report.conditions == ()
+    with pytest.raises(ValueError, match="inner dimensions must match"):
+        matmul_flops(
+            tree,
+            substitutions={left_inner: 3, right_inner: 5},
+            strict=True,
+        )
+
+
+def test_dense_product_shape_conditions_compose_with_parent_child_equalities() -> None:
+    class ChildProduct(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("left_inner", "right_inner")
+            s.bind(left_inner=s.right_inner)
+            return (
+                CostRepr(
+                    "child matrix product",
+                    torch.ops.aten.mm.default,
+                    {
+                        "self": TensorRepr((2, s.left_inner)),
+                        "mat2": TensorRepr((s.right_inner, 4)),
+                    },
+                ),
+            )
+
+    class Parent(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.product = ChildProduct()
+
+        def _cost_repr(self, scope):
+            return ()
+
+        def _cost_children(self, scope):
+            s = scope.symbols
+            s.unbound("parent_inner")
+            return (
+                scope.child(
+                    "product",
+                    self.product,
+                    arguments={"left_inner": s.parent_inner},
+                ),
+            )
+
+    tree = Parent().cost_repr()
+    parent_inner = tree.find_symbols("parent_inner")[0]
+    right_inner = tree.find_symbols("right_inner")[0]
+    report = matmul_flops(tree, strict=True)
+
+    assert report.conditions == (sympy.Eq(parent_inner, right_inner),)
+    assert report.substitute({parent_inner: 3, right_inner: 3}).bound_total == 48
+
+
 @pytest.mark.parametrize(
     "cost",
     [
