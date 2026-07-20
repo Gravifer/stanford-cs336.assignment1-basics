@@ -184,3 +184,6 @@ or source of repository policy.
   transparency, nested decoder naming, or constructor boundaries. It also confirmed that Torch's nearest homogeneous
   Transformer container deep-copies one prototype with identical initial values, unlike this model's independently
   initialized layers, so no speculative generic stack container was introduced.
+- Re-ran the veteran `scripts/transformer_accounting.py` unchanged, then independently queried the new symbolic API on
+  its GPT-2 XL meta model. Both paths report 3,516,769,894,400 forward matrix FLOPs; the new state-footprint result also
+  matches the script's 1,640,452,800 parameters, 6,561,811,200 parameter bytes, and 12,582,912 buffer bytes exactly.
