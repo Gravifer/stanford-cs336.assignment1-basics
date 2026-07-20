@@ -473,19 +473,77 @@ def _same_dimension(left: Any, right: Any, description: str) -> None:
         raise ValueError(f"{description} must match, got {left} and {right}")
 
 
-def _bmm_flops(cost: CostRepr) -> Any:
-    left = _require_tensor(cost, "self")
-    right = _require_tensor(cost, "mat2")
+def _require_broadcastable(left: tuple[Any, ...], right: tuple[Any, ...], description: str) -> None:
+    """Require every aligned dimension to be provably equal or singleton."""
+    sympy = _sympy()
+    rank = max(len(left), len(right))
+    padded_left = (sympy.Integer(1),) * (rank - len(left)) + left
+    padded_right = (sympy.Integer(1),) * (rank - len(right)) + right
+    for left_axis, right_axis in zip(padded_left, padded_right, strict=True):
+        if sympy.simplify(left_axis - right_axis) == 0:
+            continue
+        if sympy.simplify(left_axis - 1) == 0 or sympy.simplify(right_axis - 1) == 0:
+            continue
+        raise ValueError(f"{description} are not broadcastable: {left} and {right}")
+
+
+def _mm_flops(cost: CostRepr, left_name: str = "self", right_name: str = "mat2") -> Any:
+    """Apply Torch's conventional dense rank-two matrix-product formula."""
+    left = _require_tensor(cost, left_name)
+    right = _require_tensor(cost, right_name)
+    if len(left.shape) != 2 or len(right.shape) != 2:
+        raise ValueError(f"{cost.operation} matrix operands must both be rank two")
+    rows, inner = left.shape
+    other_inner, columns = right.shape
+    _same_dimension(inner, other_inner, f"{cost.operation} inner dimensions")
+    return cost.repetitions * rows * columns * 2 * inner
+
+
+def _bmm_flops(cost: CostRepr, left_name: str = "self", right_name: str = "mat2") -> Any:
+    """Apply Torch's conventional dense rank-three batched-product formula."""
+    left = _require_tensor(cost, left_name)
+    right = _require_tensor(cost, right_name)
     if len(left.shape) != 3 or len(right.shape) != 3:
-        raise ValueError("aten.bmm operands must both be rank three")
+        raise ValueError(f"{cost.operation} batch-matrix operands must both be rank three")
     batch, rows, inner = left.shape
     other_batch, other_inner, columns = right.shape
-    _same_dimension(batch, other_batch, "aten.bmm batch dimensions")
-    _same_dimension(inner, other_inner, "aten.bmm inner dimensions")
+    _same_dimension(batch, other_batch, f"{cost.operation} batch dimensions")
+    _same_dimension(inner, other_inner, f"{cost.operation} inner dimensions")
     return cost.repetitions * batch * rows * columns * 2 * inner
 
 
-_MATMUL_POLICIES = {torch.ops.aten.bmm.default: _bmm_flops}
+def _addmm_flops(cost: CostRepr) -> Any:
+    """Count only the matrix product in an ``addmm`` invocation."""
+    addend = _require_tensor(cost, "self")
+    left = _require_tensor(cost, "mat1")
+    right = _require_tensor(cost, "mat2")
+    flops = _mm_flops(cost, "mat1", "mat2")
+    _require_broadcastable(addend.shape, (left.shape[0], right.shape[1]), "aten.addmm addend and product")
+    return flops
+
+
+def _baddbmm_flops(cost: CostRepr) -> Any:
+    """Count only the batched matrix products in a ``baddbmm`` invocation."""
+    addend = _require_tensor(cost, "self")
+    left = _require_tensor(cost, "batch1")
+    right = _require_tensor(cost, "batch2")
+    flops = _bmm_flops(cost, "batch1", "batch2")
+    if len(addend.shape) > 3:
+        raise ValueError("aten.baddbmm addend must have rank at most three")
+    _require_broadcastable(
+        addend.shape,
+        (left.shape[0], left.shape[1], right.shape[2]),
+        "aten.baddbmm addend and product",
+    )
+    return flops
+
+
+_MATMUL_POLICIES = {
+    torch.ops.aten.mm.default: _mm_flops,
+    torch.ops.aten.addmm.default: _addmm_flops,
+    torch.ops.aten.bmm.default: _bmm_flops,
+    torch.ops.aten.baddbmm.default: _baddbmm_flops,
+}
 
 
 def _tree_facts(tree: CostTree) -> tuple[dict[Any, Any], list[tuple[Any, Any]], frozenset[Any]]:

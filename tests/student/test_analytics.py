@@ -268,6 +268,127 @@ def test_course_policy_keeps_symbolic_and_bound_views() -> None:
     assert isinstance(report.terms[0], CostTerm)
 
 
+@pytest.mark.parametrize(
+    ("cost", "invoke", "packet"),
+    [
+        (
+            CostRepr(
+                "matrix product",
+                torch.ops.aten.mm.default,
+                {"self": TensorRepr((2, 3)), "mat2": TensorRepr((3, 4))},
+            ),
+            lambda: torch.mm(torch.empty((2, 3), device="meta"), torch.empty((3, 4), device="meta")),
+            torch.ops.aten.mm,
+        ),
+        (
+            CostRepr(
+                "added matrix product",
+                torch.ops.aten.addmm.default,
+                {
+                    "self": TensorRepr(()),
+                    "mat1": TensorRepr((2, 3)),
+                    "mat2": TensorRepr((3, 4)),
+                },
+            ),
+            lambda: torch.addmm(
+                torch.empty((), device="meta"),
+                torch.empty((2, 3), device="meta"),
+                torch.empty((3, 4), device="meta"),
+                beta=0,
+                alpha=0,
+            ),
+            torch.ops.aten.addmm,
+        ),
+        (
+            CostRepr(
+                "added batched matrix product",
+                torch.ops.aten.baddbmm.default,
+                {
+                    "self": TensorRepr((1, 2, 1)),
+                    "batch1": TensorRepr((5, 2, 3)),
+                    "batch2": TensorRepr((5, 3, 4)),
+                },
+            ),
+            lambda: torch.baddbmm(
+                torch.empty((1, 2, 1), device="meta"),
+                torch.empty((5, 2, 3), device="meta"),
+                torch.empty((5, 3, 4), device="meta"),
+                beta=0,
+                alpha=0,
+            ),
+            torch.ops.aten.baddbmm,
+        ),
+    ],
+)
+def test_torch_registered_dense_product_policies_match_flop_counter(cost, invoke, packet) -> None:
+    class Described(Module):
+        def _cost_repr(self, scope):
+            return (cost,)
+
+    counter = FlopCounterMode(display=False)
+    with counter:
+        invoke()
+
+    report = matmul_flops(Described().cost_repr(), strict=True)
+    assert report.bound_total == counter.get_total_flops()
+    assert set(counter.get_flop_counts()["Global"]) == {packet}
+
+
+@pytest.mark.parametrize(
+    "cost",
+    [
+        CostRepr(
+            "wrong-rank matrix product",
+            torch.ops.aten.mm.default,
+            {"self": TensorRepr((1, 2, 3)), "mat2": TensorRepr((3, 4))},
+        ),
+        CostRepr(
+            "mismatched added product",
+            torch.ops.aten.addmm.default,
+            {
+                "self": TensorRepr((2, 4)),
+                "mat1": TensorRepr((2, 3)),
+                "mat2": TensorRepr((5, 4)),
+            },
+        ),
+        CostRepr(
+            "unbroadcastable added product",
+            torch.ops.aten.addmm.default,
+            {
+                "self": TensorRepr((3, 5)),
+                "mat1": TensorRepr((2, 3)),
+                "mat2": TensorRepr((3, 4)),
+            },
+        ),
+        CostRepr(
+            "mismatched batched product",
+            torch.ops.aten.baddbmm.default,
+            {
+                "self": TensorRepr((5, 2, 4)),
+                "batch1": TensorRepr((5, 2, 3)),
+                "batch2": TensorRepr((7, 3, 4)),
+            },
+        ),
+        CostRepr(
+            "over-ranked batched addend",
+            torch.ops.aten.baddbmm.default,
+            {
+                "self": TensorRepr((1, 5, 2, 4)),
+                "batch1": TensorRepr((5, 2, 3)),
+                "batch2": TensorRepr((5, 3, 4)),
+            },
+        ),
+    ],
+)
+def test_dense_product_policies_reject_structurally_invalid_operands(cost) -> None:
+    class Described(Module):
+        def _cost_repr(self, scope):
+            return (cost,)
+
+    with pytest.raises(ValueError):
+        matmul_flops(Described().cost_repr(), strict=True)
+
+
 def test_linear_symbolic_cost_matches_meta_flop_counter() -> None:
     linear = Linear(3, 5, device=torch.device("meta"))
     tree = linear.cost_repr()
