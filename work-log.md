@@ -155,3 +155,9 @@ or source of repository policy.
   stable 8,519,680-byte allocation; Torch's private diagnostic clear for cuBLAS workspaces returned allocated memory
   exactly to the pre-forward level. This confirms why allocator peaks and persistent library workspaces must not be
   reported as activation footprints; no private CUDA API enters the package implementation.
+- Final broad student regression: 346 passed and 6 skipped. The only three failures remain the deliberately disarmed
+  SwiGLU course-key warning assertions; all analytics, model, attention, loading, adapter, and typing coverage passed.
+- Checked the homogeneous-layer container idea against Torch. Python's `TransformerEncoder` and `TransformerDecoder`
+  deep-copy one prototype through a private `_get_clones()` helper into `ModuleList`, while the public generic choices
+  remain `Sequential` and `ModuleList`. That same-initial-state policy differs from this model's independently
+  constructed layers, so no generic cloned-stack abstraction was added during the audit.
