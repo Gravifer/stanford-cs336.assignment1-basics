@@ -177,3 +177,6 @@ or source of repository policy.
 - A second deterministic randomized meta probe covered sixteen MHA/GQA/MQA cases across unequal QK/value widths, both
   retained activation layouts, optional RoPE, and one or two leading batch axes. Every authored matrix total again
   matched `FlopCounterMode`; the temporary probe was removed.
+- Reopened the memo's PyTorch, Torch source, einx, jaxtyping, and Netlib references. The source paths and documentation
+  targets remain live; version-selector redirects are expected. No task framing or implementation log was added to the
+  memo during the link audit.
