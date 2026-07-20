@@ -10,6 +10,7 @@ from torch import nn
 from torch.utils.flop_counter import FlopCounterMode
 
 import cs336_basics.nn.analytics as analytics
+import cs336_basics.nn.modules as module_impl
 from cs336_basics.nn import DeltaLayer, Module
 from cs336_basics.nn.analytics import (
     CostObserver,
@@ -26,8 +27,7 @@ from cs336_basics.nn.analytics import (
 from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
 from cs336_basics.nn.model import GPTDecoderLayer, TransformerLM
-from cs336_basics.nn.modules import DeltaLayer as ModulesDeltaLayer
-from cs336_basics.nn.modules import Linear, Module as ModulesModule
+from cs336_basics.nn.modules import Linear
 
 
 def _tensor(value: object) -> TensorRepr:
@@ -41,8 +41,8 @@ def test_repository_module_base_preserves_torch_identity() -> None:
     assert isinstance(linear, Module)
     assert isinstance(linear, nn.Module)
     assert linear.state_dict().keys() == {"weight"}
-    assert Module is ModulesModule
-    assert DeltaLayer is ModulesDeltaLayer
+    assert Module is module_impl.Module
+    assert DeltaLayer is module_impl.DeltaLayer
     assert not hasattr(analytics, "Module")
 
 
