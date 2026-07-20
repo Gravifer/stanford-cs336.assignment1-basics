@@ -1115,13 +1115,19 @@ _MATMUL_POLICIES = {
 }
 
 
-def _tree_facts(tree: CostTree) -> tuple[dict[Any, Any], list[tuple[Any, Any]], frozenset[Any]]:
+def _tree_facts(
+    tree: CostTree,
+    *,
+    call_edges_only: bool = False,
+) -> tuple[dict[Any, Any], list[tuple[Any, Any]], frozenset[Any]]:
     """Collect canonical definitions, consistency relations, and known identities."""
     definitions: dict[Any, Any] = {}
     relations: list[tuple[Any, Any]] = []
     known_symbols: set[Any] = set()
 
     def visit(node: CostTree) -> None:
+        if call_edges_only and node.edge_role == "inventory":
+            return
         local_bindings = dict(node.bindings)
         for record in node.symbols:
             symbol = record.symbol
@@ -1151,8 +1157,10 @@ def _metadata_dimensions(value: Any) -> tuple[Any, ...]:
     return ()
 
 
-def _tree_domains(tree: CostTree) -> tuple[Any, ...]:
+def _tree_domains(tree: CostTree, *, call_edges_only: bool = False) -> tuple[Any, ...]:
     """Collect every expression whose value is a tensor dimension or repetition."""
+    if call_edges_only and tree.edge_role == "inventory":
+        return ()
     local = [record.symbol for record in tree.symbols]
     local.extend(record.binding for record in tree.symbols if record.binding is not None)
     local.extend(tree.arguments.values())
@@ -1160,7 +1168,11 @@ def _tree_domains(tree: CostTree) -> tuple[Any, ...]:
     for cost in tree.costs:
         local.extend(_metadata_dimensions(cost.arguments))
         local.append(cost.repetitions)
-    return tuple(local) + tuple(expression for child in tree.children for expression in _tree_domains(child))
+    return tuple(local) + tuple(
+        expression
+        for child in tree.children
+        for expression in _tree_domains(child, call_edges_only=call_edges_only)
+    )
 
 
 def _validate_domains(expressions: Iterable[Any], bindings: Mapping[Any, Any]) -> None:
@@ -1253,10 +1265,10 @@ def matmul_flops(
         raise NotImplementedError("unsupported symbolic costs:\n" + "\n".join(unsupported))
 
     symbolic_total = sympy.expand(sum((term.expression for term in terms), sympy.Integer(0)))
-    bindings, relations, known_symbols = _tree_facts(tree)
+    bindings, relations, known_symbols = _tree_facts(tree, call_edges_only=True)
     if substitutions:
         _add_substitutions(bindings, relations, substitutions, known_symbols)
-    domains = _tree_domains(tree)
+    domains = _tree_domains(tree, call_edges_only=True)
     _validate_domains(domains, bindings)
     conditions = _validate_relations(relations, bindings)
     return CostReport(

@@ -354,6 +354,10 @@ def test_registration_only_torch_containers_do_not_imply_invocation(container: n
     assert "has no static local-cost provider" in tree.unresolved[0]
     assert report.terms == ()
     assert report.bound_total == 0
+    assert report.bindings == {}
+    assert report.known_symbols == frozenset()
+    with pytest.raises(ValueError, match="unknown symbolic identities"):
+        report.substitute({tree.children[0].symbols[0].symbol: 3})
     with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
         matmul_flops(tree, strict=True)
 

@@ -149,3 +149,5 @@ or source of repository policy.
   concrete hints and range constraints remain separate. The memo records the evidence; remapping remains deferred.
 - Aligned public analytics record boundaries so whitespace-only names, paths, module types, and diagnostic messages no
   longer satisfy their documented non-empty contracts.
+- Refined inventory semantics so ignored structural subtrees no longer leak symbols, bindings, or domain constraints
+  into execution reports; full-tree validation still checks them when the static representation is collected.
