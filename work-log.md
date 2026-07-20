@@ -106,3 +106,6 @@ or source of repository policy.
   an authored parent directs invocation. Focused analytics: 92 passed; Ruff/`ty` clean.
 - Added caller-directed validation at the protected structural-provider boundary. Malformed `_cost_repr()` or
   `_cost_children()` results now fail before the collector dereferences implementation details.
+- Corrected `addmm`/`baddbmm` addend validation to follow Torch's directional expansion contract. A source addend may
+  expand to the fixed product shape, but the product is not symmetrically broadcast with it; CPU Torch oracles cover the
+  cases where meta dispatch is overly permissive.

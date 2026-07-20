@@ -934,6 +934,62 @@ def test_dense_product_policies_reject_structurally_invalid_operands(cost) -> No
         matmul_flops(Described().cost_repr(), strict=True)
 
 
+@pytest.mark.parametrize(
+    ("cost", "invoke"),
+    [
+        (
+            CostRepr(
+                "directionally invalid addmm addend",
+                torch.ops.aten.addmm.default,
+                {
+                    "self": TensorRepr((2, 4)),
+                    "mat1": TensorRepr((1, 3)),
+                    "mat2": TensorRepr((3, 4)),
+                },
+            ),
+            lambda: torch.addmm(torch.empty((2, 4)), torch.empty((1, 3)), torch.empty((3, 4))),
+        ),
+        (
+            CostRepr(
+                "directionally invalid baddbmm addend",
+                torch.ops.aten.baddbmm.default,
+                {
+                    "self": TensorRepr((2, 1, 4)),
+                    "batch1": TensorRepr((1, 1, 3)),
+                    "batch2": TensorRepr((1, 3, 4)),
+                },
+            ),
+            lambda: torch.baddbmm(
+                torch.empty((2, 1, 4)),
+                torch.empty((1, 1, 3)),
+                torch.empty((1, 3, 4)),
+            ),
+        ),
+        (
+            CostRepr(
+                "over-ranked addmm addend",
+                torch.ops.aten.addmm.default,
+                {
+                    "self": TensorRepr((1, 2, 4)),
+                    "mat1": TensorRepr((2, 3)),
+                    "mat2": TensorRepr((3, 4)),
+                },
+            ),
+            lambda: torch.addmm(torch.empty((1, 2, 4)), torch.empty((2, 3)), torch.empty((3, 4))),
+        ),
+    ],
+)
+def test_added_product_policy_matches_torch_directional_expansion(cost, invoke) -> None:
+    class Described(Module):
+        def _cost_repr(self, scope):
+            return (cost,)
+
+    with pytest.raises(RuntimeError):
+        invoke()
+    with pytest.raises(ValueError, match="addend"):
+        matmul_flops(Described().cost_repr(), strict=True)
+
+
 def test_linear_symbolic_cost_matches_meta_flop_counter() -> None:
     linear = Linear(3, 5, device=torch.device("meta"))
     tree = linear.cost_repr()

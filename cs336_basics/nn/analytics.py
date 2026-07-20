@@ -727,18 +727,18 @@ def _same_dimension(left: Any, right: Any, description: str) -> None:
         raise ValueError(f"{description} must match, got {left} and {right}")
 
 
-def _require_broadcastable(left: tuple[Any, ...], right: tuple[Any, ...], description: str) -> None:
-    """Require every aligned dimension to be provably equal or singleton."""
+def _require_expandable_to(source: tuple[Any, ...], target: tuple[Any, ...], description: str) -> None:
+    """Require ``source`` to be provably expandable to the fixed ``target`` shape."""
     sympy = _sympy()
-    rank = max(len(left), len(right))
-    padded_left = (sympy.Integer(1),) * (rank - len(left)) + left
-    padded_right = (sympy.Integer(1),) * (rank - len(right)) + right
-    for left_axis, right_axis in zip(padded_left, padded_right, strict=True):
-        if sympy.simplify(left_axis - right_axis) == 0:
+    if len(source) > len(target):
+        raise ValueError(f"{description}: source rank exceeds target rank ({source} to {target})")
+    padded_source = (sympy.Integer(1),) * (len(target) - len(source)) + source
+    for source_axis, target_axis in zip(padded_source, target, strict=True):
+        if sympy.simplify(source_axis - target_axis) == 0:
             continue
-        if sympy.simplify(left_axis - 1) == 0 or sympy.simplify(right_axis - 1) == 0:
+        if sympy.simplify(source_axis - 1) == 0:
             continue
-        raise ValueError(f"{description} are not broadcastable: {left} and {right}")
+        raise ValueError(f"{description}: {source} cannot expand to {target}")
 
 
 def _mm_flops(cost: CostRepr, left_name: str = "self", right_name: str = "mat2") -> Any:
@@ -772,7 +772,7 @@ def _addmm_flops(cost: CostRepr) -> Any:
     left = _require_tensor(cost, "mat1")
     right = _require_tensor(cost, "mat2")
     flops = _mm_flops(cost, "mat1", "mat2")
-    _require_broadcastable(addend.shape, (left.shape[0], right.shape[1]), "aten.addmm addend and product")
+    _require_expandable_to(addend.shape, (left.shape[0], right.shape[1]), "aten.addmm addend")
     return flops
 
 
@@ -782,12 +782,10 @@ def _baddbmm_flops(cost: CostRepr) -> Any:
     left = _require_tensor(cost, "batch1")
     right = _require_tensor(cost, "batch2")
     flops = _bmm_flops(cost, "batch1", "batch2")
-    if len(addend.shape) > 3:
-        raise ValueError("aten.baddbmm addend must have rank at most three")
-    _require_broadcastable(
+    _require_expandable_to(
         addend.shape,
         (left.shape[0], left.shape[1], right.shape[2]),
-        "aten.baddbmm addend and product",
+        "aten.baddbmm addend",
     )
     return flops
 
