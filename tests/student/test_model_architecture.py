@@ -55,7 +55,7 @@ def test_block_uses_nested_delta_sublayers() -> None:
     block = GPTDecoderLayer(8, 2, 16, 12, 10_000.0)
     keys = block.state_dict().keys()
 
-    assert isinstance(block.attn, GPTDecoderLayer.Attention)
+    assert isinstance(block.attn, GPTDecoderLayer.PrenormRoPEAttention)
     assert isinstance(block.ffn, GPTDecoderLayer.FeedForward)
     assert "attn.norm.weight" in keys
     assert "attn.update.in_proj_weight" in keys

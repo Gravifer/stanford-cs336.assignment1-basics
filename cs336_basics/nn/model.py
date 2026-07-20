@@ -41,7 +41,7 @@ class GPTDecoderLayer(Module):
     """Pre-norm GPT decoder layer composed of two additive updates."""
 
     @DeltaLayer
-    class Attention(Module):
+    class PrenormRoPEAttention(Module):
         """Normalized causal self-attention update."""
 
         def __init__(self, norm: RMSNorm, update: MultiheadSelfAttention) -> None:
@@ -125,7 +125,7 @@ class GPTDecoderLayer(Module):
             raise ValueError(f"d_model ({d_model}) must be divisible by num_heads ({num_heads})")
         d_k = d_model // num_heads
 
-        self.attn = self.Attention(
+        self.attn = self.PrenormRoPEAttention(
             norm=RMSNorm(d_model, eps=norm_eps, device=device, dtype=dtype),
             update=MultiheadSelfAttention(
                 d_model=d_model,
