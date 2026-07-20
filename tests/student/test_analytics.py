@@ -49,7 +49,6 @@ def test_external_torch_module_can_implement_cost_provider_structurally() -> Non
             )
 
         def _cost_children(self, scope):
-            del scope
             return ()
 
     tree = cost_repr(External())
@@ -187,7 +186,6 @@ class _DirectedLinearParent(Module):
         self.projection = Linear(3, 4)
 
     def _cost_repr(self, scope):
-        del scope
         return ()
 
     def _cost_children(self, scope):
@@ -292,7 +290,6 @@ def test_unsupported_operations_and_external_modules_remain_visible() -> None:
 
     class Unsupported(Module):
         def _cost_repr(self, scope):
-            del scope
             return (unsupported,)
 
     report = matmul_flops(Unsupported().cost_repr())

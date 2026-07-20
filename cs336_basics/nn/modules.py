@@ -49,7 +49,6 @@ class Module(nn.Module):
 
     def _cost_repr(self, scope: _CostScope) -> Iterable[CostRepr] | None:
         """Return local operations, or ``None`` until local work is classified."""
-        del scope
         return None
 
     def _cost_children(self, scope: _CostScope) -> Iterable[_CostChild]:
@@ -125,7 +124,6 @@ class Embedding(Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torc
 
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Classify embedding lookup as containing no matrix products."""
-        del scope
         return ()
 
     def extra_repr(self) -> str:
@@ -211,7 +209,6 @@ class RMSNorm(Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer norm
 
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Classify RMS normalization as containing no matrix products."""
-        del scope
         return ()
 
     def extra_repr(self) -> str:
@@ -436,7 +433,6 @@ class SoftMax(Module):  # mimicking :cls:`torch.nn.Softmax`
 
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Classify softmax as containing no matrix products."""
-        del scope
         return ()
 
     def extra_repr(self) -> str:

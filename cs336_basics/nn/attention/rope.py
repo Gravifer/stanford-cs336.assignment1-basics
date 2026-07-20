@@ -296,7 +296,6 @@ class RotaryPositionalEmbedding(Module):
 
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...] | None:
         """Classify default elementwise RoPE as containing no matrix products."""
-        del scope
         return None if self.use_matrix_form else ()
 
     def apply_qk(

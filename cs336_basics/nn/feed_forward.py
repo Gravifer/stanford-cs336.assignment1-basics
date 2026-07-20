@@ -224,7 +224,6 @@ class SwiGLU_delegate(Module):
 
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Classify all local work as non-matmul and delegate projections."""
-        del scope
         return ()
 
     def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:

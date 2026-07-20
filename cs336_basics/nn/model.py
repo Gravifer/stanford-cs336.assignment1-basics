@@ -55,7 +55,6 @@ class GPTDecoderLayer(Module):
 
         def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
             """Classify residual addition and delegate normalized attention."""
-            del scope
             return ()
 
         def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
@@ -87,7 +86,6 @@ class GPTDecoderLayer(Module):
 
         def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
             """Classify residual addition and delegate normalized SwiGLU."""
-            del scope
             return ()
 
         def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
@@ -152,7 +150,6 @@ class GPTDecoderLayer(Module):
 
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Classify block orchestration and delegate its two sublayers."""
-        del scope
         return ()
 
     def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
@@ -248,7 +245,6 @@ class TransformerLM(Module):
 
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Classify model orchestration and delegate its numerical work."""
-        del scope
         return ()
 
     def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
