@@ -693,3 +693,36 @@ def test_transformer_lm_keeps_invocation_shape_symbolic_until_bound() -> None:
     assert batch in report.bound_total.free_symbols
     assert sequence in report.bound_total.free_symbols
     assert report.substitute({batch: 1, sequence: 8}).bound_total.is_Integer
+
+
+def test_transformer_lm_state_footprint_matches_architectural_formula() -> None:
+    vocab_size = 17
+    context_length = 8
+    d_model = 8
+    num_layers = 3
+    num_heads = 4
+    d_ff = 12
+    model = TransformerLM(
+        vocab_size,
+        context_length,
+        d_model,
+        num_layers,
+        num_heads,
+        d_ff,
+        10_000.0,
+        device=torch.device("meta"),
+        dtype=torch.float16,
+    )
+
+    expected_parameters = (
+        2 * vocab_size * d_model
+        + num_layers * (4 * d_model**2 + 3 * d_model * d_ff + 2 * d_model)
+        + d_model
+    )
+    expected_rope_buffers = num_layers * context_length * (d_model // num_heads)
+    footprint = model.state_footprint()
+
+    assert footprint.parameter_numel == footprint.trainable_parameter_numel == expected_parameters
+    assert footprint.parameter_bytes == footprint.trainable_parameter_bytes == 2 * expected_parameters
+    assert footprint.buffer_numel == expected_rope_buffers
+    assert footprint.buffer_bytes == 4 * expected_rope_buffers
