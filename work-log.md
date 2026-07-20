@@ -165,3 +165,9 @@ or source of repository policy.
   Matrix policies now consume tree and caller facts first, retain unresolved batch/contraction equalities as report
   conditions, and compose through parent-shadowed child bindings. Direct aliases, caller substitutions, contradictory
   shapes, and condition deduplication are covered; unresolved broadcast disjunction remains explicitly deferred.
+- The same final review found that `DeltaLayer` preserved Torch state but erased Python runtime signature metadata.
+  Selective wrapper metadata now restores the authored signature, annotations, and qualified name while an explicit
+  additive-forward docstring avoids presenting the update-only documentation as the exposed residual behavior.
+- Post-fix broad student regression: 350 passed and 6 skipped, with only the same three intentionally disarmed SwiGLU
+  warning assertions failing. Independent review reported no remaining concrete defect in analytics composition,
+  state loading, model folding, tensor footprints, or DeltaLayer behavior.
