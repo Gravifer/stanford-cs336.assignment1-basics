@@ -160,6 +160,30 @@ _RESERVED_SYMBOL_NAMES = frozenset(
 )
 
 
+def _check_definition_cycles(definitions: Mapping[Any, Any]) -> None:
+    """Reject cycles among symbolic definitions before fixed-point substitution."""
+    identities = set(definitions)
+    dependencies = {
+        symbol: set(expression.free_symbols) & identities for symbol, expression in definitions.items()
+    }
+    visiting: set[Any] = set()
+    visited: set[Any] = set()
+
+    def visit(symbol: Any) -> None:
+        if symbol in visiting:
+            raise ValueError("symbolic definitions contain a cycle")
+        if symbol in visited:
+            return
+        visiting.add(symbol)
+        for dependency in dependencies.get(symbol, ()):
+            visit(dependency)
+        visiting.remove(symbol)
+        visited.add(symbol)
+
+    for symbol in dependencies:
+        visit(symbol)
+
+
 class _SymbolEnvironment:
     """Mutable symbol-table view used while one module authors its costs."""
 
@@ -241,27 +265,9 @@ class _SymbolEnvironment:
         return len(self._symbols)
 
     def _check_cycles(self) -> None:
-        identities = set(self._symbols.values())
-        dependencies = {
-            self._symbols[name]: set(binding.free_symbols) & identities
-            for name, binding in self._bindings.items()
-        }
-        visiting: set[Any] = set()
-        visited: set[Any] = set()
-
-        def visit(symbol: Any) -> None:
-            if symbol in visiting:
-                raise ValueError("symbolic bindings contain a cycle")
-            if symbol in visited:
-                return
-            visiting.add(symbol)
-            for dependency in dependencies.get(symbol, ()):
-                visit(dependency)
-            visiting.remove(symbol)
-            visited.add(symbol)
-
-        for symbol in dependencies:
-            visit(symbol)
+        _check_definition_cycles(
+            {self._symbols[name]: binding for name, binding in self._bindings.items()}
+        )
 
     def _freeze(self) -> tuple[SymbolRepr, ...]:
         """Freeze this builder and return immutable records in declaration order."""
@@ -503,6 +509,7 @@ def _tree_facts(tree: CostTree) -> tuple[dict[Any, Any], list[tuple[Any, Any]], 
             visit(child)
 
     visit(tree)
+    _check_definition_cycles(definitions)
     return definitions, relations, frozenset(known_symbols)
 
 
@@ -523,6 +530,7 @@ def _add_substitutions(
             relations.append((expression, definitions[symbol]))
         else:
             definitions[symbol] = expression
+    _check_definition_cycles(definitions)
 
 
 def _validate_relations(relations: Iterable[tuple[Any, Any]], definitions: Mapping[Any, Any]) -> tuple[Any, ...]:

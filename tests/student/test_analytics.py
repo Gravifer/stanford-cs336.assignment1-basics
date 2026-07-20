@@ -242,6 +242,20 @@ def test_report_substitutions_are_additive_facts_not_overrides() -> None:
         matmul_flops(tree, substitutions={sympy.Dummy("external", integer=True): 1})
 
 
+def test_report_substitutions_reject_symbolic_definition_cycles() -> None:
+    class Pair(Module):
+        def _cost_repr(self, scope):
+            scope.symbols.unbound("left", "right")
+            return ()
+
+    tree = Pair().cost_repr()
+    left = tree.find_symbols("left")[0]
+    right = tree.find_symbols("right")[0]
+
+    with pytest.raises(ValueError, match="definitions contain a cycle"):
+        matmul_flops(tree, substitutions={left: right, right: left})
+
+
 def test_course_policy_keeps_symbolic_and_bound_views() -> None:
     tree = cost_repr(Linear(3, 5))
     tokens = tree.find_symbols("tokens")[0]
