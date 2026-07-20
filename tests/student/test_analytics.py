@@ -180,6 +180,25 @@ def test_cost_repr_requires_exact_overload_and_schema_arguments() -> None:
         CostRepr("conflict", torch.ops.aten.bmm.default, {**operands, "right": operands["mat2"]})
 
 
+def test_public_cost_records_reject_malformed_structure_at_the_boundary() -> None:
+    cost = CostRepr(
+        "valid",
+        torch.ops.aten.mm.default,
+        {"self": TensorRepr((2, 3)), "mat2": TensorRepr((3, 4))},
+    )
+
+    with pytest.raises(ValueError, match="non-empty semantic name"):
+        CostRepr(1, torch.ops.aten.mm.default, cost.arguments)  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match="costs must be CostRepr"):
+        analytics.CostTree("tree", "Module", costs=(object(),))  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match="source must be CostRepr"):
+        CostTerm("tree", object(), sympy.Integer(1))  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match="conditions must be SymPy equalities"):
+        analytics.CostReport((), 0, 0, {}, conditions=("invalid",))
+    with pytest.raises(TypeError, match="expects a CostTree"):
+        matmul_flops(object())  # ty: ignore[invalid-argument-type]
+
+
 def test_cost_repr_requires_symbolic_metadata_for_tensor_schema_arguments() -> None:
     with pytest.raises(TypeError, match="must be represented by TensorRepr"):
         CostRepr("live tensor", torch.ops.aten.sin.default, {"self": torch.empty(2, 3)})

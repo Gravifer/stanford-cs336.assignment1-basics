@@ -139,9 +139,9 @@ class SymbolRepr:
     binding: Any | None = None
 
     def __post_init__(self) -> None:
-        if not self.local_name:
+        if not isinstance(self.local_name, str) or not self.local_name:
             raise ValueError("a symbolic dimension requires a non-empty local name")
-        if not self.display_name:
+        if not isinstance(self.display_name, str) or not self.display_name:
             raise ValueError("a symbolic dimension requires a non-empty display name")
         if self.binding is not None:
             object.__setattr__(self, "binding", _expression(self.binding))
@@ -169,7 +169,7 @@ class CostRepr:
     repetitions: Any = 1
 
     def __post_init__(self) -> None:
-        if not self.name:
+        if not isinstance(self.name, str) or not self.name:
             raise ValueError("a cost representation requires a non-empty semantic name")
         if not isinstance(self.operation, torch._ops.OpOverload):
             raise TypeError("operation must be an exact torch.ops overload, such as torch.ops.aten.bmm.default")
@@ -443,12 +443,28 @@ class CostTree:
     unresolved: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "costs", tuple(self.costs))
-        object.__setattr__(self, "children", tuple(self.children))
+        costs = tuple(self.costs)
+        children = tuple(self.children)
+        symbols = tuple(self.symbols)
+        unresolved = tuple(self.unresolved)
+        if not isinstance(self.name, str) or not self.name:
+            raise ValueError("a cost tree requires a non-empty name")
+        if not isinstance(self.module_type, str) or not self.module_type:
+            raise ValueError("a cost tree requires a non-empty module type")
+        if any(not isinstance(cost, CostRepr) for cost in costs):
+            raise TypeError("cost tree costs must be CostRepr values")
+        if any(not isinstance(child, CostTree) for child in children):
+            raise TypeError("cost tree children must be CostTree values")
+        if any(not isinstance(symbol, SymbolRepr) for symbol in symbols):
+            raise TypeError("cost tree symbols must be SymbolRepr values")
+        if any(not isinstance(message, str) for message in unresolved):
+            raise TypeError("cost tree unresolved messages must be strings")
+        object.__setattr__(self, "costs", costs)
+        object.__setattr__(self, "children", children)
         object.__setattr__(self, "repetitions", _expression(self.repetitions))
-        object.__setattr__(self, "symbols", tuple(self.symbols))
+        object.__setattr__(self, "symbols", symbols)
         object.__setattr__(self, "arguments", _immutable_mapping(self.arguments))
-        object.__setattr__(self, "unresolved", tuple(self.unresolved))
+        object.__setattr__(self, "unresolved", unresolved)
 
     @property
     def bindings(self) -> Mapping[Any, Any]:
@@ -471,6 +487,12 @@ class CostTerm:
     source: CostRepr
     expression: Any
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.path, str) or not self.path:
+            raise ValueError("a cost term requires a non-empty module path")
+        if not isinstance(self.source, CostRepr):
+            raise TypeError("a cost term source must be CostRepr")
+
 
 @dataclass(frozen=True)
 class CostReport:
@@ -486,10 +508,21 @@ class CostReport:
     _domain_expressions: tuple[Any, ...] = field(default=(), repr=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "terms", tuple(self.terms))
+        terms = tuple(self.terms)
+        unsupported = tuple(self.unsupported)
+        conditions = tuple(self.conditions)
+        if any(not isinstance(term, CostTerm) for term in terms):
+            raise TypeError("cost report terms must be CostTerm values")
+        if any(not isinstance(message, str) for message in unsupported):
+            raise TypeError("cost report unsupported messages must be strings")
+        if conditions:
+            equality_type = _sympy().Equality
+            if any(not isinstance(condition, equality_type) for condition in conditions):
+                raise TypeError("cost report conditions must be SymPy equalities")
+        object.__setattr__(self, "terms", terms)
         object.__setattr__(self, "bindings", _immutable_mapping(self.bindings))
-        object.__setattr__(self, "unsupported", tuple(self.unsupported))
-        object.__setattr__(self, "conditions", tuple(self.conditions))
+        object.__setattr__(self, "unsupported", unsupported)
+        object.__setattr__(self, "conditions", conditions)
         object.__setattr__(self, "known_symbols", frozenset(self.known_symbols))
         object.__setattr__(self, "_domain_expressions", tuple(self._domain_expressions))
 
@@ -865,6 +898,8 @@ def matmul_flops(
     strict: bool = False,
 ) -> CostReport:
     """Apply the course's conventional matrix-operation FLOP policy."""
+    if not isinstance(tree, CostTree):
+        raise TypeError(f"matmul_flops expects a CostTree, got {type(tree).__qualname__}")
     sympy = _sympy()
     terms: list[CostTerm] = []
     unsupported: list[str] = []

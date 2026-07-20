@@ -83,3 +83,6 @@ or source of repository policy.
 - Completed symbolic tensor compatibility checks for composed ATen schema types. Optional Tensor lists recurse correctly,
   and `TensorRepr` cannot be placed inside scalar or non-tensor-list slots. This remains deliberately narrower than full
   dispatcher argument validation. Focused analytics: 76 passed; Ruff/`ty` clean.
+- Hardened exported record boundaries: names and member kinds are validated at construction, report conditions must be
+  SymPy equalities, iterable fields are normalized without consuming generators twice, and `matmul_flops()` rejects a
+  non-`CostTree` argument directly. Focused analytics: 77 passed; Ruff/`ty` clean.
