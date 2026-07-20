@@ -220,11 +220,12 @@ def test_structural_containers_preserve_repeated_shared_module_invocations() -> 
 
     assert tuple(child.name for child in tree.children) == ("0", "1")
     assert tree.children[0].module_type == tree.children[1].module_type == "Linear"
+    assert all(child.edge_role == "call" for child in tree.children)
     substitutions = {symbol: 5 for symbol in tree.find_symbols("tokens")}
     assert matmul_flops(tree, substitutions=substitutions, strict=True).bound_total == counter.get_total_flops()
 
 
-def test_default_module_recursion_preserves_repeated_registered_child_slots() -> None:
+def test_authored_module_recursion_preserves_repeated_registered_child_calls() -> None:
     class SharedParent(Module):
         def __init__(self) -> None:
             super().__init__()
@@ -238,6 +239,9 @@ def test_default_module_recursion_preserves_repeated_registered_child_slots() ->
         def _cost_repr(self, scope):
             return ()
 
+        def _cost_children(self, scope):
+            return (scope.child("first", self.first), scope.child("second", self.second))
+
     module = SharedParent()
     tree = module.cost_repr()
     counter = FlopCounterMode(display=False)
@@ -248,6 +252,24 @@ def test_default_module_recursion_preserves_repeated_registered_child_slots() ->
     assert tuple(child.name for child in tree.children) == ("first", "second")
     substitutions = {symbol: 5 for symbol in tree.find_symbols("tokens")}
     assert matmul_flops(tree, substitutions=substitutions, strict=True).bound_total == counter.get_total_flops()
+
+
+def test_default_module_children_are_inventory_until_calls_are_authored() -> None:
+    class RegistrationOnly(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.projection = Linear(3, 4)
+
+        def _cost_repr(self, scope):
+            return ()
+
+    tree = RegistrationOnly().cost_repr()
+    report = matmul_flops(tree, strict=True)
+
+    assert tree.children[0].edge_role == "inventory"
+    assert report.terms == ()
+    assert report.bound_total == 0
+    assert matmul_flops(tree.children[0], strict=True).bound_total == 0
 
 
 def test_structural_containers_preserve_authored_slot_names() -> None:
@@ -271,8 +293,10 @@ def test_structural_container_subclasses_must_classify_custom_local_work() -> No
     tree = cost_repr(SpecializedSequential(Linear(3, 3)))
 
     assert tuple(child.name for child in tree.children) == ("0",)
+    assert tree.children[0].edge_role == "inventory"
     assert len(tree.unresolved) == 1
     assert "SpecializedSequential has no static local-cost provider" in tree.unresolved[0]
+    assert matmul_flops(tree).terms == ()
     with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
         matmul_flops(tree, strict=True)
 
@@ -286,10 +310,14 @@ def test_structural_container_subclasses_must_classify_custom_local_work() -> No
 )
 def test_registration_only_torch_containers_do_not_imply_invocation(container: nn.Module) -> None:
     tree = cost_repr(container)
+    report = matmul_flops(tree)
 
     assert len(tree.children) == 2
+    assert all(child.edge_role == "inventory" for child in tree.children)
     assert len(tree.unresolved) == 1
     assert "has no static local-cost provider" in tree.unresolved[0]
+    assert report.terms == ()
+    assert report.bound_total == 0
     with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
         matmul_flops(tree, strict=True)
 
@@ -385,6 +413,8 @@ def test_public_cost_records_reject_malformed_structure_at_the_boundary() -> Non
         analytics.CostReport((), 0, 0, {}, conditions=("invalid",))
     with pytest.raises(TypeError, match="expects a CostTree"):
         matmul_flops(object())  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValueError, match="edge role"):
+        analytics.CostTree("tree", "Module", edge_role="unknown")  # ty: ignore[invalid-argument-type]
 
 
 def test_public_cost_trees_preserve_unambiguous_child_paths_and_symbol_scopes() -> None:

@@ -136,3 +136,6 @@ or source of repository policy.
 - A follow-up public-API and memo audit found no code defect, but corrected five documentation boundaries: symbolic
   `SymInt` remapping, root binding versus operator observation, exact Torch overload terminology, deferred observation
   failures, and registered buffers versus serialized checkpoint state.
+- A registration-only container audit found that non-strict reports still summed every registered slot once. Directed
+  cost edges now distinguish actual calls from structural inventory; inventory remains inspectable but contributes no
+  execution terms until a model author declares the calls.

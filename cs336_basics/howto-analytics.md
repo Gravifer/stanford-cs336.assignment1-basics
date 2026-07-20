@@ -198,6 +198,9 @@ transport future invocation information; the provider need not reinvent executio
 Container registration is not always execution. `Sequential` defines a chained forward and can be interpreted directly;
 `ModuleList` and `ModuleDict` only register slots. Their children may be displayed as an inventory, but a strict static
 cost report remains unresolved until an authored parent states which slots are invoked and with what repetition.
+Inventory edges remain inspectable in the cost tree but do not contribute terms to an execution report. The same
+conservative default applies to registered children of the repository's base `Module`: a concrete delegating module must
+use `scope.child(...)` to identify actual calls.
 
 [`torch.fx`](https://docs.pytorch.org/docs/stable/fx.html) represents executable dataflow as a graph of calls and values.
 [`torch.export`](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/export.html) captures an ahead-of-time
@@ -272,10 +275,12 @@ a distinct human-facing label, and attribute or bracket access retrieves the cor
 symbols. Collection then freezes that builder into immutable records carrying a local name, a display name, the unique
 symbolic identity, and an optional local binding; the mutable view does not escape into the resulting cost tree.
 
-A parent's `scope.child(..., arguments=...)` mapping supplies expressions for the child's formal local symbols. These
-arguments do not overwrite definitions contributed by the child instance. Instead, both facts are retained as an
-equality: a definitely false equality is rejected, while one that still contains unbound symbols appears in the cost
-report as a condition. Caller substitutions are additional facts under the same rule rather than mutable overrides.
+A parent's `scope.child(..., arguments=...)` mapping declares a call edge and supplies expressions for the child's formal
+local symbols. These arguments do not overwrite definitions contributed by the child instance. Instead, both facts are
+retained as an equality: a definitely false equality is rejected, while one that still contains unbound symbols appears
+in the cost report as a condition. Caller substitutions are additional facts under the same rule rather than mutable
+overrides. Registration-only inventory uses a distinct edge role, preserving structure without assigning one fictional
+invocation to every slot.
 
 Call-specific facts can be supplied by a root observation session without changing the authored tree:
 
@@ -302,12 +307,13 @@ forward-hook completion order. The session is single-use and not thread-safe, so
 or report generation. It is deliberately a root-binding facility, not yet a recursive runtime trace: static authored
 parent-child arguments continue to propagate the root facts through a Transformer model.
 
-The model author also owns recursion policy. Ordinary modules contribute only their local work and delegate to their
-children. A repeated Transformer stack may deliberately describe one representative block with symbolic `num_layers`
-repetition and avoid traversing the remaining concrete blocks; embeddings, final normalization, and logit emission are
-still traversed normally. Such authored folding must validate that the concrete layer count and cost-driving
-configuration still match the representative; independently initialized parameter values and cost-irrelevant buffer
-capacity need not match. Automatically discovering and folding repeated siblings is a separate presentation problem.
+The model author also owns recursion policy. Ordinary modules contribute only their local work; modules that actually
+delegate computation author call edges to the relevant children. A repeated Transformer stack may deliberately describe
+one representative block with symbolic `num_layers` repetition and avoid traversing the remaining concrete blocks;
+embeddings, final normalization, and logit emission are still traversed normally. Such authored folding must validate
+that the concrete layer count and cost-driving configuration still match the representative; independently initialized
+parameter values and cost-irrelevant buffer capacity need not match. Automatically discovering and folding repeated
+siblings is a separate presentation problem.
 
 The first representation is matmul-focused. Concrete parameter and buffer counts already come from Torch's module
 introspection. A unified resource record should not be introduced until at least an ordinary parameter, the RoPE

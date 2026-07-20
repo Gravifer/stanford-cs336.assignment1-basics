@@ -6,7 +6,7 @@ import keyword
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Protocol, cast, overload, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, overload, runtime_checkable
 
 import torch
 from torch import nn
@@ -206,12 +206,13 @@ class CostRepr:
 
 @dataclass(frozen=True)
 class _CostChild:
-    """One directed symbolic invocation of an immediate child module."""
+    """One directed symbolic relationship to an immediate child module."""
 
     name: str
     module: nn.Module
     repetitions: Any = 1
     arguments: Mapping[str, Any] = field(default_factory=dict)
+    edge_role: Literal["call", "inventory"] = "call"
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name or "." in self.name:
@@ -220,6 +221,8 @@ class _CostChild:
             raise TypeError(f"a directed cost child must be a torch.nn.Module, got {type(self.module).__qualname__}")
         if any(not isinstance(name, str) for name in self.arguments):
             raise TypeError("directed cost child argument names must be strings")
+        if self.edge_role not in ("call", "inventory"):
+            raise ValueError(f"unknown directed cost child edge role: {self.edge_role!r}")
         object.__setattr__(self, "repetitions", _expression(self.repetitions))
         object.__setattr__(
             self,
@@ -434,8 +437,18 @@ class _CostScope:
         repetitions: Any = 1,
         arguments: Mapping[str, Any] | None = None,
     ) -> _CostChild:
-        """Pass symbolic arguments into one immediate child module."""
-        return _CostChild(name, module, repetitions, {} if arguments is None else arguments)
+        """Describe one immediate child invocation and pass its symbolic arguments."""
+        return _CostChild(
+            name,
+            module,
+            repetitions,
+            {} if arguments is None else arguments,
+            edge_role="call",
+        )
+
+    def inventory(self, name: str, module: nn.Module) -> _CostChild:
+        """Retain a registered child without claiming that the parent invokes it."""
+        return _CostChild(name, module, edge_role="inventory")
 
 
 @dataclass(frozen=True)
@@ -450,6 +463,7 @@ class CostTree:
     symbols: tuple[SymbolRepr, ...] = ()
     arguments: Mapping[Any, Any] = field(default_factory=dict)
     unresolved: tuple[str, ...] = ()
+    edge_role: Literal["call", "inventory"] = "call"
 
     def __post_init__(self) -> None:
         costs = tuple(self.costs)
@@ -468,6 +482,8 @@ class CostTree:
             raise TypeError("cost tree symbols must be SymbolRepr values")
         if any(not isinstance(message, str) for message in unresolved):
             raise TypeError("cost tree unresolved messages must be strings")
+        if self.edge_role not in ("call", "inventory"):
+            raise ValueError(f"unknown cost tree edge role: {self.edge_role!r}")
         child_names = tuple(child.name for child in children)
         if any("." in name for name in child_names):
             raise ValueError("cost tree child names must not contain dots")
@@ -812,6 +828,7 @@ def _collect_cost_tree(
     *,
     repetitions: Any = 1,
     parent_arguments: Mapping[str, Any] | None = None,
+    edge_role: Literal["call", "inventory"] = "call",
     ancestors: frozenset[int] = frozenset(),
 ) -> CostTree:
     module_identity = id(module)
@@ -837,8 +854,12 @@ def _collect_cost_tree(
             unresolved = (f"{type(module).__qualname__} has not classified its static local matmul work",)
     else:
         costs = ()
-        child_specs = tuple(scope.child(child_name, child) for child_name, child in _structural_children(module))
-        if type(module) not in _EXECUTING_TORCH_CONTAINERS:
+        executes_registered_slots = type(module) in _EXECUTING_TORCH_CONTAINERS
+        describe_child = scope.child if executes_registered_slots else scope.inventory
+        child_specs = tuple(
+            describe_child(child_name, child) for child_name, child in _structural_children(module)
+        )
+        if not executes_registered_slots:
             unresolved = (f"{type(module).__qualname__} has no static local-cost provider",)
 
     child_names = tuple(child_spec.name for child_spec in child_specs)
@@ -872,6 +893,7 @@ def _collect_cost_tree(
             child_spec.name,
             repetitions=child_spec.repetitions,
             parent_arguments=child_spec.arguments,
+            edge_role=child_spec.edge_role,
             ancestors=child_ancestors,
         )
         for child_spec in child_specs
@@ -886,6 +908,7 @@ def _collect_cost_tree(
         symbols=symbol_records,
         arguments=arguments,
         unresolved=unresolved,
+        edge_role=edge_role,
     )
 
 
@@ -1142,7 +1165,12 @@ def matmul_flops(
     substitutions: Mapping[Any, Any] | None = None,
     strict: bool = False,
 ) -> CostReport:
-    """Apply the course's conventional matrix-operation FLOP policy."""
+    """Apply the course's matrix-operation policy to call edges in a cost tree.
+
+    Inventory edges remain available for structural inspection but contribute
+    no terms. With ``strict=False``, unsupported executed work is reported next
+    to the sum of supported terms; that sum is not a complete execution total.
+    """
     if not isinstance(tree, CostTree):
         raise TypeError(f"matmul_flops expects a CostTree, got {type(tree).__qualname__}")
     sympy = _sympy()
@@ -1150,6 +1178,8 @@ def matmul_flops(
     unsupported: list[str] = []
 
     def visit(node: CostTree, path: str, repetition: Any) -> None:
+        if node.edge_role == "inventory":
+            return
         effective_repetition = repetition * node.repetitions
         unsupported.extend(f"{path}: {message}" for message in node.unresolved)
         for cost in node.costs:
