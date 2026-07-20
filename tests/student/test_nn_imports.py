@@ -10,7 +10,6 @@ from cs336_basics.nn.modules import (
     Linear,
     Module,
     RMSNorm,
-    SiLU,  # ty: ignore[deprecated]
     SoftMax,
 )
 
@@ -26,7 +25,6 @@ def test_nn_facade_reexports_all_supported_module_classes() -> None:
         "MultiheadSelfAttention": MultiheadSelfAttention,
         "RMSNorm": RMSNorm,
         "RotaryPositionalEmbedding": RotaryPositionalEmbedding,
-        "SiLU": SiLU,  # ty: ignore[deprecated]
         "SoftMax": SoftMax,
         "SwiGLU": SwiGLU,
         "SwiGLU_delegate": SwiGLU_delegate,

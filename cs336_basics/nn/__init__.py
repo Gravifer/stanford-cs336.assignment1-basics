@@ -10,7 +10,7 @@ from . import modules as modules
 from .attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from .feed_forward import SwiGLU, SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
 from .model import GPTDecoderLayer, TransformerBlock, TransformerLM
-from .modules import DeltaLayer, Embedding, Linear, Module, RMSNorm, SiLU, SoftMax  # ty: ignore[deprecated]
+from .modules import DeltaLayer, Embedding, Linear, Module, RMSNorm, SoftMax
 
 
 __all__ = [
@@ -23,7 +23,6 @@ __all__ = [
     "MultiheadSelfAttention",
     "RMSNorm",
     "RotaryPositionalEmbedding",
-    "SiLU",
     "SoftMax",
     "SwiGLU",
     "SwiGLU_delegate",
