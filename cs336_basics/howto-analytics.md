@@ -213,7 +213,18 @@ future observation can bind it and check its chosen ATen lowering.
 
 Symbols are local to a module description. Two distant modules may both display `d_model` without their variables being
 identical. Internally, identity-distinct SymPy symbols prevent accidental capture, while immediate parent-child
-substitutions establish the identities that the model author intends.
+arguments establish the identities that the model author intends.
+
+During a module's protected cost hook, `scope.symbols` is a focused mutable view of that module's symbol table.
+`unbound()` introduces invocation dimensions, `bind()` adds instance or architectural definitions, and attribute or
+bracket access retrieves the corresponding identity-distinct SymPy symbols. Collection then freezes that builder into
+immutable records carrying a local name, a display name, the unique symbolic identity, and an optional local binding;
+the mutable view does not escape into the resulting cost tree.
+
+A parent's `scope.child(..., arguments=...)` mapping supplies expressions for the child's formal local symbols. These
+arguments do not overwrite definitions contributed by the child instance. Instead, both facts are retained as an
+equality: a definitely false equality is rejected, while one that still contains unbound symbols appears in the cost
+report as a condition. Caller substitutions are additional facts under the same rule rather than mutable overrides.
 
 The model author also owns recursion policy. Ordinary modules contribute only their local work and delegate to their
 children. A repeated Transformer stack may deliberately describe one representative block with symbolic `num_layers`
