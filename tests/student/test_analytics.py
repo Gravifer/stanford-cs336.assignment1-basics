@@ -218,6 +218,51 @@ def test_symbol_environment_is_a_focused_builder_for_immutable_records() -> None
         captured["symbols"].unbound("late")  # ty: ignore[unresolved-attribute]
 
 
+def test_symbol_environment_keeps_display_names_separate_from_local_identity() -> None:
+    class Named(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("query_heads", "kv_heads")
+            assert s.display(query_heads="H_q", kv_heads="H_kv") is s
+            return ()
+
+    tree = Named().cost_repr()
+
+    assert tuple(record.local_name for record in tree.symbols) == ("query_heads", "kv_heads")
+    assert tuple(record.display_name for record in tree.symbols) == ("H_q", "H_kv")
+    assert tree.find_symbols("H_q") == (tree.symbols[0].symbol,)
+    assert tree.find_symbols("query_heads") == ()
+
+
+def test_symbol_environment_rejects_invalid_display_names() -> None:
+    class InvalidDisplay(Module):
+        def __init__(self, local_name: str, display_name: str) -> None:
+            super().__init__()
+            self.local_name = local_name
+            self.display_name = display_name
+
+        def _cost_repr(self, scope):
+            scope.symbols.unbound("width")
+            scope.symbols.display(**{self.local_name: self.display_name})
+            return ()
+
+    with pytest.raises(ValueError, match="undeclared"):
+        InvalidDisplay("depth", "D").cost_repr()
+    with pytest.raises(ValueError, match="non-empty"):
+        InvalidDisplay("width", "").cost_repr()
+    with pytest.raises(ValueError, match="non-empty"):
+        InvalidDisplay("width", "   ").cost_repr()
+
+    class CollidingDisplay(Module):
+        def _cost_repr(self, scope):
+            scope.symbols.unbound("width", "depth")
+            scope.symbols.display(width="depth")
+            return ()
+
+    with pytest.raises(ValueError, match="unique"):
+        CollidingDisplay().cost_repr()
+
+
 @pytest.mark.parametrize("name", ["bind", "_private", "not-valid", "class"])
 def test_symbol_environment_reserves_api_and_invalid_names(name: str) -> None:
     class InvalidSymbol(Module):

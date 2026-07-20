@@ -204,6 +204,7 @@ class _SymbolEnvironment:
     def __init__(self) -> None:
         self._symbols: dict[str, Any] = {}
         self._bindings: dict[str, Any] = {}
+        self._display_names: dict[str, str] = {}
         self._frozen = False
 
     def _validate_name(self, name: str) -> None:
@@ -249,6 +250,29 @@ class _SymbolEnvironment:
             self._bindings[name] = binding
         return self
 
+    def display(self, **names: str) -> _SymbolEnvironment:
+        """Assign human-facing names to symbols already declared in this scope."""
+        self._ensure_mutable()
+        if not names:
+            raise ValueError("display() requires at least one symbol name")
+        proposed = dict(self._display_names)
+        for local_name, display_name in names.items():
+            if local_name not in self._symbols:
+                raise ValueError(f"cannot name undeclared symbol {local_name!r}")
+            if not isinstance(display_name, str) or not display_name.strip():
+                raise ValueError(f"display name for {local_name!r} must be a non-empty string")
+            existing = self._display_names.get(local_name)
+            if existing is not None and existing != display_name:
+                raise ValueError(
+                    f"symbol {local_name!r} already has display name {existing!r}, got {display_name!r}"
+                )
+            proposed[local_name] = display_name
+        effective_names = [proposed.get(local_name, local_name) for local_name in self._symbols]
+        if len(set(effective_names)) != len(effective_names):
+            raise ValueError("display names must be unique within one symbolic scope")
+        self._display_names = proposed
+        return self
+
     def __getattr__(self, name: str) -> Any:
         try:
             return self._symbols[name]
@@ -288,7 +312,8 @@ class _SymbolEnvironment:
         self._check_cycles()
         self._frozen = True
         return tuple(
-            SymbolRepr(name, name, symbol, self._bindings.get(name)) for name, symbol in self._symbols.items()
+            SymbolRepr(name, self._display_names.get(name, name), symbol, self._bindings.get(name))
+            for name, symbol in self._symbols.items()
         )
 
 

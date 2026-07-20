@@ -216,10 +216,10 @@ identical. Internally, identity-distinct SymPy symbols prevent accidental captur
 arguments establish the identities that the model author intends.
 
 During a module's protected cost hook, `scope.symbols` is a focused mutable view of that module's symbol table.
-`unbound()` introduces invocation dimensions, `bind()` adds instance or architectural definitions, and attribute or
-bracket access retrieves the corresponding identity-distinct SymPy symbols. Collection then freezes that builder into
-immutable records carrying a local name, a display name, the unique symbolic identity, and an optional local binding;
-the mutable view does not escape into the resulting cost tree.
+`unbound()` introduces invocation dimensions, `bind()` adds instance or architectural definitions, `display()` may assign
+a distinct human-facing label, and attribute or bracket access retrieves the corresponding identity-distinct SymPy
+symbols. Collection then freezes that builder into immutable records carrying a local name, a display name, the unique
+symbolic identity, and an optional local binding; the mutable view does not escape into the resulting cost tree.
 
 A parent's `scope.child(..., arguments=...)` mapping supplies expressions for the child's formal local symbols. These
 arguments do not overwrite definitions contributed by the child instance. Instead, both facts are retained as an
