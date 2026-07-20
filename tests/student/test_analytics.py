@@ -1,6 +1,7 @@
 """Tests for static symbolic model analytics."""
 
 from collections import OrderedDict
+from typing import Literal
 
 import pytest
 import sympy
@@ -1014,6 +1015,40 @@ def test_self_attention_symbolic_cost_matches_meta_flop_counter(num_kv_heads: in
         module(torch.empty((2, 3, 8), device="meta"))
 
     assert len(report.terms) == 4
+    assert report.bound_total == counter.get_total_flops()
+    assert set(counter.get_flop_counts()["Global"]) == {torch.ops.aten.bmm}
+
+
+@pytest.mark.parametrize("activation_layout", ["head_before_sequence", "head_after_sequence"])
+@pytest.mark.parametrize("num_kv_heads", [4, 2, 1])
+def test_self_attention_cost_matches_generalized_batch_and_head_layouts(
+    activation_layout: Literal["head_before_sequence", "head_after_sequence"],
+    num_kv_heads: int,
+) -> None:
+    module = MultiheadSelfAttention(
+        d_model=12,
+        num_heads=4,
+        num_kv_heads=num_kv_heads,
+        d_k=4,
+        d_v=2,
+        rope=RotaryPositionalEmbedding(10_000.0, 4, 8, device=torch.device("meta")),
+        _layout_strategy=activation_layout,
+        device=torch.device("meta"),
+    )
+    tree = module.cost_repr()
+    report = matmul_flops(
+        tree,
+        substitutions={
+            tree.find_symbols("batch")[0]: 6,
+            tree.find_symbols("sequence")[0]: 5,
+        },
+        strict=True,
+    )
+    counter = FlopCounterMode(display=False)
+
+    with counter:
+        module(torch.empty((2, 3, 5, 12), device="meta"))
+
     assert report.bound_total == counter.get_total_flops()
     assert set(counter.get_flop_counts()["Global"]) == {torch.ops.aten.bmm}
 

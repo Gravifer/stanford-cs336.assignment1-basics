@@ -99,3 +99,5 @@ or source of repository policy.
 - Aligned the reusable `Module` default recursion with its documented one-invocation-per-registered-slot policy. Direct
   child slots preserve repeated aliases; custom call semantics still override `_cost_children()`. Focused analytics and
   model-architecture suites: 91 passed; Ruff/`ty` clean.
+- Broadened the nondegenerate attention oracle across MHA/GQA/MQA, unequal QK/value widths, both retained private layout
+  strategies, and two leading batch axes represented by their product. Focused analytics: 90 passed; Ruff/`ty` clean.
