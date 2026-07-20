@@ -183,6 +183,36 @@ class ModuleStateFootprint:
     buffer_numel: int
     buffer_bytes: int
 
+    def __post_init__(self) -> None:
+        values = {
+            "parameter_numel": self.parameter_numel,
+            "parameter_bytes": self.parameter_bytes,
+            "trainable_parameter_numel": self.trainable_parameter_numel,
+            "trainable_parameter_bytes": self.trainable_parameter_bytes,
+            "buffer_numel": self.buffer_numel,
+            "buffer_bytes": self.buffer_bytes,
+        }
+        for name, value in values.items():
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"module state footprint {name} must be an integer")
+            if value < 0:
+                raise ValueError(f"module state footprint {name} must be nonnegative")
+        if self.parameter_bytes < self.parameter_numel or self.buffer_bytes < self.buffer_numel:
+            raise ValueError("module state footprint bytes cannot be smaller than logical element counts")
+        if self.trainable_parameter_numel > self.parameter_numel:
+            raise ValueError("trainable parameter elements cannot exceed all parameter elements")
+        if self.trainable_parameter_bytes > self.parameter_bytes:
+            raise ValueError("trainable parameter bytes cannot exceed all parameter bytes")
+        if self.trainable_parameter_bytes < self.trainable_parameter_numel:
+            raise ValueError("trainable parameter bytes cannot be smaller than trainable element counts")
+        for category, numel, byte_count in (
+            ("parameter", self.parameter_numel, self.parameter_bytes),
+            ("trainable parameter", self.trainable_parameter_numel, self.trainable_parameter_bytes),
+            ("buffer", self.buffer_numel, self.buffer_bytes),
+        ):
+            if numel == 0 and byte_count != 0:
+                raise ValueError(f"zero {category} elements must occupy zero logical bytes")
+
 
 @dataclass(frozen=True)
 class CostRepr:

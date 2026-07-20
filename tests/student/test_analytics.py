@@ -599,6 +599,55 @@ def test_module_state_footprint_uses_torch_registered_state_traversal() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("parameter_numel", True, TypeError),
+        ("parameter_bytes", 1.5, TypeError),
+        ("buffer_numel", -1, ValueError),
+    ],
+)
+def test_module_state_footprint_rejects_invalid_concrete_counts(field, value, error) -> None:
+    values = {
+        "parameter_numel": 4,
+        "parameter_bytes": 16,
+        "trainable_parameter_numel": 3,
+        "trainable_parameter_bytes": 12,
+        "buffer_numel": 2,
+        "buffer_bytes": 8,
+    }
+    values[field] = value
+
+    with pytest.raises(error):
+        ModuleStateFootprint(**values)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"parameter_numel": 17},
+        {"buffer_numel": 9},
+        {"trainable_parameter_numel": 5},
+        {"trainable_parameter_bytes": 17},
+        {"trainable_parameter_bytes": 2},
+        {"trainable_parameter_numel": 0},
+    ],
+)
+def test_module_state_footprint_rejects_inconsistent_subtotals(changes: dict[str, int]) -> None:
+    values = {
+        "parameter_numel": 4,
+        "parameter_bytes": 16,
+        "trainable_parameter_numel": 3,
+        "trainable_parameter_bytes": 12,
+        "buffer_numel": 2,
+        "buffer_bytes": 8,
+    }
+    values.update(changes)
+
+    with pytest.raises(ValueError):
+        ModuleStateFootprint(**values)
+
+
 def test_module_state_footprint_works_for_meta_models_and_rejects_nonmodules() -> None:
     module = Linear(3, 5, device=torch.device("meta"), dtype=torch.float16)
     report = module_state_footprint(module)

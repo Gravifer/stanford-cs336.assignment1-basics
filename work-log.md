@@ -143,3 +143,5 @@ or source of repository policy.
   extension provider or manually constructed public tree from smuggling invocation semantics into structural slots.
 - Added one non-aggregating tensor-footprint primitive: symbolic logical element count and optional dtype-sized bytes.
   Its API and memo explicitly avoid activation-lifetime or allocator-peak claims.
+- Hardened the public concrete state-footprint record against negative, non-integral, and impossible byte/subset totals;
+  normal module traversal continues to produce the same values.
