@@ -197,6 +197,37 @@ def test_cost_repr_requires_symbolic_metadata_for_tensor_schema_arguments() -> N
             torch.ops.aten.cat.default,
             {"tensors": [TensorRepr((2, 3))], "dim": torch.tensor(0)},
         )
+    with pytest.raises(TypeError, match="non-tensor argument 'dim'"):
+        CostRepr(
+            "tensor metadata in scalar slot",
+            torch.ops.aten.cat.default,
+            {"tensors": [TensorRepr((2, 3))], "dim": TensorRepr(())},
+        )
+
+
+def test_cost_repr_recurses_through_optional_tensor_lists() -> None:
+    valid = CostRepr(
+        "advanced index",
+        torch.ops.aten.index.Tensor,
+        {"self": TensorRepr((3, 4)), "indices": [TensorRepr((2,)), None]},
+    )
+
+    assert valid.arguments["indices"] == (TensorRepr((2,)), None)
+    with pytest.raises(TypeError, match="must be represented by TensorRepr"):
+        CostRepr(
+            "invalid advanced index",
+            torch.ops.aten.index.Tensor,
+            {"self": TensorRepr((3, 4)), "indices": [1, None]},
+        )
+
+
+def test_cost_repr_rejects_tensor_metadata_nested_in_nontensor_lists() -> None:
+    with pytest.raises(TypeError, match="non-tensor argument 'shape'"):
+        CostRepr(
+            "invalid reshape",
+            torch.ops.aten.reshape.default,
+            {"self": TensorRepr((2, 3)), "shape": [TensorRepr(())]},
+        )
 
 
 def test_module_state_footprint_uses_torch_registered_state_traversal() -> None:

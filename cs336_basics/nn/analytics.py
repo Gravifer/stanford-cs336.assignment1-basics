@@ -75,7 +75,7 @@ def _expression(value: object) -> Any:
 
 
 def _validate_tensor_argument(schema_type: Any, value: Any, operation: Any, name: str) -> None:
-    """Require symbolic metadata wherever an ATen schema expects tensor data."""
+    """Validate symbolic tensor compatibility with one ATen schema argument."""
     if isinstance(schema_type, torch.TensorType):
         if not isinstance(value, TensorRepr):
             raise TypeError(f"{operation} tensor argument {name!r} must be represented by TensorRepr")
@@ -84,11 +84,36 @@ def _validate_tensor_argument(schema_type: Any, value: Any, operation: Any, name
         if value is not None:
             _validate_tensor_argument(schema_type.getElementType(), value, operation, name)
         return
-    if isinstance(schema_type, torch.ListType) and isinstance(schema_type.getElementType(), torch.TensorType):
-        if not isinstance(value, (list, tuple)):
-            raise TypeError(f"{operation} tensor-list argument {name!r} must be a sequence of TensorRepr values")
-        for item in value:
-            _validate_tensor_argument(schema_type.getElementType(), item, operation, name)
+    if isinstance(schema_type, torch.ListType):
+        element_type = schema_type.getElementType()
+        if _schema_contains_tensor(element_type):
+            if not isinstance(value, (list, tuple)):
+                raise TypeError(f"{operation} tensor-list argument {name!r} must be a sequence of TensorRepr values")
+            for item in value:
+                _validate_tensor_argument(element_type, item, operation, name)
+            return
+    if _contains_tensor_repr(value):
+        raise TypeError(f"{operation} non-tensor argument {name!r} cannot contain TensorRepr")
+
+
+def _schema_contains_tensor(schema_type: Any) -> bool:
+    """Return whether optional/list composition ultimately contains Tensor."""
+    if isinstance(schema_type, torch.TensorType):
+        return True
+    if isinstance(schema_type, (torch.OptionalType, torch.ListType)):
+        return _schema_contains_tensor(schema_type.getElementType())
+    return False
+
+
+def _contains_tensor_repr(value: Any) -> bool:
+    """Find tensor metadata nested in standard symbolic containers."""
+    if isinstance(value, TensorRepr):
+        return True
+    if isinstance(value, Mapping):
+        return any(_contains_tensor_repr(item) for item in value.values())
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return any(_contains_tensor_repr(item) for item in value)
+    return False
 
 
 @dataclass(frozen=True)

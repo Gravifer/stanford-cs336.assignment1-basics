@@ -80,3 +80,6 @@ or source of repository policy.
   local/tree repetition. Expressions may remain unresolved, but a later substitution that makes one definitely negative
   or non-integral is rejected, including across incremental `CostReport.substitute()` calls. Independent review added
   child-local bindings shadowed by parent arguments. Focused analytics: 74 passed; Ruff/`ty` clean.
+- Completed symbolic tensor compatibility checks for composed ATen schema types. Optional Tensor lists recurse correctly,
+  and `TensorRepr` cannot be placed inside scalar or non-tensor-list slots. This remains deliberately narrower than full
+  dispatcher argument validation. Focused analytics: 76 passed; Ruff/`ty` clean.
