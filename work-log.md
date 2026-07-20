@@ -145,3 +145,5 @@ or source of repository policy.
   Its API and memo explicitly avoid activation-lifetime or allocator-peak claims.
 - Hardened the public concrete state-footprint record against negative, non-integral, and impossible byte/subset totals;
   normal module traversal continues to produce the same values.
+- A Torch export probe confirmed that backed dynamic `SymInt` values still sympify to foreign `ShapeEnv` symbols while
+  concrete hints and range constraints remain separate. The memo records the evidence; remapping remains deferred.

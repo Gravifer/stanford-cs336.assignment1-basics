@@ -139,6 +139,11 @@ receiving analytics scope or deliberately specialized to its hint. The current b
 identities. Concrete classes may import SymPy lazily inside their own analytics hooks when their symbolic description
 needs it.
 
+An exported dynamic dimension makes the distinction observable. Its `SymInt` may have a concrete node hint from the
+example input while its node expression is a separate SymPy symbol; `sympy.sympify()` returns that symbol, not the hint.
+Range constraints likewise remain separately attached to the exported program. Importing the expression without its
+scope and constraints would therefore lose provenance even for a backed value.
+
 The [`meta` device](https://docs.pytorch.org/docs/stable/meta.html) stores tensor metadata without allocating tensor data.
 Most operations can produce meta outputs with the shapes, strides, and dtypes that real execution would have produced,
 but no numerical result exists and data-dependent operations such as `item()` cannot succeed. This makes a GPT-scale
