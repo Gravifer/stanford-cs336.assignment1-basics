@@ -257,6 +257,13 @@ A report must name the level it interprets. Counting one semantic operation and 
 which it decomposes is double counting. The authored plane may keep a human name and an expected eager-ATen anchor; the
 observed plane determines whether that expectation still matches the implementation.
 
+An expected eager anchor is not a promise that every concrete shape reaches that operator. In particular, einx may
+strength-reduce a contraction whose reduced axis has size one into elementwise multiplication. The authored record still
+describes the logical matrix product and the course formula still assigns it $2mnp$ work; a concrete
+`FlopCounterMode` run then reports the strength-reduced eager program. Exact oracle-equality tests therefore use
+nondegenerate contraction axes, while degenerate tests preserve and explain the distinction rather than conditionally
+changing the architectural formula.
+
 ## Deliberately deferred questions
 
 The following are not prerequisites for the current static work:

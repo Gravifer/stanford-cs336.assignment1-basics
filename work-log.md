@@ -91,3 +91,6 @@ or source of repository policy.
   and cost-owner parameter shape/dtype without comparing values or cost-irrelevant RoPE capacity. Two review rounds
   supplied same-state-shape grouped-attention and delegated-norm counterexamples before approval. Model-focused suite:
   102 passed; Ruff/`ty` clean.
+- Formula audit identified einx strength reduction for unit contraction axes. Preserved the architectural/course-level
+  `bmm` record and documented why concrete meta `FlopCounterMode` totals diverge for those degenerate eager programs;
+  added pinned Linear and packed-SwiGLU examples. Focused analytics: 83 passed; Ruff/`ty` clean.

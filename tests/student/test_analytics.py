@@ -890,6 +890,33 @@ def test_linear_symbolic_cost_matches_meta_flop_counter() -> None:
     assert matmul_flops(tree, substitutions={tokens: 7}).bound_total == counter.get_total_flops()
 
 
+def test_logical_matmul_cost_survives_einx_unit_axis_strength_reduction() -> None:
+    linear = Linear(1, 5, device=torch.device("meta"))
+    linear_tree = linear.cost_repr()
+    linear_tokens = linear_tree.find_symbols("tokens")[0]
+    linear_counter = FlopCounterMode(display=False)
+
+    with linear_counter:
+        linear(torch.empty((8, 1), device="meta"))
+
+    linear_report = matmul_flops(linear_tree, substitutions={linear_tokens: 8}, strict=True)
+    assert linear_tree.costs[0].operation is torch.ops.aten.bmm.default
+    assert linear_report.bound_total == 80
+    assert linear_counter.get_total_flops() == 0
+
+    swiglu = SwiGLU_packed_input(1, 5, device=torch.device("meta"))
+    swiglu_tree = swiglu.cost_repr()
+    swiglu_tokens = swiglu_tree.find_symbols("tokens")[0]
+    swiglu_counter = FlopCounterMode(display=False)
+
+    with swiglu_counter:
+        swiglu(torch.empty((8, 1), device="meta"))
+
+    swiglu_report = matmul_flops(swiglu_tree, substitutions={swiglu_tokens: 8}, strict=True)
+    assert swiglu_report.bound_total == 240
+    assert swiglu_counter.get_total_flops() == 80
+
+
 def test_unsupported_operations_and_external_modules_remain_visible() -> None:
     unsupported = CostRepr(
         "pointwise sine",
