@@ -458,6 +458,7 @@ class CostReport:
     unsupported: tuple[str, ...] = ()
     conditions: tuple[Any, ...] = ()
     known_symbols: frozenset[Any] = field(default_factory=frozenset, repr=False)
+    _domain_expressions: tuple[Any, ...] = field(default=(), repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "terms", tuple(self.terms))
@@ -465,12 +466,14 @@ class CostReport:
         object.__setattr__(self, "unsupported", tuple(self.unsupported))
         object.__setattr__(self, "conditions", tuple(self.conditions))
         object.__setattr__(self, "known_symbols", frozenset(self.known_symbols))
+        object.__setattr__(self, "_domain_expressions", tuple(self._domain_expressions))
 
     def substitute(self, bindings: Mapping[Any, Any]) -> CostReport:
         """Return a report with additional symbolic bindings applied."""
         combined = dict(self.bindings)
         relations = [(condition.lhs, condition.rhs) for condition in self.conditions]
         _add_substitutions(combined, relations, bindings, self.known_symbols)
+        _validate_domains(self._domain_expressions, combined)
         conditions = _validate_relations(relations, combined)
         return replace(
             self,
@@ -587,6 +590,7 @@ def cost_repr(module: nn.Module) -> CostTree:
         raise TypeError(f"cost_repr expects a torch.nn.Module, got {type(module).__qualname__}")
     tree = _collect_cost_tree(module, type(module).__qualname__)
     definitions, relations, _ = _tree_facts(tree)
+    _validate_domains(_tree_domains(tree), definitions)
     _validate_relations(relations, definitions)
     return tree
 
@@ -754,6 +758,41 @@ def _tree_facts(tree: CostTree) -> tuple[dict[Any, Any], list[tuple[Any, Any]], 
     return definitions, relations, frozenset(known_symbols)
 
 
+def _metadata_dimensions(value: Any) -> tuple[Any, ...]:
+    """Collect tensor-axis expressions without treating arbitrary integer arguments as dimensions."""
+    if isinstance(value, TensorRepr):
+        return value.shape
+    if isinstance(value, Mapping):
+        return tuple(axis for item in value.values() for axis in _metadata_dimensions(item))
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return tuple(axis for item in value for axis in _metadata_dimensions(item))
+    return ()
+
+
+def _tree_domains(tree: CostTree) -> tuple[Any, ...]:
+    """Collect every expression whose value is a tensor dimension or repetition."""
+    local = [record.symbol for record in tree.symbols]
+    local.extend(record.binding for record in tree.symbols if record.binding is not None)
+    local.extend(tree.arguments.values())
+    local.append(tree.repetitions)
+    for cost in tree.costs:
+        local.extend(_metadata_dimensions(cost.arguments))
+        local.append(cost.repetitions)
+    return tuple(local) + tuple(expression for child in tree.children for expression in _tree_domains(child))
+
+
+def _validate_domains(expressions: Iterable[Any], bindings: Mapping[Any, Any]) -> None:
+    """Reject dimensions or repetitions that become definitely non-integral or negative."""
+    for expression in expressions:
+        resolved = _substitute(expression, bindings)
+        if resolved.is_Boolean or resolved.is_integer is False:
+            raise ValueError(f"resolved cost dimensions and repetitions must be integers, got {resolved}")
+        if resolved.is_number and resolved.is_integer is not True:
+            raise ValueError(f"resolved cost dimensions and repetitions must be integers, got {resolved}")
+        if resolved.is_nonnegative is False:
+            raise ValueError(f"resolved cost dimensions and repetitions must be nonnegative, got {resolved}")
+
+
 def _add_substitutions(
     definitions: dict[Any, Any],
     relations: list[tuple[Any, Any]],
@@ -826,6 +865,8 @@ def matmul_flops(
     bindings, relations, known_symbols = _tree_facts(tree)
     if substitutions:
         _add_substitutions(bindings, relations, substitutions, known_symbols)
+    domains = _tree_domains(tree)
+    _validate_domains(domains, bindings)
     conditions = _validate_relations(relations, bindings)
     return CostReport(
         terms=tuple(terms),
@@ -835,4 +876,5 @@ def matmul_flops(
         unsupported=tuple(unsupported),
         conditions=conditions,
         known_symbols=known_symbols,
+        _domain_expressions=domains,
     )

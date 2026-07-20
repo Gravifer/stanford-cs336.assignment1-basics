@@ -76,3 +76,7 @@ or source of repository policy.
 - Enforced lexical symbol scope for authored analytics. Local bindings and costs may use only identities declared by that
   module; child arguments and repetitions may use only identities declared by their parent scope. Parent-to-child
   identity transfer remains explicit through named arguments. Focused analytics: 68 passed; Ruff/`ty` clean.
+- Added post-binding domain validation for every declared dimension, tensor axis, local/parent dimension expression, and
+  local/tree repetition. Expressions may remain unresolved, but a later substitution that makes one definitely negative
+  or non-integral is rejected, including across incremental `CostReport.substitute()` calls. Independent review added
+  child-local bindings shadowed by parent arguments. Focused analytics: 74 passed; Ruff/`ty` clean.

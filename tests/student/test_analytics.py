@@ -462,6 +462,119 @@ def test_symbolic_dimensions_retain_unresolved_symbolic_expressions() -> None:
     assert TensorRepr((dimension,)).shape == (dimension,)
 
 
+@pytest.mark.parametrize("location", ["axis", "cost_repetition", "child_repetition"])
+def test_domain_checks_reject_values_that_become_invalid_after_binding(location: str) -> None:
+    class DeferredDomain(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.child = Linear(2, 2)
+
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("tokens")
+            axis = s.tokens / 2 if location == "axis" else s.tokens
+            repetitions = s.tokens / 2 if location == "cost_repetition" else 1
+            return (
+                CostRepr(
+                    "deferred domain",
+                    torch.ops.aten.bmm.default,
+                    {
+                        "self": TensorRepr((1, axis, 2)),
+                        "mat2": TensorRepr((1, 2, 2)),
+                    },
+                    repetitions=repetitions,
+                ),
+            )
+
+        def _cost_children(self, scope):
+            if location != "child_repetition":
+                return ()
+            return (scope.child("child", self.child, repetitions=scope.symbols.tokens / 2),)
+
+    tree = DeferredDomain().cost_repr()
+    tokens = tree.find_symbols("tokens")[0]
+    report = matmul_flops(tree, strict=True)
+
+    assert tokens in report.bound_total.free_symbols
+    with pytest.raises(ValueError, match="must be integers"):
+        report.substitute({tokens: 3})
+
+
+def test_domain_checks_reject_values_that_become_negative_after_binding() -> None:
+    class DeferredDomain(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("tokens")
+            return (
+                CostRepr(
+                    "deferred domain",
+                    torch.ops.aten.bmm.default,
+                    {
+                        "self": TensorRepr((1, s.tokens - 10, 2)),
+                        "mat2": TensorRepr((1, 2, 2)),
+                    },
+                ),
+            )
+
+    tree = DeferredDomain().cost_repr()
+    tokens = tree.find_symbols("tokens")[0]
+
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        matmul_flops(tree, substitutions={tokens: 3}, strict=True)
+
+
+def test_domain_checks_retain_child_bindings_shadowed_by_parent_arguments() -> None:
+    class Child(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("width", "offset")
+            s.bind(width=s.offset - 10)
+            return ()
+
+    class Parent(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.child = Child()
+
+        def _cost_repr(self, scope):
+            scope.symbols.unbound("width")
+            return ()
+
+        def _cost_children(self, scope):
+            return (scope.child("child", self.child, arguments={"width": scope.symbols.width}),)
+
+    tree = Parent().cost_repr()
+    offset = tree.find_symbols("offset")[0]
+
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        matmul_flops(tree, substitutions={offset: 3}, strict=True)
+
+
+def test_domain_expressions_survive_incremental_report_substitution() -> None:
+    class DeferredDomains(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("tokens", "width")
+            return (
+                CostRepr(
+                    "deferred domains",
+                    torch.ops.aten.bmm.default,
+                    {
+                        "self": TensorRepr((1, s.tokens / 2, s.width - 10)),
+                        "mat2": TensorRepr((1, s.width - 10, 2)),
+                    },
+                ),
+            )
+
+    tree = DeferredDomains().cost_repr()
+    tokens = tree.find_symbols("tokens")[0]
+    width = tree.find_symbols("width")[0]
+    partly_bound = matmul_flops(tree, strict=True).substitute({tokens: 4})
+
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        partly_bound.substitute({width: 3})
+
+
 class _DirectedLinearParent(Module):
     def __init__(self, width: int | None = None, *, argument_name: str = "d_in") -> None:
         super().__init__()
