@@ -135,6 +135,22 @@ class TensorRepr:
             raise TypeError(f"tensor metadata dtype must be a torch.dtype or None, got {self.dtype!r}")
         object.__setattr__(self, "shape", tuple(_expression(axis) for axis in self.shape))
 
+    @property
+    def numel(self) -> Any:
+        """Return the symbolic number of logical elements in this tensor."""
+        return _sympy().prod(self.shape)
+
+    @property
+    def logical_nbytes(self) -> Any | None:
+        """Return logical dtype-sized bytes, or ``None`` when dtype is unknown.
+
+        This intrinsic extent does not say whether storage is materialized,
+        aliased, retained, or simultaneously live with another tensor.
+        """
+        if self.dtype is None:
+            return None
+        return self.numel * self.dtype.itemsize
+
 
 @dataclass(frozen=True)
 class SymbolRepr:

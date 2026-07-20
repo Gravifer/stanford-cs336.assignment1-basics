@@ -141,3 +141,5 @@ or source of repository policy.
   execution terms until a model author declares the calls.
 - Tightened the new edge-role boundary: inventory cannot carry symbolic call arguments or repetitions, preventing an
   extension provider or manually constructed public tree from smuggling invocation semantics into structural slots.
+- Added one non-aggregating tensor-footprint primitive: symbolic logical element count and optional dtype-sized bytes.
+  Its API and memo explicitly avoid activation-lifetime or allocator-peak claims.

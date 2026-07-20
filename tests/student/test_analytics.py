@@ -397,6 +397,20 @@ def test_symbolic_tensor_requires_a_torch_dtype() -> None:
         TensorRepr((2, 3), "float32")  # ty: ignore[invalid-argument-type]
 
 
+def test_symbolic_tensor_reports_only_its_intrinsic_logical_footprint() -> None:
+    tokens = sympy.Dummy("tokens", integer=True, nonnegative=True)
+    symbolic = TensorRepr((tokens, 3), torch.float16)
+    symbolic_nbytes = symbolic.logical_nbytes
+
+    assert TensorRepr((), torch.float32).numel == 1
+    assert TensorRepr((), torch.float32).logical_nbytes == 4
+    assert TensorRepr((2, 0, 7), torch.float64).numel == 0
+    assert sympy.simplify(symbolic.numel - 3 * tokens) == 0
+    assert symbolic_nbytes is not None
+    assert sympy.simplify(symbolic_nbytes - 6 * tokens) == 0
+    assert TensorRepr((tokens, 3)).logical_nbytes is None
+
+
 def test_cost_repr_requires_exact_overload_and_schema_arguments() -> None:
     operands = {
         "self": TensorRepr((1, 2, 3)),

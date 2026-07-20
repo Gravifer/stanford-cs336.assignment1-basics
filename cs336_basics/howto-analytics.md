@@ -169,6 +169,11 @@ useful quantities differ:
 Here registered state means all tensors registered as parameters or buffers. It includes nonpersistent buffers that
 `state_dict()` deliberately omits, so it is not synonymous with serialized checkpoint state.
 
+For one symbolic operand, `TensorRepr.numel` is the product of its logical shape and
+`TensorRepr.logical_nbytes` additionally multiplies by the known dtype size. The latter is `None` when dtype is unknown.
+These intrinsic values deliberately do not aggregate operands or claim that a tensor is materialized, retained,
+nonaliasing, or simultaneously live with any other tensor.
+
 The sum of operator output sizes is not generally any of these. An output may alias an input, be a view, be released
 before a later output exists, remain live because the caller retains it, or be saved specifically for backward. The CUDA
 allocator may also round requests, cache freed blocks, and report allocated versus reserved bytes separately. The
