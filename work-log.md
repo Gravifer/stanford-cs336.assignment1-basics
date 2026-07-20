@@ -174,3 +174,6 @@ or source of repository policy.
 - A deterministic randomized meta probe varied Transformer layer count (including zero), vocabulary, width, head count,
   feed-forward width, batch, and sequence across twelve cases. Every authored matrix total exactly matched Torch's
   `FlopCounterMode`; the temporary probe was removed rather than retained as a randomized student test.
+- A second deterministic randomized meta probe covered sixteen MHA/GQA/MQA cases across unequal QK/value widths, both
+  retained activation layouts, optional RoPE, and one or two leading batch axes. Every authored matrix total again
+  matched `FlopCounterMode`; the temporary probe was removed.
