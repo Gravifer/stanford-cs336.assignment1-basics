@@ -116,3 +116,5 @@ or source of repository policy.
   binds only root-local scalar facts for each completed call; reports remain readable after exit, repeated calls stay
   separate, hook failures do not alter a successful forward, and tensors are not retained. Public naming/export remains
   deferred until the lifecycle contract survives review.
+- Exposed the reviewed root-session surface as `CostObserver`, `observe_costs(module)`, and the repository `Module`
+  convenience method. Concrete classes still opt into call bindings through the protected local-name mapping hook.

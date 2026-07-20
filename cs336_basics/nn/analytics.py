@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "CostObserver",
     "CostReport",
     "CostRepr",
     "CostTerm",
@@ -27,6 +28,7 @@ __all__ = [
     "cost_repr",
     "matmul_flops",
     "module_state_footprint",
+    "observe_costs",
 ]
 
 
@@ -687,14 +689,14 @@ class _CostCallProvider(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
-class _CostObserver:
-    """Private root-invocation session used to stabilize observation semantics.
+class CostObserver:
+    """Observe call-specific root bindings without retaining call tensors.
 
     The session installs one ordinary per-module forward hook. It observes every
     invocation that reaches that hook while the context is active, in forward-hook
     completion order. It retains only normalized scalar facts and never the call
-    tensors themselves. The private experiment is not thread-safe: forwards must
-    not overlap context exit or report generation.
+    tensors themselves. A session is not thread-safe: forwards must not overlap
+    context exit or report generation.
     """
 
     def __init__(self, module: nn.Module) -> None:
@@ -713,7 +715,7 @@ class _CostObserver:
         self._entered = False
         self._closed = False
 
-    def __enter__(self) -> _CostObserver:
+    def __enter__(self) -> CostObserver:
         if self._entered or self._closed:
             raise RuntimeError("a cost observation session cannot be entered more than once")
         tree = cost_repr(self._module)
@@ -786,6 +788,11 @@ class _CostObserver:
             matmul_flops(tree, substitutions=substitutions, strict=strict)
             for substitutions in self._substitutions
         )
+
+
+def observe_costs(module: nn.Module) -> CostObserver:
+    """Create a single-use observation session for one root module."""
+    return CostObserver(module)
 
 
 _REGISTERED_SLOT_CONTAINERS = (nn.ModuleDict, nn.ModuleList, nn.Sequential)

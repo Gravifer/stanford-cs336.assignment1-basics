@@ -16,6 +16,7 @@ from typing_extensions import deprecated  # ? ruff doesn't see that python 3.13 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
 from cs336_basics.nn.analytics import (
+    CostObserver,
     CostRepr,
     CostTree,
     ModuleStateFootprint,
@@ -24,6 +25,7 @@ from cs336_basics.nn.analytics import (
     _CostScope,
     cost_repr,
     module_state_footprint,
+    observe_costs,
 )
 
 # from .feed_forward import SwiGLU  # ! would be circular
@@ -52,6 +54,10 @@ class Module(nn.Module):
     def state_footprint(self) -> ModuleStateFootprint:
         """Return the logical footprint of registered parameters and buffers."""
         return module_state_footprint(self)
+
+    def observe_costs(self) -> CostObserver:
+        """Create a call-specific symbolic-cost observation session."""
+        return observe_costs(self)
 
     def _cost_repr(self, scope: _CostScope) -> Iterable[CostRepr] | None:
         """Return local operations, or ``None`` until local work is classified."""

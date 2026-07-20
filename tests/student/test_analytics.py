@@ -12,6 +12,7 @@ from torch.utils.flop_counter import FlopCounterMode
 import cs336_basics.nn.analytics as analytics
 from cs336_basics.nn import DeltaLayer, Module
 from cs336_basics.nn.analytics import (
+    CostObserver,
     CostRepr,
     CostTerm,
     ModuleStateFootprint,
@@ -20,6 +21,7 @@ from cs336_basics.nn.analytics import (
     cost_repr,
     matmul_flops,
     module_state_footprint,
+    observe_costs,
 )
 from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
@@ -94,11 +96,11 @@ class _ObservableProjection(Module):
         return {"undeclared" if self.invalid_name else "tokens": x.shape[0]}
 
 
-def test_private_cost_observer_records_repeated_root_calls_without_retaining_tensors() -> None:
+def test_cost_observer_records_repeated_root_calls_without_retaining_tensors() -> None:
     module = _ObservableProjection()
     first = torch.empty((2, 3))
     second = torch.empty((5, 3))
-    observer = analytics._CostObserver(module)
+    observer = observe_costs(module)
 
     with observer:
         assert module(first).shape == first.shape
@@ -111,9 +113,10 @@ def test_private_cost_observer_records_repeated_root_calls_without_retaining_ten
     assert all(not isinstance(value, torch.Tensor) for record in observer._substitutions for value in record.values())
 
 
-def test_private_cost_observer_lifecycle_and_hook_isolation() -> None:
+def test_cost_observer_lifecycle_and_hook_isolation() -> None:
     module = _ObservableProjection()
-    observer = analytics._CostObserver(module)
+    observer = module.observe_costs()
+    assert isinstance(observer, CostObserver)
     existing_hook_outputs: list[torch.Tensor] = []
     existing_handle = module.register_forward_hook(lambda _module, _args, output: existing_hook_outputs.append(output))
 
@@ -134,12 +137,12 @@ def test_private_cost_observer_lifecycle_and_hook_isolation() -> None:
         observer.__enter__()
 
 
-def test_private_cost_observer_does_not_record_a_forward_without_output() -> None:
+def test_cost_observer_does_not_record_a_forward_without_output() -> None:
     class Fails(_ObservableProjection):
         def forward(self, x):
             raise LookupError("no output")
 
-    observer = analytics._CostObserver(Fails())
+    observer = observe_costs(Fails())
     with observer, pytest.raises(LookupError, match="no output"):
         observer._module(torch.empty((2, 3)))
 
@@ -147,8 +150,8 @@ def test_private_cost_observer_does_not_record_a_forward_without_output() -> Non
     assert observer.matmul_flops() == ()
 
 
-def test_private_cost_observer_defers_binding_failures_until_reporting() -> None:
-    observer = analytics._CostObserver(_ObservableProjection(invalid_name=True))
+def test_cost_observer_defers_binding_failures_until_reporting() -> None:
+    observer = observe_costs(_ObservableProjection(invalid_name=True))
 
     with observer:
         output = observer._module(torch.empty((2, 3)))
@@ -158,7 +161,7 @@ def test_private_cost_observer_defers_binding_failures_until_reporting() -> None
     with pytest.raises(RuntimeError, match="undeclared root symbols"):
         observer.matmul_flops()
 
-    rank_error = analytics._CostObserver(_ObservableProjection())
+    rank_error = observe_costs(_ObservableProjection())
     with rank_error:
         scalar_output = rank_error._module(torch.tensor(1.0))
     assert scalar_output.shape == ()
@@ -166,10 +169,10 @@ def test_private_cost_observer_defers_binding_failures_until_reporting() -> None
         rank_error.matmul_flops()
 
 
-def test_private_cost_observer_nested_sessions_record_their_own_completion_windows() -> None:
+def test_cost_observer_nested_sessions_record_their_own_completion_windows() -> None:
     module = _ObservableProjection()
-    outer = analytics._CostObserver(module)
-    inner = analytics._CostObserver(module)
+    outer = observe_costs(module)
+    inner = observe_costs(module)
 
     with outer:
         module(torch.empty((2, 3)))
@@ -181,7 +184,7 @@ def test_private_cost_observer_nested_sessions_record_their_own_completion_windo
     assert tuple(report.bound_total for report in inner.matmul_flops(strict=True)) == (72,)
 
 
-def test_private_cost_observer_requires_a_structural_call_provider() -> None:
+def test_cost_observer_requires_a_structural_call_provider() -> None:
     class External(nn.Module):
         def _cost_repr(self, scope):
             return ()
@@ -190,7 +193,7 @@ def test_private_cost_observer_requires_a_structural_call_provider() -> None:
             return ()
 
     with pytest.raises(TypeError, match="does not provide root-invocation"):
-        analytics._CostObserver(External())
+        observe_costs(External())
 
 
 @pytest.mark.parametrize("provider_method", ["_cost_repr", "_cost_children"])
