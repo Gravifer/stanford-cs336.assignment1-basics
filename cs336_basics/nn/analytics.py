@@ -699,6 +699,10 @@ def _add_substitutions(
         raise ValueError(f"substitutions contain unknown symbolic identities: {names}")
     for symbol, value in substitutions.items():
         expression = _expression(value)
+        foreign = expression.free_symbols - known_symbols
+        if foreign:
+            names = ", ".join(sorted(map(str, foreign)))
+            raise ValueError(f"substitution values contain unknown symbolic identities: {names}")
         if symbol in definitions:
             relations.append((expression, definitions[symbol]))
         else:

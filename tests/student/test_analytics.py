@@ -426,6 +426,7 @@ def test_child_arguments_preserve_and_validate_instance_bindings() -> None:
 
 def test_report_substitutions_are_additive_facts_not_overrides() -> None:
     tree = Linear(3, 5).cost_repr()
+    tokens = tree.find_symbols("tokens")[0]
     d_in = tree.find_symbols("d_in")[0]
 
     assert matmul_flops(tree, substitutions={d_in: 3}).conditions == ()
@@ -433,6 +434,16 @@ def test_report_substitutions_are_additive_facts_not_overrides() -> None:
         matmul_flops(tree, substitutions={d_in: 4})
     with pytest.raises(ValueError, match="unknown symbolic identities"):
         matmul_flops(tree, substitutions={sympy.Dummy("external", integer=True): 1})
+    with pytest.raises(ValueError, match="substitution values contain unknown symbolic identities"):
+        matmul_flops(tree, substitutions={tokens: sympy.Dummy("external", integer=True)})
+
+
+def test_report_substitutions_may_relate_known_scoped_symbols() -> None:
+    tree = Linear(3, 5).cost_repr()
+    tokens = tree.find_symbols("tokens")[0]
+    d_in = tree.find_symbols("d_in")[0]
+
+    assert matmul_flops(tree, substitutions={tokens: d_in}, strict=True).bound_total == 90
 
 
 def test_report_substitutions_reject_symbolic_definition_cycles() -> None:
