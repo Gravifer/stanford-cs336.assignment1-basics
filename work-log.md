@@ -180,3 +180,7 @@ or source of repository policy.
 - Reopened the memo's PyTorch, Torch source, einx, jaxtyping, and Netlib references. The source paths and documentation
   targets remain live; version-selector redirects are expected. No task framing or implementation log was added to the
   memo during the link audit.
+- An independent final API audit found no defect in the `Module`/`DeltaLayer` ownership, root façade, decorator
+  transparency, nested decoder naming, or constructor boundaries. It also confirmed that Torch's nearest homogeneous
+  Transformer container deep-copies one prototype with identical initial values, unlike this model's independently
+  initialized layers, so no speculative generic stack container was introduced.
