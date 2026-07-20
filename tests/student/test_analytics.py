@@ -69,6 +69,130 @@ def test_external_torch_module_can_implement_cost_provider_structurally() -> Non
     assert matmul_flops(tree, substitutions={tree.find_symbols("tokens")[0]: 5}, strict=True).bound_total == 120
 
 
+class _ObservableProjection(Module):
+    def __init__(self, *, invalid_name: bool = False) -> None:
+        super().__init__()
+        self.invalid_name = invalid_name
+
+    def forward(self, x):
+        return x + 1
+
+    def _cost_repr(self, scope):
+        s = scope.symbols
+        s.unbound("tokens")
+        return (
+            CostRepr(
+                "observed projection",
+                torch.ops.aten.mm.default,
+                {"self": TensorRepr((s.tokens, 3)), "mat2": TensorRepr((3, 4))},
+            ),
+        )
+
+    def _cost_call_bindings(self, args, kwargs, output):
+        del output
+        x = args[0] if args else kwargs["x"]
+        return {"undeclared" if self.invalid_name else "tokens": x.shape[0]}
+
+
+def test_private_cost_observer_records_repeated_root_calls_without_retaining_tensors() -> None:
+    module = _ObservableProjection()
+    first = torch.empty((2, 3))
+    second = torch.empty((5, 3))
+    observer = analytics._CostObserver(module)
+
+    with observer:
+        assert module(first).shape == first.shape
+        assert module(x=second).shape == second.shape
+
+    reports = observer.matmul_flops(strict=True)
+    assert observer.call_count == 2
+    assert tuple(report.bound_total for report in reports) == (48, 120)
+    assert reports[0].symbolic_total == reports[1].symbolic_total
+    assert all(not isinstance(value, torch.Tensor) for record in observer._substitutions for value in record.values())
+
+
+def test_private_cost_observer_lifecycle_and_hook_isolation() -> None:
+    module = _ObservableProjection()
+    observer = analytics._CostObserver(module)
+    existing_hook_outputs: list[torch.Tensor] = []
+    existing_handle = module.register_forward_hook(lambda _module, _args, output: existing_hook_outputs.append(output))
+
+    with pytest.raises(RuntimeError, match="has not been entered"):
+        observer.matmul_flops()
+    with observer:
+        with pytest.raises(RuntimeError, match="cannot be entered more than once"):
+            observer.__enter__()
+        output = module(torch.empty((2, 3)))
+    module(torch.empty((7, 3)))
+    existing_handle.remove()
+
+    assert output.shape == (2, 3)
+    assert observer.call_count == 1
+    assert len(existing_hook_outputs) == 2
+    assert observer.matmul_flops(strict=True)[0].bound_total == 48
+    with pytest.raises(RuntimeError, match="cannot be entered more than once"):
+        observer.__enter__()
+
+
+def test_private_cost_observer_does_not_record_a_forward_without_output() -> None:
+    class Fails(_ObservableProjection):
+        def forward(self, x):
+            raise LookupError("no output")
+
+    observer = analytics._CostObserver(Fails())
+    with observer, pytest.raises(LookupError, match="no output"):
+        observer._module(torch.empty((2, 3)))
+
+    assert observer.call_count == 0
+    assert observer.matmul_flops() == ()
+
+
+def test_private_cost_observer_defers_binding_failures_until_reporting() -> None:
+    observer = analytics._CostObserver(_ObservableProjection(invalid_name=True))
+
+    with observer:
+        output = observer._module(torch.empty((2, 3)))
+
+    assert output.shape == (2, 3)
+    assert observer.call_count == 0
+    with pytest.raises(RuntimeError, match="undeclared root symbols"):
+        observer.matmul_flops()
+
+    rank_error = analytics._CostObserver(_ObservableProjection())
+    with rank_error:
+        scalar_output = rank_error._module(torch.tensor(1.0))
+    assert scalar_output.shape == ()
+    with pytest.raises(RuntimeError, match="IndexError"):
+        rank_error.matmul_flops()
+
+
+def test_private_cost_observer_nested_sessions_record_their_own_completion_windows() -> None:
+    module = _ObservableProjection()
+    outer = analytics._CostObserver(module)
+    inner = analytics._CostObserver(module)
+
+    with outer:
+        module(torch.empty((2, 3)))
+        with inner:
+            module(torch.empty((3, 3)))
+        module(torch.empty((5, 3)))
+
+    assert tuple(report.bound_total for report in outer.matmul_flops(strict=True)) == (48, 72, 120)
+    assert tuple(report.bound_total for report in inner.matmul_flops(strict=True)) == (72,)
+
+
+def test_private_cost_observer_requires_a_structural_call_provider() -> None:
+    class External(nn.Module):
+        def _cost_repr(self, scope):
+            return ()
+
+        def _cost_children(self, scope):
+            return ()
+
+    with pytest.raises(TypeError, match="does not provide root-invocation"):
+        analytics._CostObserver(External())
+
+
 @pytest.mark.parametrize("provider_method", ["_cost_repr", "_cost_children"])
 def test_structural_cost_providers_reject_malformed_results(provider_method: str) -> None:
     class Malformed(nn.Module):

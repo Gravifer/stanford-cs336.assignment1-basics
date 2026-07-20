@@ -112,3 +112,7 @@ or source of repository policy.
 - Hardened the exported analytics records as construction boundaries. Symbol identities and expressions are normalized
   eagerly, reports validate known binding identities, and directly assembled trees preserve local symbol and child-path
   uniqueness rather than failing later inside aggregation.
+- Began invocation observation as a private lifecycle experiment. One official per-module forward hook snapshots and
+  binds only root-local scalar facts for each completed call; reports remain readable after exit, repeated calls stay
+  separate, hook failures do not alter a successful forward, and tensors are not retained. Public naming/export remains
+  deferred until the lifecycle contract survives review.

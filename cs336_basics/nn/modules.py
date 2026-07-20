@@ -1,6 +1,6 @@
 """Core neural-network modules used by the course implementations."""
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Never, NoReturn, cast
 
 import einx
@@ -62,6 +62,16 @@ class Module(nn.Module):
         return tuple(
             scope.child(name, child) for name, child in self._modules.items() if child is not None
         )
+
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]:
+        """Leave invocation dimensions symbolic unless a concrete class binds them."""
+        del args, kwargs, output
+        return {}
 
 
 def DeltaLayer[ModuleT: nn.Module](module_type: type[ModuleT]) -> type[ModuleT]:  # noqa: N802

@@ -6,7 +6,7 @@ import keyword
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Protocol, overload, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, overload, runtime_checkable
 
 import torch
 from torch import nn
@@ -673,6 +673,119 @@ class _CostProvider(Protocol):
     def _cost_repr(self, scope: _CostScope) -> Iterable[CostRepr] | None: ...
 
     def _cost_children(self, scope: _CostScope) -> Iterable[_CostChild]: ...
+
+
+@runtime_checkable
+class _CostCallProvider(Protocol):
+    """Protected contract for binding one completed root-module forward."""
+
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]: ...
+
+
+class _CostObserver:
+    """Private root-invocation session used to stabilize observation semantics.
+
+    The session installs one ordinary per-module forward hook. It observes every
+    invocation that reaches that hook while the context is active, in forward-hook
+    completion order. It retains only normalized scalar facts and never the call
+    tensors themselves. The private experiment is not thread-safe: forwards must
+    not overlap context exit or report generation.
+    """
+
+    def __init__(self, module: nn.Module) -> None:
+        if not isinstance(module, nn.Module):
+            raise TypeError(f"cost observation expects a torch.nn.Module, got {type(module).__qualname__}")
+        if not isinstance(module, _CostCallProvider):
+            raise TypeError(
+                f"{type(module).__qualname__} does not provide root-invocation cost bindings"
+            )
+        self._module = module
+        self._tree: CostTree | None = None
+        self._root_symbols: Mapping[str, Any] = MappingProxyType({})
+        self._substitutions: list[Mapping[Any, Any]] = []
+        self._failures: list[str] = []
+        self._handle: Any | None = None
+        self._entered = False
+        self._closed = False
+
+    def __enter__(self) -> _CostObserver:
+        if self._entered or self._closed:
+            raise RuntimeError("a cost observation session cannot be entered more than once")
+        tree = cost_repr(self._module)
+        self._tree = tree
+        self._root_symbols = MappingProxyType(
+            {record.local_name: record.symbol for record in tree.symbols}
+        )
+        self._handle = self._module.register_forward_hook(
+            self._observe,
+            with_kwargs=True,
+            always_call=False,
+        )
+        self._entered = True
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        del exc_info
+        if self._handle is not None:
+            self._handle.remove()
+            self._handle = None
+        self._entered = False
+        self._closed = True
+
+    def _observe(
+        self,
+        module: nn.Module,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> None:
+        """Copy call-specific facts without modifying or retaining the output."""
+        try:
+            provider = cast(_CostCallProvider, module)
+            bindings = provider._cost_call_bindings(args, kwargs, output)
+            if not isinstance(bindings, Mapping):
+                raise TypeError("_cost_call_bindings() must return a mapping")
+            if any(not isinstance(name, str) for name in bindings):
+                raise TypeError("_cost_call_bindings() keys must be local symbol names")
+            unknown = bindings.keys() - self._root_symbols.keys()
+            if unknown:
+                names = ", ".join(sorted(unknown))
+                raise ValueError(f"_cost_call_bindings() returned undeclared root symbols: {names}")
+            substitutions = {
+                self._root_symbols[name]: _expression(value) for name, value in bindings.items()
+            }
+        except Exception as error:  # observation must not turn a valid forward into a failure
+            self._failures.append(f"{type(error).__qualname__}: {error}")
+            return None
+        self._substitutions.append(MappingProxyType(substitutions))
+        return None
+
+    @property
+    def tree(self) -> CostTree:
+        """Return the static tree snapshot after the session has been entered."""
+        if self._tree is None:
+            raise RuntimeError("cost observation has not been entered")
+        return self._tree
+
+    @property
+    def call_count(self) -> int:
+        """Return the number of root forwards whose facts were bound successfully."""
+        return len(self._substitutions)
+
+    def matmul_flops(self, *, strict: bool = False) -> tuple[CostReport, ...]:
+        """Apply the matrix-product policy separately to every observed call."""
+        tree = self.tree
+        if self._failures:
+            raise RuntimeError("cost observation failed:\n" + "\n".join(self._failures))
+        return tuple(
+            matmul_flops(tree, substitutions=substitutions, strict=strict)
+            for substitutions in self._substitutions
+        )
 
 
 _REGISTERED_SLOT_CONTAINERS = (nn.ModuleDict, nn.ModuleList, nn.Sequential)
