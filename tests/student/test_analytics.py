@@ -83,6 +83,32 @@ def test_structural_containers_preserve_repeated_shared_module_invocations() -> 
     assert matmul_flops(tree, substitutions=substitutions, strict=True).bound_total == counter.get_total_flops()
 
 
+def test_default_module_recursion_preserves_repeated_registered_child_slots() -> None:
+    class SharedParent(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            shared = Linear(3, 3, device=torch.device("meta"))
+            self.first = shared
+            self.second = shared
+
+        def forward(self, x):
+            return self.second(self.first(x))
+
+        def _cost_repr(self, scope):
+            return ()
+
+    module = SharedParent()
+    tree = module.cost_repr()
+    counter = FlopCounterMode(display=False)
+
+    with counter:
+        module(torch.empty((5, 3), device="meta"))
+
+    assert tuple(child.name for child in tree.children) == ("first", "second")
+    substitutions = {symbol: 5 for symbol in tree.find_symbols("tokens")}
+    assert matmul_flops(tree, substitutions=substitutions, strict=True).bound_total == counter.get_total_flops()
+
+
 def test_structural_containers_preserve_authored_slot_names() -> None:
     module = nn.Sequential(OrderedDict((name, Linear(3, 3)) for name in ("attention", "feed_forward")))
 

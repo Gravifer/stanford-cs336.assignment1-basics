@@ -96,3 +96,6 @@ or source of repository policy.
   added pinned Linear and packed-SwiGLU examples. Focused analytics: 83 passed; Ruff/`ty` clean.
 - Qualified the memo's `SymInt` boundary: concrete/backed values can normalize now, while genuine `ShapeEnv` identities
   require explicit scope remapping and remain deferred with dynamic invocation observation.
+- Aligned the reusable `Module` default recursion with its documented one-invocation-per-registered-slot policy. Direct
+  child slots preserve repeated aliases; custom call semantics still override `_cost_children()`. Focused analytics and
+  model-architecture suites: 91 passed; Ruff/`ty` clean.

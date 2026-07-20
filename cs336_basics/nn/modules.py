@@ -59,7 +59,9 @@ class Module(nn.Module):
 
     def _cost_children(self, scope: _CostScope) -> Iterable[_CostChild]:
         """Direct symbolic collection into immediate children."""
-        return tuple(scope.child(name, child) for name, child in self.named_children())
+        return tuple(
+            scope.child(name, child) for name, child in self._modules.items() if child is not None
+        )
 
 
 def DeltaLayer[ModuleT: nn.Module](module_type: type[ModuleT]) -> type[ModuleT]:  # noqa: N802
