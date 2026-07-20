@@ -11,9 +11,9 @@ from torch import dtype, nn
 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
-from cs336_basics.nn.analytics import CostRepr, Module, TensorRepr, _CostChild, _CostScope
+from cs336_basics.nn.analytics import CostRepr, TensorRepr, _CostChild, _CostScope
 
-from .modules import Linear, ModelVec
+from .modules import Linear, ModelVec, Module
 
 _COURSE_SWIGLU_KEY_TO_ROLE = {
     "w1.weight": "gate",

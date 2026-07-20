@@ -6,11 +6,14 @@ import torch
 from torch import nn
 from torch.utils.flop_counter import FlopCounterMode
 
-from cs336_basics.nn.analytics import CostRepr, CostTerm, Module, TensorRepr, cost_repr, matmul_flops
+import cs336_basics.nn.analytics as analytics
+from cs336_basics.nn import DeltaLayer, Module
+from cs336_basics.nn.analytics import CostRepr, CostTerm, TensorRepr, cost_repr, matmul_flops
 from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
 from cs336_basics.nn.model import TransformerLM
-from cs336_basics.nn.modules import Linear
+from cs336_basics.nn.modules import DeltaLayer as ModulesDeltaLayer
+from cs336_basics.nn.modules import Linear, Module as ModulesModule
 
 
 def _tensor(value: object) -> TensorRepr:
@@ -24,6 +27,34 @@ def test_repository_module_base_preserves_torch_identity() -> None:
     assert isinstance(linear, Module)
     assert isinstance(linear, nn.Module)
     assert linear.state_dict().keys() == {"weight"}
+    assert Module is ModulesModule
+    assert DeltaLayer is ModulesDeltaLayer
+    assert not hasattr(analytics, "Module")
+
+
+def test_external_torch_module_can_implement_cost_provider_structurally() -> None:
+    class External(nn.Module):
+        def _cost_repr(self, scope):
+            tokens = scope.symbol("tokens")
+            return (
+                CostRepr(
+                    "external projection",
+                    torch.ops.aten.bmm.default,
+                    {
+                        "self": TensorRepr((1, tokens, 3)),
+                        "mat2": TensorRepr((1, 3, 4)),
+                    },
+                ),
+            )
+
+        def _cost_children(self, scope):
+            del scope
+            return ()
+
+    tree = cost_repr(External())
+
+    assert tree.costs[0].name == "external projection"
+    assert matmul_flops(tree, substitutions={tree.find_symbols("tokens")[0]: 5}, strict=True).bound_total == 120
 
 
 def test_symbolic_tensor_and_arguments_are_immutable_copies() -> None:

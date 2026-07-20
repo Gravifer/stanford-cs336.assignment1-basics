@@ -1,21 +1,19 @@
 """Decoder-only Transformer language-model modules."""
 
-from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
-import einx
 import torch
 from jaxtyping import Float, Int
 from torch import nn
 
 from cs336_basics.nn.attention import MultiheadSelfAttention, RotaryPositionalEmbedding
-from cs336_basics.nn.analytics import CostRepr, Module, _CostChild, _CostScope
+from cs336_basics.nn.analytics import CostRepr, _CostChild, _CostScope
 from cs336_basics.nn.feed_forward import SwiGLU
-from cs336_basics.nn.modules import Embedding, Linear, RMSNorm
+from cs336_basics.nn.modules import DeltaLayer as _DeltaLayer
+from cs336_basics.nn.modules import Embedding, Linear, Module, RMSNorm
 
 
 __all__ = [
-    "DeltaLayer",
     "GPTDecoderLayer",
     "TransformerBlock",
     "TransformerLM",
@@ -25,29 +23,6 @@ __all__ = [
 type ModelActivations = Float[torch.Tensor, "*batch sequence_length d_model"]
 type TokenIndices = Int[torch.Tensor, "*batch sequence_length"]
 type Logits = Float[torch.Tensor, "*batch sequence_length vocab_size"]
-
-
-def DeltaLayer[ModuleT: nn.Module](module_type: type[ModuleT]) -> type[ModuleT]:  # noqa: N802
-    """Turn an ordinary module forward pass into an additive layer.
-
-    The module's authored ``forward`` is exposed as ``delta``. The decorator
-    replaces the public forward pass with ``forward(x) = x + delta(x)``. It
-    introduces no wrapper module, parameters, child prefixes, or state-loading
-    behavior.
-    """
-    delta = cast(Callable[..., torch.Tensor] | None, module_type.__dict__.get("forward"))
-    if delta is None:
-        raise TypeError("a DeltaLayer must define its own forward method")
-    if "delta" in module_type.__dict__:
-        raise TypeError("a DeltaLayer cannot define delta separately from forward")
-
-    def forward(self: ModuleT, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        update = delta(self, x, *args, **kwargs)
-        return einx.add("... d_model, ... d_model -> ... d_model", x, update)
-
-    setattr(module_type, "delta", delta)
-    setattr(module_type, "forward", forward)
-    return module_type
 
 
 _COURSE_BLOCK_KEY_TRANSLATION = {
@@ -66,7 +41,7 @@ _COURSE_BLOCK_KEY_TRANSLATION = {
 class GPTDecoderLayer(Module):
     """Pre-norm GPT decoder layer composed of two additive updates."""
 
-    @DeltaLayer
+    @_DeltaLayer
     class Attention(Module):
         """Normalized causal self-attention update."""
 
@@ -98,7 +73,7 @@ class GPTDecoderLayer(Module):
                 ),
             )
 
-    @DeltaLayer
+    @_DeltaLayer
     class FeedForward(Module):
         """Normalized position-wise SwiGLU update."""
 

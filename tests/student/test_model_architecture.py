@@ -7,7 +7,13 @@ from typing import cast
 import torch
 from torch import nn
 
-from cs336_basics.nn.model import DeltaLayer, GPTDecoderLayer, TransformerBlock, TransformerLM
+import cs336_basics.nn.model as model_module
+from cs336_basics.nn import DeltaLayer
+from cs336_basics.nn.model import GPTDecoderLayer, TransformerBlock, TransformerLM
+
+
+def test_delta_layer_is_owned_by_reusable_modules_surface() -> None:
+    assert not hasattr(model_module, "DeltaLayer")
 
 
 @DeltaLayer

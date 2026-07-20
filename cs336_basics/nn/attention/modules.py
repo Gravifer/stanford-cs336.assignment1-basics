@@ -8,11 +8,11 @@ from jaxtyping import Float, Int, Shaped
 from torch import nn
 
 from cs336_basics.nn import functional as F
-from cs336_basics.nn.analytics import CostRepr, Module, TensorRepr, _CostChild, _CostScope
+from cs336_basics.nn.analytics import CostRepr, TensorRepr, _CostChild, _CostScope
 
 from .. import initializer as init
 from .._typing import MaskBias
-from ..modules import Linear
+from ..modules import Linear, Module
 from . import _head_layout
 from .rope import RotaryPositionalEmbedding
 

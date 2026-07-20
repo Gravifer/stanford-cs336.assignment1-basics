@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import torch
 from torch import nn
@@ -19,7 +19,6 @@ __all__ = [
     "CostRepr",
     "CostTerm",
     "CostTree",
-    "Module",
     "TensorRepr",
     "cost_repr",
     "matmul_flops",
@@ -225,21 +224,13 @@ class CostReport:
         return replace(self, bound_total=_substitute(self.symbolic_total, combined), bindings=combined)
 
 
-class Module(nn.Module):
-    """Torch module with an optional, composable symbolic-cost description."""
+@runtime_checkable
+class _CostProvider(Protocol):
+    """Protected structural contract for modules that author symbolic costs."""
 
-    def cost_repr(self) -> CostTree:
-        """Collect this module's static symbolic cost representation."""
-        return cost_repr(self)
+    def _cost_repr(self, scope: _CostScope) -> Iterable[CostRepr] | None: ...
 
-    def _cost_repr(self, scope: _CostScope) -> Iterable[CostRepr] | None:
-        """Return local operations, or ``None`` until local work is classified."""
-        del scope
-        return None
-
-    def _cost_children(self, scope: _CostScope) -> Iterable[_CostChild]:
-        """Direct symbolic collection into immediate children."""
-        return tuple(scope.child(name, child) for name, child in self.named_children())
+    def _cost_children(self, scope: _CostScope) -> Iterable[_CostChild]: ...
 
 
 _STRUCTURAL_TORCH_MODULES = (nn.ModuleDict, nn.ModuleList, nn.Sequential)
@@ -255,7 +246,7 @@ def _collect_cost_tree(
     scope = _CostScope()
     unresolved: tuple[str, ...] = ()
 
-    if isinstance(module, Module):
+    if isinstance(module, _CostProvider):
         local_costs = module._cost_repr(scope)
         costs = () if local_costs is None else tuple(local_costs)
         child_specs = tuple(module._cost_children(scope))

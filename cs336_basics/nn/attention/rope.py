@@ -8,7 +8,8 @@ import einx
 import torch
 from jaxtyping import Float, Int, Shaped
 
-from cs336_basics.nn.analytics import CostRepr, Module, _CostScope
+from cs336_basics.nn.analytics import CostRepr, _CostScope
+from cs336_basics.nn.modules import Module
 
 
 class RotaryPositionalEmbedding(Module):

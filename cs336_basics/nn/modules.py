@@ -1,6 +1,7 @@
 """Core neural-network modules used by the course implementations."""
 
-from typing import Never, NoReturn
+from collections.abc import Callable, Iterable
+from typing import Any, Never, NoReturn, cast
 
 import einx
 import einx._src.namedtensor.stage1 as einx_stage1
@@ -14,11 +15,69 @@ from typing_extensions import deprecated  # ? ruff doesn't see that python 3.13 
 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
-from cs336_basics.nn.analytics import CostRepr, Module, TensorRepr, _CostScope
+from cs336_basics.nn.analytics import (
+    CostRepr,
+    CostTree,
+    TensorRepr,
+    _CostChild,
+    _CostScope,
+    cost_repr,
+)
 
 # from .feed_forward import SwiGLU  # ! would be circular
 
 type ModelVec = Float[torch.Tensor, "{self.d_model}"]  # ruff takes issue with this # noqa: F821
+
+
+__all__ = [
+    "DeltaLayer",
+    "Embedding",
+    "Linear",
+    "Module",
+    "RMSNorm",
+    "SiLU",
+    "SoftMax",
+]
+
+
+class Module(nn.Module):
+    """Torch module with an optional, composable symbolic-cost description."""
+
+    def cost_repr(self) -> CostTree:
+        """Collect this module's static symbolic cost representation."""
+        return cost_repr(self)
+
+    def _cost_repr(self, scope: _CostScope) -> Iterable[CostRepr] | None:
+        """Return local operations, or ``None`` until local work is classified."""
+        del scope
+        return None
+
+    def _cost_children(self, scope: _CostScope) -> Iterable[_CostChild]:
+        """Direct symbolic collection into immediate children."""
+        return tuple(scope.child(name, child) for name, child in self.named_children())
+
+
+def DeltaLayer[ModuleT: nn.Module](module_type: type[ModuleT]) -> type[ModuleT]:  # noqa: N802
+    """Turn an ordinary module forward pass into an additive layer.
+
+    The module's authored ``forward`` is exposed as ``delta``. The decorator
+    replaces the public forward pass with ``forward(x) = x + delta(x)``. It
+    introduces no wrapper module, parameters, child prefixes, or state-loading
+    behavior.
+    """
+    delta = cast(Callable[..., torch.Tensor] | None, module_type.__dict__.get("forward"))
+    if delta is None:
+        raise TypeError("a DeltaLayer must define its own forward method")
+    if "delta" in module_type.__dict__:
+        raise TypeError("a DeltaLayer cannot define delta separately from forward")
+
+    def forward(self: ModuleT, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        update = delta(self, x, *args, **kwargs)
+        return einx.add("... d_model, ... d_model -> ... d_model", x, update)
+
+    setattr(module_type, "delta", delta)
+    setattr(module_type, "forward", forward)
+    return module_type
 
 
 class Embedding(Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torch.nn.sparse`
