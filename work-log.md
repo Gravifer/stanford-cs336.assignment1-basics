@@ -187,3 +187,6 @@ or source of repository policy.
 - Re-ran the veteran `scripts/transformer_accounting.py` unchanged, then independently queried the new symbolic API on
   its GPT-2 XL meta model. Both paths report 3,516,769,894,400 forward matrix FLOPs; the new state-footprint result also
   matches the script's 1,640,452,800 parameters, 6,561,811,200 parameter bytes, and 12,582,912 buffer bytes exactly.
+- Built the project wheel and imported it in isolated Python mode. The artifact contains the new neural-network façade,
+  analytics, module base, and model sources; `Module` and `DeltaLayer` resolve through `nn.modules` and all sixteen root
+  façade exports survive packaging. The workspace-local wheel audit directory was removed after verification.
