@@ -56,6 +56,12 @@ precedent. It is a context manager backed by `TorchDispatchMode`. Its registry i
 formula wrappers replace tensor arguments with their shapes. The formulas for `mm` and `bmm` therefore receive operand
 shapes rather than model-specific `m`, `n`, and `p` supplied by each caller.
 
+The public surface of that module exports `FlopCounterMode` and `register_flop_formula`, not the module-level
+`flop_registry`. A registered formula is also wrapped to extract shapes from actual tensor arguments; it does not accept
+`TensorRepr` records carrying arbitrary SymPy dimensions. Reaching through the wrapper's `__wrapped__` attribute would
+depend on private implementation structure. Static symbolic policies consequently mirror the small supported formula
+set under exact ATen overload identities, while meta execution under `FlopCounterMode` remains the executable oracle.
+
 The counter uses [`ModuleTracker`](https://github.com/pytorch/pytorch/blob/main/torch/utils/module_tracker.py) to attribute
 observed operations to fully qualified module names. The
 [`ModuleTracker` documentation](https://docs.pytorch.org/docs/stable/module_tracker.html) explicitly describes this use.
