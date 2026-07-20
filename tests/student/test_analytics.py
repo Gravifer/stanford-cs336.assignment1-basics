@@ -272,6 +272,25 @@ def test_default_module_children_are_inventory_until_calls_are_authored() -> Non
     assert matmul_flops(tree.children[0], strict=True).bound_total == 0
 
 
+def test_unresolved_local_work_keeps_explicitly_authored_child_calls() -> None:
+    class Partial(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.projection = Linear(3, 4)
+
+        def _cost_children(self, scope):
+            return (scope.child("projection", self.projection),)
+
+    tree = Partial().cost_repr()
+    report = matmul_flops(tree)
+
+    assert tree.children[0].edge_role == "call"
+    assert len(report.terms) == 1
+    assert len(report.unsupported) == 1
+    with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
+        matmul_flops(tree, strict=True)
+
+
 def test_structural_containers_preserve_authored_slot_names() -> None:
     module = nn.Sequential(OrderedDict((name, Linear(3, 3)) for name in ("attention", "feed_forward")))
 
