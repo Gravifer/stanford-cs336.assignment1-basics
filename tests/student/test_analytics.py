@@ -8,7 +8,7 @@ from torch.utils.flop_counter import FlopCounterMode
 
 import cs336_basics.nn.analytics as analytics
 from cs336_basics.nn import DeltaLayer, Module
-from cs336_basics.nn.analytics import CostRepr, CostTerm, TensorRepr, cost_repr, matmul_flops
+from cs336_basics.nn.analytics import CostRepr, CostTerm, SymbolRepr, TensorRepr, cost_repr, matmul_flops
 from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
 from cs336_basics.nn.model import TransformerLM
@@ -35,13 +35,14 @@ def test_repository_module_base_preserves_torch_identity() -> None:
 def test_external_torch_module_can_implement_cost_provider_structurally() -> None:
     class External(nn.Module):
         def _cost_repr(self, scope):
-            tokens = scope.symbol("tokens")
+            s = scope.symbols
+            s.unbound("tokens")
             return (
                 CostRepr(
                     "external projection",
                     torch.ops.aten.bmm.default,
                     {
-                        "self": TensorRepr((1, tokens, 3)),
+                        "self": TensorRepr((1, s.tokens, 3)),
                         "mat2": TensorRepr((1, 3, 4)),
                     },
                 ),
@@ -90,7 +91,8 @@ def test_linear_cost_uses_symbolic_aten_operands() -> None:
 
     assert cost.operation is torch.ops.aten.bmm.default
     assert cost.name == "linear projection"
-    assert tuple(tree.symbols.values()) == ("tokens", "d_in", "d_out")
+    assert tuple(record.local_name for record in tree.symbols) == ("tokens", "d_in", "d_out")
+    assert all(isinstance(record, SymbolRepr) for record in tree.symbols)
     assert _tensor(cost.arguments["self"]).shape[1:] == (
         tree.find_symbols("tokens")[0],
         tree.find_symbols("d_in")[0],
@@ -103,6 +105,141 @@ def test_scoped_symbols_do_not_collide_between_modules() -> None:
 
     assert first.find_symbols("d_in")[0] != second.find_symbols("d_in")[0]
     assert str(first.find_symbols("d_in")[0]) == str(second.find_symbols("d_in")[0])
+
+
+def test_symbol_environment_is_a_focused_builder_for_immutable_records() -> None:
+    captured: dict[str, object] = {}
+
+    class Described(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            captured["symbols"] = s
+
+            assert s.unbound("batch", "sequence") is s
+            assert s.bind(width=4) is s
+            assert s.bind(twice_width=2 * s.width) is s
+            assert s.batch is s["batch"]
+            assert s["batch", "sequence"] == (s.batch, s.sequence)
+            assert tuple(s) == (s.batch, s.sequence, s.width, s.twice_width)
+            return ()
+
+    tree = Described().cost_repr()
+    records = tree.symbols
+
+    assert tuple(record.local_name for record in records) == ("batch", "sequence", "width", "twice_width")
+    assert tuple(record.display_name for record in records) == ("batch", "sequence", "width", "twice_width")
+    assert all(isinstance(record.symbol, sympy.Dummy) for record in records)
+    assert records[0].binding is None
+    assert records[2].binding == 4
+    assert records[3].binding == 2 * records[2].symbol
+    with pytest.raises(RuntimeError, match="environment is frozen"):
+        captured["symbols"].unbound("late")  # ty: ignore[unresolved-attribute]
+
+
+@pytest.mark.parametrize("name", ["bind", "_private", "not-valid", "class"])
+def test_symbol_environment_reserves_api_and_invalid_names(name: str) -> None:
+    class InvalidSymbol(Module):
+        def _cost_repr(self, scope):
+            scope.symbols.unbound(name)
+            return ()
+
+    with pytest.raises(ValueError, match="symbol name"):
+        InvalidSymbol().cost_repr()
+
+
+def test_symbol_environment_rejects_incompatible_definitions_and_cycles() -> None:
+    class Incompatible(Module):
+        def _cost_repr(self, scope):
+            scope.symbols.bind(width=3)
+            scope.symbols.bind(width=4)
+            return ()
+
+    class Cyclic(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("left", "right")
+            s.bind(left=s.right, right=s.left)
+            return ()
+
+    with pytest.raises(ValueError, match="incompatible bindings"):
+        Incompatible().cost_repr()
+    with pytest.raises(ValueError, match="contain a cycle"):
+        Cyclic().cost_repr()
+
+
+def test_symbolic_dimensions_and_repetitions_reject_definite_negative_values() -> None:
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        TensorRepr((-1, 3))
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        CostRepr(
+            "negative repetition",
+            torch.ops.aten.bmm.default,
+            {"self": TensorRepr((1, 2, 3)), "mat2": TensorRepr((1, 3, 4))},
+            repetitions=-1,
+        )
+
+
+class _DirectedLinearParent(Module):
+    def __init__(self, width: int | None = None, *, argument_name: str = "d_in") -> None:
+        super().__init__()
+        self.width = width
+        self.argument_name = argument_name
+        self.projection = Linear(3, 4)
+
+    def _cost_repr(self, scope):
+        del scope
+        return ()
+
+    def _cost_children(self, scope):
+        s = scope.symbols
+        s.unbound("tokens", "width")
+        if self.width is not None:
+            s.bind(width=self.width)
+        return (
+            scope.child(
+                "projection",
+                self.projection,
+                arguments={"tokens": s.tokens, self.argument_name: s.width, "d_out": 4},
+            ),
+        )
+
+
+def test_child_arguments_create_checked_parent_child_equalities() -> None:
+    tree = _DirectedLinearParent().cost_repr()
+    tokens = tree.find_symbols("tokens")[0]
+    width = tree.find_symbols("width")[0]
+    report = matmul_flops(tree, strict=True)
+
+    assert len(report.conditions) == 1
+    assert report.conditions[0].subs({width: 3}) == sympy.true
+    assert sympy.simplify(report.bound_total - 8 * tokens * width) == 0
+
+    resolved = report.substitute({tokens: 5, width: 3})
+    assert resolved.bound_total == 120
+    assert resolved.conditions == ()
+    with pytest.raises(ValueError, match="symbolic facts are inconsistent"):
+        report.substitute({width: 5})
+
+
+def test_child_arguments_preserve_and_validate_instance_bindings() -> None:
+    matching = _DirectedLinearParent(3).cost_repr()
+    assert matmul_flops(matching, strict=True).conditions == ()
+
+    with pytest.raises(ValueError, match="symbolic facts are inconsistent"):
+        _DirectedLinearParent(5).cost_repr()
+    with pytest.raises(ValueError, match="does not declare child argument symbols: input_width"):
+        _DirectedLinearParent(argument_name="input_width").cost_repr()
+
+
+def test_report_substitutions_are_additive_facts_not_overrides() -> None:
+    tree = Linear(3, 5).cost_repr()
+    d_in = tree.find_symbols("d_in")[0]
+
+    assert matmul_flops(tree, substitutions={d_in: 3}).conditions == ()
+    with pytest.raises(ValueError, match="symbolic facts are inconsistent"):
+        matmul_flops(tree, substitutions={d_in: 4})
+    with pytest.raises(ValueError, match="unknown symbolic identities"):
+        matmul_flops(tree, substitutions={sympy.Dummy("external", integer=True): 1})
 
 
 def test_course_policy_keeps_symbolic_and_bound_views() -> None:

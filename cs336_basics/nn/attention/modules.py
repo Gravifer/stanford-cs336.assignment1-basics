@@ -909,60 +909,60 @@ class MultiheadSelfAttention(MultiheadAttention):
 
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Describe packed projection and grouped attention at symbolic shapes."""
-        batch = scope.symbol("batch")
-        sequence = scope.symbol("sequence")
-        d_model = scope.symbol("d_model", self.d_model)
-        query_heads = scope.symbol("query_heads", self.num_heads)
-        kv_heads = scope.symbol("kv_heads", self.num_kv_heads)
-        d_k = scope.symbol("d_k", self.d_k)
-        d_v = scope.symbol("d_v", self.d_v)
+        s = scope.symbols
+        s.unbound("batch", "sequence")
+        s.bind(
+            d_model=self.d_model,
+            query_heads=self.num_heads,
+            kv_heads=self.num_kv_heads,
+            d_k=self.d_k,
+            d_v=self.d_v,
+        )
 
-        tokens = batch * sequence
-        group = query_heads / kv_heads
-        projected_width = query_heads * d_k + kv_heads * d_k + kv_heads * d_v
+        tokens = s.batch * s.sequence
+        group = s.query_heads / s.kv_heads
+        projected_width = s.query_heads * s.d_k + s.kv_heads * s.d_k + s.kv_heads * s.d_v
         dtype = self.output_proj.weight.dtype
         return (
             CostRepr(
                 "packed query, key, and value projection",
                 torch.ops.aten.bmm.default,
                 {
-                    "self": TensorRepr((1, tokens, d_model), dtype),
-                    "mat2": TensorRepr((1, d_model, projected_width), dtype),
+                    "self": TensorRepr((1, tokens, s.d_model), dtype),
+                    "mat2": TensorRepr((1, s.d_model, projected_width), dtype),
                 },
             ),
             CostRepr(
                 "grouped query-key scores",
                 torch.ops.aten.bmm.default,
                 {
-                    "self": TensorRepr((batch * kv_heads, group * sequence, d_k), dtype),
-                    "mat2": TensorRepr((batch * kv_heads, d_k, sequence), dtype),
+                    "self": TensorRepr((s.batch * s.kv_heads, group * s.sequence, s.d_k), dtype),
+                    "mat2": TensorRepr((s.batch * s.kv_heads, s.d_k, s.sequence), dtype),
                 },
             ),
             CostRepr(
                 "grouped attention-value product",
                 torch.ops.aten.bmm.default,
                 {
-                    "self": TensorRepr((batch * kv_heads, group * sequence, sequence), dtype),
-                    "mat2": TensorRepr((batch * kv_heads, sequence, d_v), dtype),
+                    "self": TensorRepr((s.batch * s.kv_heads, group * s.sequence, s.sequence), dtype),
+                    "mat2": TensorRepr((s.batch * s.kv_heads, s.sequence, s.d_v), dtype),
                 },
             ),
         )
 
     def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
-        """Bind the output projection and retain optional RoPE as a child."""
-        batch = scope.symbol("batch")
-        sequence = scope.symbol("sequence")
-        query_heads = scope.symbol("query_heads", self.num_heads)
-        d_v = scope.symbol("d_v", self.d_v)
-        d_model = scope.symbol("d_model", self.d_model)
+        """Pass dimensions to the output projection and retain optional RoPE."""
+        s = scope.symbols
+        s.unbound("batch", "sequence")
+        s.bind(query_heads=self.num_heads, d_v=self.d_v, d_model=self.d_model)
         children = [
             scope.child(
                 "output_proj",
                 self.output_proj,
-                bindings={
-                    "tokens": batch * sequence,
-                    "d_in": query_heads * d_v,
-                    "d_out": d_model,
+                arguments={
+                    "tokens": s.batch * s.sequence,
+                    "d_in": s.query_heads * s.d_v,
+                    "d_out": s.d_model,
                 },
             )
         ]

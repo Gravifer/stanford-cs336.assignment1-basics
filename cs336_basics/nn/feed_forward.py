@@ -219,25 +219,25 @@ class SwiGLU_delegate(Module):
         return ()
 
     def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
-        """Bind all delegated projections to one SwiGLU invocation shape."""
-        tokens = scope.symbol("tokens")
-        d_model = scope.symbol("d_model", self.d_model)
-        d_ff = scope.symbol("d_ff", self.d_ff)
+        """Pass one SwiGLU invocation shape to all delegated projections."""
+        s = scope.symbols
+        s.unbound("tokens")
+        s.bind(d_model=self.d_model, d_ff=self.d_ff)
         return (
             scope.child(
                 "value_linear",
                 self.value_linear,
-                bindings={"tokens": tokens, "d_in": d_model, "d_out": d_ff},
+                arguments={"tokens": s.tokens, "d_in": s.d_model, "d_out": s.d_ff},
             ),
             scope.child(
                 "gate_linear",
                 self.gate_linear,
-                bindings={"tokens": tokens, "d_in": d_model, "d_out": d_ff},
+                arguments={"tokens": s.tokens, "d_in": s.d_model, "d_out": s.d_ff},
             ),
             scope.child(
                 "out_linear",
                 self.out_linear,
-                bindings={"tokens": tokens, "d_in": d_ff, "d_out": d_model},
+                arguments={"tokens": s.tokens, "d_in": s.d_ff, "d_out": s.d_model},
             ),
         )
 
@@ -314,13 +314,13 @@ class SwiGLU_own_weights(Module):
 
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Describe the three independently stored SwiGLU projections."""
-        tokens = scope.symbol("tokens")
-        d_model = scope.symbol("d_model", self.d_model)
-        d_ff = scope.symbol("d_ff", self.d_ff)
+        s = scope.symbols
+        s.unbound("tokens")
+        s.bind(d_model=self.d_model, d_ff=self.d_ff)
         return (
-            _projection_cost("SwiGLU value projection", tokens, d_model, d_ff, self.value_weight.dtype),
-            _projection_cost("SwiGLU gate projection", tokens, d_model, d_ff, self.gate_weight.dtype),
-            _projection_cost("SwiGLU output projection", tokens, d_ff, d_model, self.out_weight.dtype),
+            _projection_cost("SwiGLU value projection", s.tokens, s.d_model, s.d_ff, self.value_weight.dtype),
+            _projection_cost("SwiGLU gate projection", s.tokens, s.d_model, s.d_ff, self.gate_weight.dtype),
+            _projection_cost("SwiGLU output projection", s.tokens, s.d_ff, s.d_model, self.out_weight.dtype),
         )
 
     def extra_repr(self) -> str:
@@ -393,18 +393,18 @@ class SwiGLU_packed_input(Module):
 
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Describe the packed gate/value and output projections."""
-        tokens = scope.symbol("tokens")
-        d_model = scope.symbol("d_model", self.d_model)
-        d_ff = scope.symbol("d_ff", self.d_ff)
+        s = scope.symbols
+        s.unbound("tokens")
+        s.bind(d_model=self.d_model, d_ff=self.d_ff)
         return (
             _projection_cost(
                 "SwiGLU packed gate/value projection",
-                tokens,
-                d_model,
-                2 * d_ff,
+                s.tokens,
+                s.d_model,
+                2 * s.d_ff,
                 self.in_weight.dtype,
             ),
-            _projection_cost("SwiGLU output projection", tokens, d_ff, d_model, self.out_weight.dtype),
+            _projection_cost("SwiGLU output projection", s.tokens, s.d_ff, s.d_model, self.out_weight.dtype),
         )
 
     def extra_repr(self) -> str:

@@ -493,16 +493,16 @@ class Linear(Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
 
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Describe the backend contraction used by this linear projection."""
-        tokens = scope.symbol("tokens")
-        d_in = scope.symbol("d_in", self.in_features)
-        d_out = scope.symbol("d_out", self.out_features)
+        s = scope.symbols
+        s.unbound("tokens")
+        s.bind(d_in=self.in_features, d_out=self.out_features)
         return (
             CostRepr(
                 name="linear projection",
                 operation=torch.ops.aten.bmm.default,
                 arguments={
-                    "self": TensorRepr((1, tokens, d_in), self.weight.dtype),
-                    "mat2": TensorRepr((1, d_in, d_out), self.weight.dtype),
+                    "self": TensorRepr((1, s.tokens, s.d_in), self.weight.dtype),
+                    "mat2": TensorRepr((1, s.d_in, s.d_out), self.weight.dtype),
                 },
             ),
         )

@@ -60,16 +60,16 @@ class GPTDecoderLayer(Module):
             return ()
 
         def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
-            """Bind self-attention to this sublayer's invocation shape."""
-            batch = scope.symbol("batch")
-            sequence = scope.symbol("sequence")
-            d_model = scope.symbol("d_model", self.update.d_model)
+            """Pass this sublayer's invocation shape to self-attention."""
+            s = scope.symbols
+            s.unbound("batch", "sequence")
+            s.bind(d_model=self.update.d_model)
             return (
                 scope.child("norm", self.norm),
                 scope.child(
                     "update",
                     self.update,
-                    bindings={"batch": batch, "sequence": sequence, "d_model": d_model},
+                    arguments={"batch": s.batch, "sequence": s.sequence, "d_model": s.d_model},
                 ),
             )
 
@@ -92,16 +92,20 @@ class GPTDecoderLayer(Module):
             return ()
 
         def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
-            """Bind SwiGLU to this sublayer's invocation shape."""
-            batch = scope.symbol("batch")
-            sequence = scope.symbol("sequence")
-            d_model = scope.symbol("d_model", self.update.d_model)
+            """Pass this sublayer's invocation shape to SwiGLU."""
+            s = scope.symbols
+            s.unbound("batch", "sequence")
+            s.bind(d_model=self.update.d_model)
             return (
                 scope.child("norm", self.norm),
                 scope.child(
                     "update",
                     self.update,
-                    bindings={"tokens": batch * sequence, "d_model": d_model, "d_ff": self.update.d_ff},
+                    arguments={
+                        "tokens": s.batch * s.sequence,
+                        "d_model": s.d_model,
+                        "d_ff": self.update.d_ff,
+                    },
                 ),
             )
 
@@ -153,14 +157,14 @@ class GPTDecoderLayer(Module):
         return ()
 
     def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
-        """Bind attention and feed-forward to one shared block shape."""
-        batch = scope.symbol("batch")
-        sequence = scope.symbol("sequence")
-        d_model = scope.symbol("d_model", self.attn.update.d_model)
-        bindings = {"batch": batch, "sequence": sequence, "d_model": d_model}
+        """Pass one shared block shape to attention and feed-forward."""
+        s = scope.symbols
+        s.unbound("batch", "sequence")
+        s.bind(d_model=self.attn.update.d_model)
+        arguments = {"batch": s.batch, "sequence": s.sequence, "d_model": s.d_model}
         return (
-            scope.child("attn", self.attn, bindings=bindings),
-            scope.child("ffn", self.ffn, bindings=bindings),
+            scope.child("attn", self.attn, arguments=arguments),
+            scope.child("ffn", self.ffn, arguments=arguments),
         )
 
     def _translate_course_state_dict(
@@ -250,19 +254,17 @@ class TransformerLM(Module):
 
     def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
         """Summarize identical blocks while traversing other children normally."""
-        batch = scope.symbol("batch")
-        sequence = scope.symbol("sequence")
-        d_model = scope.symbol("d_model", self.d_model)
-        num_layers = scope.symbol("num_layers", self.num_layers)
-        vocab_size = scope.symbol("vocab_size", self.vocab_size)
+        s = scope.symbols
+        s.unbound("batch", "sequence")
+        s.bind(d_model=self.d_model, num_layers=self.num_layers, vocab_size=self.vocab_size)
         children = [scope.child("token_embeddings", self.token_embeddings)]
         if self.layers:
             children.append(
                 scope.child(
                     "layers",
                     self.layers[0],
-                    repetitions=num_layers,
-                    bindings={"batch": batch, "sequence": sequence, "d_model": d_model},
+                    repetitions=s.num_layers,
+                    arguments={"batch": s.batch, "sequence": s.sequence, "d_model": s.d_model},
                 )
             )
         children.extend(
@@ -271,7 +273,7 @@ class TransformerLM(Module):
                 scope.child(
                     "lm_head",
                     self.lm_head,
-                    bindings={"tokens": batch * sequence, "d_in": d_model, "d_out": vocab_size},
+                    arguments={"tokens": s.batch * s.sequence, "d_in": s.d_model, "d_out": s.vocab_size},
                 ),
             )
         )
