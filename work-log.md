@@ -73,3 +73,6 @@ or source of repository policy.
   collector's guard ran. Direct registered-slot traversal now puts every edge through that guard. Only exact official
   `ModuleList`, `ModuleDict`, and `Sequential` types receive known-zero-local-work classification; subclasses without a
   provider remain visibly unsupported because they may override `forward`. Focused analytics: 64 passed; Ruff/`ty` clean.
+- Enforced lexical symbol scope for authored analytics. Local bindings and costs may use only identities declared by that
+  module; child arguments and repetitions may use only identities declared by their parent scope. Parent-to-child
+  identity transfer remains explicit through named arguments. Focused analytics: 68 passed; Ruff/`ty` clean.

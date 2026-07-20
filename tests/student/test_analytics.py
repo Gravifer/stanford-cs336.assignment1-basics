@@ -400,6 +400,44 @@ def test_symbol_environment_rejects_incompatible_definitions_and_cycles() -> Non
         Cyclic().cost_repr()
 
 
+@pytest.mark.parametrize("location", ["binding", "cost", "child_argument", "child_repetition"])
+def test_cost_providers_cannot_introduce_undeclared_symbol_identities(location: str) -> None:
+    foreign = sympy.Symbol("foreign", integer=True, nonnegative=True)
+
+    class ForeignSymbol(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.child = Linear(3, 4)
+
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("tokens")
+            if location == "binding":
+                s.bind(width=foreign)
+            if location == "cost":
+                return (
+                    CostRepr(
+                        "foreign projection",
+                        torch.ops.aten.bmm.default,
+                        {
+                            "self": TensorRepr((1, s.tokens, foreign)),
+                            "mat2": TensorRepr((1, foreign, 4)),
+                        },
+                    ),
+                )
+            return ()
+
+        def _cost_children(self, scope):
+            if location == "child_argument":
+                return (scope.child("child", self.child, arguments={"d_in": foreign}),)
+            if location == "child_repetition":
+                return (scope.child("child", self.child, repetitions=foreign),)
+            return ()
+
+    with pytest.raises(ValueError, match="references undeclared scoped symbols: foreign"):
+        ForeignSymbol().cost_repr()
+
+
 def test_symbolic_dimensions_and_repetitions_reject_definite_negative_values() -> None:
     with pytest.raises(ValueError, match="must be nonnegative"):
         TensorRepr((-1, 3))

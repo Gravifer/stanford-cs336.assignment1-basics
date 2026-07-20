@@ -194,6 +194,32 @@ class _CostChild:
         )
 
 
+def _metadata_free_symbols(value: Any) -> frozenset[Any]:
+    """Find SymPy identities used by supported symbolic metadata containers."""
+    if isinstance(value, TensorRepr):
+        return frozenset().union(*(axis.free_symbols for axis in value.shape))
+    if isinstance(value, Mapping):
+        return frozenset().union(*(_metadata_free_symbols(item) for item in value.values()))
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return frozenset().union(*(_metadata_free_symbols(item) for item in value))
+    return frozenset(getattr(value, "free_symbols", ()))
+
+
+def _require_local_symbols(
+    module: nn.Module,
+    local_symbols: frozenset[Any],
+    value: Any,
+    description: str,
+) -> None:
+    """Reject symbolic identities that were not declared by this module scope."""
+    foreign = _metadata_free_symbols(value) - local_symbols
+    if foreign:
+        names = ", ".join(sorted(map(str, foreign)))
+        raise ValueError(
+            f"{type(module).__qualname__} {description} references undeclared scoped symbols: {names}"
+        )
+
+
 _RESERVED_SYMBOL_NAMES = frozenset(
     {
         "bind",
@@ -512,6 +538,17 @@ def _collect_cost_tree(
         raise ValueError(f"{type(module).__qualname__} describes duplicate directed cost child names")
 
     symbol_records = scope.symbols._freeze()
+    local_symbols = frozenset(record.symbol for record in symbol_records)
+    for record in symbol_records:
+        if record.binding is not None:
+            _require_local_symbols(module, local_symbols, record.binding, f"binding for {record.local_name!r}")
+    for cost in costs:
+        _require_local_symbols(module, local_symbols, cost.arguments, f"cost {cost.name!r}")
+        _require_local_symbols(module, local_symbols, cost.repetitions, f"cost {cost.name!r} repetitions")
+    for child_spec in child_specs:
+        _require_local_symbols(module, local_symbols, child_spec.arguments, f"child {child_spec.name!r} arguments")
+        _require_local_symbols(module, local_symbols, child_spec.repetitions, f"child {child_spec.name!r} repetitions")
+
     by_name = {record.local_name: record.symbol for record in symbol_records}
     arguments: dict[Any, Any] = {}
     if parent_arguments:
