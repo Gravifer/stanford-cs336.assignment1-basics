@@ -159,6 +159,25 @@ def test_cost_repr_requires_exact_overload_and_schema_arguments() -> None:
         CostRepr("conflict", torch.ops.aten.bmm.default, {**operands, "right": operands["mat2"]})
 
 
+def test_cost_repr_requires_symbolic_metadata_for_tensor_schema_arguments() -> None:
+    with pytest.raises(TypeError, match="must be represented by TensorRepr"):
+        CostRepr("live tensor", torch.ops.aten.sin.default, {"self": torch.empty(2, 3)})
+    with pytest.raises(TypeError, match="sequence of TensorRepr"):
+        CostRepr("not a sequence", torch.ops.aten.cat.default, {"tensors": TensorRepr((2, 3))})
+    with pytest.raises(TypeError, match="must be represented by TensorRepr"):
+        CostRepr(
+            "live tensor list",
+            torch.ops.aten.cat.default,
+            {"tensors": [TensorRepr((2, 3)), torch.empty(2, 4)]},
+        )
+    with pytest.raises(TypeError, match="rather than live torch.Tensor"):
+        CostRepr(
+            "tensor in scalar slot",
+            torch.ops.aten.cat.default,
+            {"tensors": [TensorRepr((2, 3))], "dim": torch.tensor(0)},
+        )
+
+
 def test_module_state_footprint_uses_torch_registered_state_traversal() -> None:
     class MixedState(nn.Module):
         def __init__(self) -> None:

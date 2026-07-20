@@ -43,6 +43,8 @@ def _sympy() -> Any:
 
 def _immutable_value(value: Any) -> Any:
     """Copy and freeze standard containers used in symbolic metadata."""
+    if isinstance(value, torch.Tensor):
+        raise TypeError("symbolic cost metadata must use TensorRepr rather than live torch.Tensor values")
     if isinstance(value, Mapping):
         return MappingProxyType({key: _immutable_value(item) for key, item in value.items()})
     if isinstance(value, (list, tuple)):
@@ -70,6 +72,23 @@ def _expression(value: object) -> Any:
     if expression.is_nonnegative is False:
         raise ValueError(f"cost dimensions and repetitions must be nonnegative, got {value!r}")
     return expression
+
+
+def _validate_tensor_argument(schema_type: Any, value: Any, operation: Any, name: str) -> None:
+    """Require symbolic metadata wherever an ATen schema expects tensor data."""
+    if isinstance(schema_type, torch.TensorType):
+        if not isinstance(value, TensorRepr):
+            raise TypeError(f"{operation} tensor argument {name!r} must be represented by TensorRepr")
+        return
+    if isinstance(schema_type, torch.OptionalType):
+        if value is not None:
+            _validate_tensor_argument(schema_type.getElementType(), value, operation, name)
+        return
+    if isinstance(schema_type, torch.ListType) and isinstance(schema_type.getElementType(), torch.TensorType):
+        if not isinstance(value, (list, tuple)):
+            raise TypeError(f"{operation} tensor-list argument {name!r} must be a sequence of TensorRepr values")
+        for item in value:
+            _validate_tensor_argument(schema_type.getElementType(), item, operation, name)
 
 
 @dataclass(frozen=True)
@@ -144,6 +163,8 @@ class CostRepr:
         if missing:
             names = ", ".join(sorted(missing))
             raise ValueError(f"{self.operation} requires schema arguments: {names}")
+        for name, value in arguments.items():
+            _validate_tensor_argument(schema_arguments[name].type, value, self.operation, name)
 
         object.__setattr__(self, "arguments", _immutable_mapping(arguments))
         object.__setattr__(self, "repetitions", _expression(self.repetitions))
