@@ -1,6 +1,7 @@
 """Core neural-network modules used by the course implementations."""
 
 from collections.abc import Callable, Iterable, Mapping
+from math import prod
 from typing import Any, Never, NoReturn, cast
 
 import einx
@@ -526,6 +527,21 @@ class Linear(Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
                 },
             ),
         )
+
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]:
+        """Bind the product of mapped input axes as the logical token count."""
+        del output
+        x = args[0] if args else kwargs["x"]
+        if not isinstance(x, torch.Tensor):
+            raise TypeError("Linear cost observation requires a tensor with a feature axis")
+        if x.ndim < 1:
+            raise ValueError("Linear cost observation requires a feature axis")
+        return {"tokens": prod(x.shape[:-1], start=1)}
 
     def extra_repr(self) -> str:
         """Return input/output widths and the bias-free contract for module repr."""

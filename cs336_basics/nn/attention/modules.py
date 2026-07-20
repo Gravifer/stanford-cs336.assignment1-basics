@@ -1,5 +1,7 @@
 """Multi-head, grouped-query, and multi-query attention modules."""
 
+from collections.abc import Mapping
+from math import prod
 from typing import Any, Literal, overload
 
 import einx
@@ -949,6 +951,24 @@ class MultiheadSelfAttention(MultiheadAttention):
                 },
             ),
         )
+
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]:
+        """Bind flattened batch and sequence axes from one self-attention call."""
+        del output
+        x = args[0] if args else kwargs["x"]
+        if not isinstance(x, torch.Tensor):
+            raise TypeError("self-attention cost observation requires sequence-feature tensor input")
+        if x.ndim < 2:
+            raise ValueError("self-attention cost observation requires sequence and feature axes")
+        return {
+            "batch": prod(x.shape[:-2], start=1),
+            "sequence": x.shape[-2],
+        }
 
     def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
         """Pass dimensions to the output projection and retain optional RoPE."""

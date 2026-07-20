@@ -1431,6 +1431,71 @@ def test_transformer_lm_observer_binds_positional_and_keyword_call_shapes() -> N
     assert sum(report.bound_total for report in reports) == counter.get_total_flops()
 
 
+@pytest.mark.parametrize(
+    ("factory", "input_shape"),
+    [
+        (lambda: Linear(4, 5, device=torch.device("meta")), (2, 3, 4)),
+        (lambda: SwiGLU_delegate(4, 7, device=torch.device("meta")), (2, 3, 4)),
+        (lambda: SwiGLU_own_weights(4, 7, device=torch.device("meta")), (2, 3, 4)),
+        (lambda: SwiGLU_packed_input(4, 7, device=torch.device("meta")), (2, 3, 4)),
+        (
+            lambda: MultiheadSelfAttention(
+                d_model=4,
+                num_heads=2,
+                d_k=2,
+                d_v=3,
+                device=torch.device("meta"),
+            ),
+            (2, 3, 5, 4),
+        ),
+        (
+            lambda: GPTDecoderLayer(
+                d_model=4,
+                num_heads=2,
+                d_ff=7,
+                max_seq_len=8,
+                theta=10_000.0,
+                device=torch.device("meta"),
+            ),
+            (2, 3, 5, 4),
+        ),
+        (
+            lambda: GPTDecoderLayer(
+                d_model=4,
+                num_heads=2,
+                d_ff=7,
+                max_seq_len=8,
+                theta=10_000.0,
+                device=torch.device("meta"),
+            ).attn,
+            (2, 3, 5, 4),
+        ),
+        (
+            lambda: GPTDecoderLayer(
+                d_model=4,
+                num_heads=2,
+                d_ff=7,
+                max_seq_len=8,
+                theta=10_000.0,
+                device=torch.device("meta"),
+            ).ffn,
+            (2, 3, 5, 4),
+        ),
+    ],
+)
+def test_core_module_observers_bind_interface_axes_and_match_flop_counter(factory, input_shape) -> None:
+    module = factory()
+    observer = module.observe_costs()
+    counter = FlopCounterMode(display=False)
+
+    with observer, counter:
+        module(x=torch.empty(input_shape, device="meta"))
+
+    report, = observer.matmul_flops(strict=True)
+    assert report.bound_total.is_Integer
+    assert report.bound_total == counter.get_total_flops()
+
+
 def test_transformer_lm_folding_rejects_layer_count_drift() -> None:
     model = TransformerLM(17, 8, 8, 2, 4, 12, 10_000.0, device=torch.device("meta"))
     model.num_layers = 3

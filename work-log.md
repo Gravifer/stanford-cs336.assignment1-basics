@@ -121,3 +121,6 @@ or source of repository policy.
 - Added the first concrete invocation binding at the model interface. `TransformerLM` maps all leading token-ID axes to
   flattened `batch` and the final axis to `sequence`; positional and keyword meta forwards produce separate fully bound
   reports whose combined total matches Torch's observed FLOP counter.
+- Extended the same interface-local binding to direct `Linear`, all three SwiGLU representations, self-attention, and
+  decoder-layer roots. Multi-axis meta calls for each now resolve their authored symbols and agree with Torch's FLOP
+  counter without recursive runtime tracing.

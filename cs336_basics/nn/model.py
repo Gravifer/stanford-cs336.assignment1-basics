@@ -26,6 +26,24 @@ type TokenIndices = Int[torch.Tensor, "*batch sequence_length"]
 type Logits = Float[torch.Tensor, "*batch sequence_length vocab_size"]
 
 
+def _activation_call_bindings(
+    args: tuple[Any, ...],
+    kwargs: Mapping[str, Any],
+    output: Any,
+) -> Mapping[str, Any]:
+    """Bind flattened batch and sequence axes from model activations."""
+    del output
+    x = args[0] if args else kwargs["x"]
+    if not isinstance(x, torch.Tensor):
+        raise TypeError("decoder cost observation requires sequence-feature tensor input")
+    if x.ndim < 2:
+        raise ValueError("decoder cost observation requires sequence and feature axes")
+    return {
+        "batch": prod(x.shape[:-2], start=1),
+        "sequence": x.shape[-2],
+    }
+
+
 _COURSE_BLOCK_KEY_TRANSLATION = {
     "ln1.weight": "attn.norm.weight",
     "attn.q_proj.weight": "attn.update.q_proj.weight",
@@ -59,6 +77,15 @@ class GPTDecoderLayer(Module):
             """Classify residual addition and delegate normalized attention."""
             return ()
 
+        def _cost_call_bindings(
+            self,
+            args: tuple[Any, ...],
+            kwargs: Mapping[str, Any],
+            output: Any,
+        ) -> Mapping[str, Any]:
+            """Bind this sublayer's activation batch and sequence axes."""
+            return _activation_call_bindings(args, kwargs, output)
+
         def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
             """Pass this sublayer's invocation shape to self-attention."""
             s = scope.symbols
@@ -89,6 +116,15 @@ class GPTDecoderLayer(Module):
         def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
             """Classify residual addition and delegate normalized SwiGLU."""
             return ()
+
+        def _cost_call_bindings(
+            self,
+            args: tuple[Any, ...],
+            kwargs: Mapping[str, Any],
+            output: Any,
+        ) -> Mapping[str, Any]:
+            """Bind this sublayer's activation batch and sequence axes."""
+            return _activation_call_bindings(args, kwargs, output)
 
         def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
             """Pass this sublayer's invocation shape to SwiGLU."""
@@ -189,6 +225,15 @@ class GPTDecoderLayer(Module):
     def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
         """Classify block orchestration and delegate its two sublayers."""
         return ()
+
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]:
+        """Bind this layer's activation batch and sequence axes."""
+        return _activation_call_bindings(args, kwargs, output)
 
     def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
         """Pass one shared block shape to attention and feed-forward."""
