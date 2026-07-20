@@ -131,7 +131,9 @@ which tracks hints, constraints, guards, and symbol provenance. This is substant
 
 That machinery is appropriate for dimensions discovered while tracing tensor programs. It is less natural as the
 canonical algebra for architectural quantities such as an unbound layer count. The authored representation therefore
-uses SymPy expressions directly and accepts observed `SymInt` values at its boundary. Concrete classes may import SymPy
+uses SymPy expressions directly. Concrete or backed `SymInt` values can be normalized at its boundary; a genuinely
+symbolic `ShapeEnv` identity must first be remapped into the receiving analytics scope. That remapping belongs with
+future invocation observation rather than bypassing lexical symbol identity today. Concrete classes may import SymPy
 lazily inside their own analytics hooks when their symbolic description needs it.
 
 The [`meta` device](https://docs.pytorch.org/docs/stable/meta.html) stores tensor metadata without allocating tensor data.
@@ -269,6 +271,7 @@ changing the architectural formula.
 The following are not prerequisites for the current static work:
 
 - binding call-specific variables with hooks or a context manager;
+- importing and remapping symbolic `ShapeEnv`/`SymInt` identities during observation;
 - training and backward-pass costs;
 - exact activation lifetime and peak-memory analysis;
 - public third-party extension contracts;

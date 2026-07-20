@@ -94,3 +94,5 @@ or source of repository policy.
 - Formula audit identified einx strength reduction for unit contraction axes. Preserved the architectural/course-level
   `bmm` record and documented why concrete meta `FlopCounterMode` totals diverge for those degenerate eager programs;
   added pinned Linear and packed-SwiGLU examples. Focused analytics: 83 passed; Ruff/`ty` clean.
+- Qualified the memo's `SymInt` boundary: concrete/backed values can normalize now, while genuine `ShapeEnv` identities
+  require explicit scope remapping and remain deferred with dynamic invocation observation.
