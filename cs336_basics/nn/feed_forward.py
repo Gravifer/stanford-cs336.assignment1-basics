@@ -15,6 +15,15 @@ from cs336_basics.nn.analytics import CostRepr, TensorRepr, _CostChild, _CostSco
 
 from .modules import Linear, ModelVec, Module
 
+
+__all__ = [
+    "SwiGLU",
+    "SwiGLU_delegate",
+    "SwiGLU_own_weights",
+    "SwiGLU_packed_input",
+]
+
+
 _COURSE_SWIGLU_KEY_TO_ROLE = {
     "w1.weight": "gate",
     "w2.weight": "output",

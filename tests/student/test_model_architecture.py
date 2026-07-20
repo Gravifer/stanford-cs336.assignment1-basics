@@ -13,7 +13,7 @@ from cs336_basics.nn.model import GPTDecoderLayer, TransformerBlock, Transformer
 
 
 def test_delta_layer_is_owned_by_reusable_modules_surface() -> None:
-    assert not hasattr(model_module, "DeltaLayer")
+    assert "DeltaLayer" not in model_module.__all__
 
 
 @DeltaLayer

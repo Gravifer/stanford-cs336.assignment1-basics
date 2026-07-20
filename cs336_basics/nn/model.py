@@ -9,8 +9,7 @@ from torch import nn
 from cs336_basics.nn.attention import MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.analytics import CostRepr, _CostChild, _CostScope
 from cs336_basics.nn.feed_forward import SwiGLU
-from cs336_basics.nn.modules import DeltaLayer as _DeltaLayer
-from cs336_basics.nn.modules import Embedding, Linear, Module, RMSNorm
+from cs336_basics.nn.modules import DeltaLayer, Embedding, Linear, Module, RMSNorm
 
 
 __all__ = [
@@ -41,7 +40,7 @@ _COURSE_BLOCK_KEY_TRANSLATION = {
 class GPTDecoderLayer(Module):
     """Pre-norm GPT decoder layer composed of two additive updates."""
 
-    @_DeltaLayer
+    @DeltaLayer
     class Attention(Module):
         """Normalized causal self-attention update."""
 
@@ -73,7 +72,7 @@ class GPTDecoderLayer(Module):
                 ),
             )
 
-    @_DeltaLayer
+    @DeltaLayer
     class FeedForward(Module):
         """Normalized position-wise SwiGLU update."""
 
