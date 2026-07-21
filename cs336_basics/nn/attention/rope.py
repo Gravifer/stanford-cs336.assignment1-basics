@@ -7,10 +7,12 @@ import einops
 import einx
 import torch
 from jaxtyping import Float, Int, Shaped
-from torch import nn
+
+from cs336_basics.nn.analytics import CostRepr, _CostScope
+from cs336_basics.nn.modules import Module
 
 
-class RotaryPositionalEmbedding(nn.Module):
+class RotaryPositionalEmbedding(Module):
     """RoPE for attention, with cached rotation data.
 
     Elementwise cosine/sine rotation is the default. Optional matrix-form
@@ -249,6 +251,7 @@ class RotaryPositionalEmbedding(nn.Module):
         size: int,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Share selected rotation data across a newly stacked Q/K axis."""
+
         def prepend(x: torch.Tensor) -> torch.Tensor:
             return x.unsqueeze(0).expand((size, *x.shape))
 
@@ -290,6 +293,10 @@ class RotaryPositionalEmbedding(nn.Module):
             warnings.warn("Applying RoPE to empty tensors is a no-op", stacklevel=2)
             return x
         return self._apply_rotations(x, selection, layout_strategy="head_before_sequence")
+
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...] | None:
+        """Classify default elementwise RoPE as containing no matrix products."""
+        return None if self.use_matrix_form else ()
 
     def apply_qk(
         self,

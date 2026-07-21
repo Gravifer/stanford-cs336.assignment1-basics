@@ -11,14 +11,44 @@ from torch import dtype, nn
 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
+from cs336_basics.nn.analytics import CostRepr, TensorRepr, _CostChild, _CostScope
 
-from .modules import Linear, ModelVec
+from .modules import Linear, ModelVec, Module
+
+
+__all__ = [
+    "SwiGLU",
+    "SwiGLU_delegate",
+    "SwiGLU_own_weights",
+    "SwiGLU_packed_input",
+]
+
 
 _COURSE_SWIGLU_KEY_TO_ROLE = {
     "w1.weight": "gate",
     "w2.weight": "output",
     "w3.weight": "value",
 }
+
+
+def _projection_cost(
+    name: str,
+    tokens: object,
+    d_in: object,
+    d_out: object,
+    dtype: torch.dtype,
+) -> CostRepr:
+    """Describe one bias-free projection using the repository's ATen lowering."""
+    return CostRepr(
+        name=name,
+        operation=torch.ops.aten.bmm.default,
+        arguments={
+            "self": TensorRepr((1, tokens, d_in), dtype),
+            "mat2": TensorRepr((1, d_in, d_out), dtype),
+        },
+    )
+
+
 _COURSE_SWIGLU_WARNING = (
     "loading course SwiGLU keys: w1.weight maps to gate, w2.weight maps to output, and w3.weight maps to value"
 )
@@ -141,7 +171,7 @@ def _store_logical_swiglu_weights(
         state_dict[prefix + suffixes[role]] = weight
 
 
-class SwiGLU_delegate(nn.Module):
+class SwiGLU_delegate(Module):
     """SwiGLU module made of :cls:`Linear`s and functional SiLU.
 
     Given a value tensor :math:`𝑥`,
@@ -192,6 +222,33 @@ class SwiGLU_delegate(nn.Module):
         gated: Shaped[HiddenVec, "*mapped"] = F.swiglu(value, gate)
         return self.out_linear(gated)
 
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Classify all local work as non-matmul and delegate projections."""
+        return ()
+
+    def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
+        """Pass one SwiGLU invocation shape to all delegated projections."""
+        s = scope.symbols
+        s.unbound("tokens")
+        s.bind(d_model=self.d_model, d_ff=self.d_ff)
+        return (
+            scope.child(
+                "value_linear",
+                self.value_linear,
+                arguments={"tokens": s.tokens, "d_in": s.d_model, "d_out": s.d_ff},
+            ),
+            scope.child(
+                "gate_linear",
+                self.gate_linear,
+                arguments={"tokens": s.tokens, "d_in": s.d_model, "d_out": s.d_ff},
+            ),
+            scope.child(
+                "out_linear",
+                self.out_linear,
+                arguments={"tokens": s.tokens, "d_in": s.d_ff, "d_out": s.d_model},
+            ),
+        )
+
     def extra_repr(self) -> str:
         """Return model and hidden widths for module repr."""
         return f"d_model={self.d_model}, d_ff={self.d_ff}"
@@ -211,7 +268,7 @@ class SwiGLU_delegate(nn.Module):
         _translate_swiglu_state_dict(state_dict, prefix, self.d_ff, "delegate")
 
 
-class SwiGLU_own_weights(nn.Module):
+class SwiGLU_own_weights(Module):
     """SwiGLU feed-forward layer.
 
     Given a value tensor :math:`𝑥`,
@@ -263,6 +320,17 @@ class SwiGLU_own_weights(nn.Module):
         gate = F.linear(x, self.gate_weight)
         return F.linear(F.swiglu(value, gate), self.out_weight)
 
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Describe the three independently stored SwiGLU projections."""
+        s = scope.symbols
+        s.unbound("tokens")
+        s.bind(d_model=self.d_model, d_ff=self.d_ff)
+        return (
+            _projection_cost("SwiGLU value projection", s.tokens, s.d_model, s.d_ff, self.value_weight.dtype),
+            _projection_cost("SwiGLU gate projection", s.tokens, s.d_model, s.d_ff, self.gate_weight.dtype),
+            _projection_cost("SwiGLU output projection", s.tokens, s.d_ff, s.d_model, self.out_weight.dtype),
+        )
+
     def extra_repr(self) -> str:
         """Return widths and owned-storage information for module repr."""
         return f"d_model={self.d_model}, d_ff={self.d_ff}; weights owned"
@@ -282,7 +350,7 @@ class SwiGLU_own_weights(nn.Module):
         _translate_swiglu_state_dict(state_dict, prefix, self.d_ff, "owned")
 
 
-class SwiGLU_packed_input(nn.Module):
+class SwiGLU_packed_input(Module):
     """SwiGLU feed-forward layer.
 
     Given a value tensor :math:`𝑥`,
@@ -330,6 +398,22 @@ class SwiGLU_packed_input(nn.Module):
         vg = F.linear(x, self.in_weight)
         value, gate = einx.id("mapped... (v + g) -> mapped... v, mapped... g", vg, v=self.d_ff, g=self.d_ff)
         return F.linear(F.swiglu(value, gate), self.out_weight)
+
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Describe the packed gate/value and output projections."""
+        s = scope.symbols
+        s.unbound("tokens")
+        s.bind(d_model=self.d_model, d_ff=self.d_ff)
+        return (
+            _projection_cost(
+                "SwiGLU packed gate/value projection",
+                s.tokens,
+                s.d_model,
+                2 * s.d_ff,
+                self.in_weight.dtype,
+            ),
+            _projection_cost("SwiGLU output projection", s.tokens, s.d_ff, s.d_model, self.out_weight.dtype),
+        )
 
     def extra_repr(self) -> str:
         """Return widths and packed-input storage information for module repr."""

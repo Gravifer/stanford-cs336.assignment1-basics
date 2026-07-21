@@ -1,20 +1,18 @@
 """Decoder-only Transformer language-model modules."""
 
-from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
-import einx
 import torch
 from jaxtyping import Float, Int
 from torch import nn
 
 from cs336_basics.nn.attention import MultiheadSelfAttention, RotaryPositionalEmbedding
+from cs336_basics.nn.analytics import CostRepr, _CostChild, _CostScope
 from cs336_basics.nn.feed_forward import SwiGLU
-from cs336_basics.nn.modules import Embedding, Linear, RMSNorm
+from cs336_basics.nn.modules import DeltaLayer, Embedding, Linear, Module, RMSNorm
 
 
 __all__ = [
-    "DeltaLayer",
     "GPTDecoderLayer",
     "TransformerBlock",
     "TransformerLM",
@@ -24,29 +22,6 @@ __all__ = [
 type ModelActivations = Float[torch.Tensor, "*batch sequence_length d_model"]
 type TokenIndices = Int[torch.Tensor, "*batch sequence_length"]
 type Logits = Float[torch.Tensor, "*batch sequence_length vocab_size"]
-
-
-def DeltaLayer[ModuleT: nn.Module](module_type: type[ModuleT]) -> type[ModuleT]:  # noqa: N802
-    """Turn an ordinary module forward pass into an additive layer.
-
-    The module's authored ``forward`` is exposed as ``delta``. The decorator
-    replaces the public forward pass with ``forward(x) = x + delta(x)``. It
-    introduces no wrapper module, parameters, child prefixes, or state-loading
-    behavior.
-    """
-    delta = cast(Callable[..., torch.Tensor] | None, module_type.__dict__.get("forward"))
-    if delta is None:
-        raise TypeError("a DeltaLayer must define its own forward method")
-    if "delta" in module_type.__dict__:
-        raise TypeError("a DeltaLayer cannot define delta separately from forward")
-
-    def forward(self: ModuleT, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        update = delta(self, x, *args, **kwargs)
-        return einx.add("... d_model, ... d_model -> ... d_model", x, update)
-
-    setattr(module_type, "delta", delta)
-    setattr(module_type, "forward", forward)
-    return module_type
 
 
 _COURSE_BLOCK_KEY_TRANSLATION = {
@@ -62,11 +37,11 @@ _COURSE_BLOCK_KEY_TRANSLATION = {
 }
 
 
-class GPTDecoderLayer(nn.Module):
+class GPTDecoderLayer(Module):
     """Pre-norm GPT decoder layer composed of two additive updates."""
 
     @DeltaLayer
-    class Attention(nn.Module):
+    class PrenormRoPEAttention(Module):
         """Normalized causal self-attention update."""
 
         def __init__(self, norm: RMSNorm, update: MultiheadSelfAttention) -> None:
@@ -78,8 +53,26 @@ class GPTDecoderLayer(nn.Module):
             """Compute the normalized attention update."""
             return self.update(self.norm(x))
 
+        def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+            """Classify residual addition and delegate normalized attention."""
+            return ()
+
+        def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
+            """Pass this sublayer's invocation shape to self-attention."""
+            s = scope.symbols
+            s.unbound("batch", "sequence")
+            s.bind(d_model=self.update.d_model)
+            return (
+                scope.child("norm", self.norm),
+                scope.child(
+                    "update",
+                    self.update,
+                    arguments={"batch": s.batch, "sequence": s.sequence, "d_model": s.d_model},
+                ),
+            )
+
     @DeltaLayer
-    class FeedForward(nn.Module):
+    class FeedForward(Module):
         """Normalized position-wise SwiGLU update."""
 
         def __init__(self, norm: RMSNorm, update: SwiGLU) -> None:
@@ -90,6 +83,28 @@ class GPTDecoderLayer(nn.Module):
         def forward(self, x: ModelActivations) -> ModelActivations:
             """Compute the normalized feed-forward update."""
             return self.update(self.norm(x))
+
+        def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+            """Classify residual addition and delegate normalized SwiGLU."""
+            return ()
+
+        def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
+            """Pass this sublayer's invocation shape to SwiGLU."""
+            s = scope.symbols
+            s.unbound("batch", "sequence")
+            s.bind(d_model=self.update.d_model)
+            return (
+                scope.child("norm", self.norm),
+                scope.child(
+                    "update",
+                    self.update,
+                    arguments={
+                        "tokens": s.batch * s.sequence,
+                        "d_model": s.d_model,
+                        "d_ff": self.update.d_ff,
+                    },
+                ),
+            )
 
     def __init__(
         self,
@@ -110,7 +125,7 @@ class GPTDecoderLayer(nn.Module):
             raise ValueError(f"d_model ({d_model}) must be divisible by num_heads ({num_heads})")
         d_k = d_model // num_heads
 
-        self.attn = self.Attention(
+        self.attn = self.PrenormRoPEAttention(
             norm=RMSNorm(d_model, eps=norm_eps, device=device, dtype=dtype),
             update=MultiheadSelfAttention(
                 d_model=d_model,
@@ -132,6 +147,21 @@ class GPTDecoderLayer(nn.Module):
     def forward(self, x: ModelActivations) -> ModelActivations:
         """Pass the attention result directly into the feed-forward layer."""
         return self.ffn(self.attn(x))
+
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Classify block orchestration and delegate its two sublayers."""
+        return ()
+
+    def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
+        """Pass one shared block shape to attention and feed-forward."""
+        s = scope.symbols
+        s.unbound("batch", "sequence")
+        s.bind(d_model=self.attn.update.d_model)
+        arguments = {"batch": s.batch, "sequence": s.sequence, "d_model": s.d_model}
+        return (
+            scope.child("attn", self.attn, arguments=arguments),
+            scope.child("ffn", self.ffn, arguments=arguments),
+        )
 
     def _translate_course_state_dict(
         self,
@@ -162,7 +192,7 @@ class GPTDecoderLayer(nn.Module):
 TransformerBlock = GPTDecoderLayer
 
 
-class TransformerLM(nn.Module):
+class TransformerLM(Module):
     """Decoder-only Transformer language model."""
 
     def __init__(
@@ -212,3 +242,34 @@ class TransformerLM(nn.Module):
         for layer in self.layers:
             x = layer(x)
         return self.lm_head(self.ln_final(x))
+
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Classify model orchestration and delegate its numerical work."""
+        return ()
+
+    def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
+        """Summarize identical blocks while traversing other children normally."""
+        s = scope.symbols
+        s.unbound("batch", "sequence")
+        s.bind(d_model=self.d_model, num_layers=self.num_layers, vocab_size=self.vocab_size)
+        children = [scope.child("token_embeddings", self.token_embeddings)]
+        if self.layers:
+            children.append(
+                scope.child(
+                    "layers",
+                    self.layers[0],
+                    repetitions=s.num_layers,
+                    arguments={"batch": s.batch, "sequence": s.sequence, "d_model": s.d_model},
+                )
+            )
+        children.extend(
+            (
+                scope.child("ln_final", self.ln_final),
+                scope.child(
+                    "lm_head",
+                    self.lm_head,
+                    arguments={"tokens": s.batch * s.sequence, "d_in": s.d_model, "d_out": s.vocab_size},
+                ),
+            )
+        )
+        return tuple(children)

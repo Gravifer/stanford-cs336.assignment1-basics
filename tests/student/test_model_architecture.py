@@ -7,7 +7,13 @@ from typing import cast
 import torch
 from torch import nn
 
-from cs336_basics.nn.model import DeltaLayer, GPTDecoderLayer, TransformerBlock, TransformerLM
+import cs336_basics.nn.model as model_module
+from cs336_basics.nn import DeltaLayer
+from cs336_basics.nn.model import GPTDecoderLayer, TransformerBlock, TransformerLM
+
+
+def test_delta_layer_is_owned_by_reusable_modules_surface() -> None:
+    assert "DeltaLayer" not in model_module.__all__
 
 
 @DeltaLayer
@@ -49,7 +55,7 @@ def test_block_uses_nested_delta_sublayers() -> None:
     block = GPTDecoderLayer(8, 2, 16, 12, 10_000.0)
     keys = block.state_dict().keys()
 
-    assert isinstance(block.attn, GPTDecoderLayer.Attention)
+    assert isinstance(block.attn, GPTDecoderLayer.PrenormRoPEAttention)
     assert isinstance(block.ffn, GPTDecoderLayer.FeedForward)
     assert "attn.norm.weight" in keys
     assert "attn.update.in_proj_weight" in keys
