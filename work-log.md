@@ -165,3 +165,28 @@ or source of repository policy.
   Matrix policies now consume tree and caller facts first, retain unresolved batch/contraction equalities as report
   conditions, and compose through parent-shadowed child bindings. Direct aliases, caller substitutions, contradictory
   shapes, and condition deduplication are covered; unresolved broadcast disjunction remains explicitly deferred.
+- The same final review found that `DeltaLayer` preserved Torch state but erased Python runtime signature metadata.
+  Selective wrapper metadata now restores the authored signature, annotations, and qualified name while an explicit
+  additive-forward docstring avoids presenting the update-only documentation as the exposed residual behavior.
+- Post-fix broad student regression: 350 passed and 6 skipped, with only the same three intentionally disarmed SwiGLU
+  warning assertions failing. Independent review reported no remaining concrete defect in analytics composition,
+  state loading, model folding, tensor footprints, or DeltaLayer behavior.
+- A deterministic randomized meta probe varied Transformer layer count (including zero), vocabulary, width, head count,
+  feed-forward width, batch, and sequence across twelve cases. Every authored matrix total exactly matched Torch's
+  `FlopCounterMode`; the temporary probe was removed rather than retained as a randomized student test.
+- A second deterministic randomized meta probe covered sixteen MHA/GQA/MQA cases across unequal QK/value widths, both
+  retained activation layouts, optional RoPE, and one or two leading batch axes. Every authored matrix total again
+  matched `FlopCounterMode`; the temporary probe was removed.
+- Reopened the memo's PyTorch, Torch source, einx, jaxtyping, and Netlib references. The source paths and documentation
+  targets remain live; version-selector redirects are expected. No task framing or implementation log was added to the
+  memo during the link audit.
+- An independent final API audit found no defect in the `Module`/`DeltaLayer` ownership, root façade, decorator
+  transparency, nested decoder naming, or constructor boundaries. It also confirmed that Torch's nearest homogeneous
+  Transformer container deep-copies one prototype with identical initial values, unlike this model's independently
+  initialized layers, so no speculative generic stack container was introduced.
+- Re-ran the veteran `scripts/transformer_accounting.py` unchanged, then independently queried the new symbolic API on
+  its GPT-2 XL meta model. Both paths report 3,516,769,894,400 forward matrix FLOPs; the new state-footprint result also
+  matches the script's 1,640,452,800 parameters, 6,561,811,200 parameter bytes, and 12,582,912 buffer bytes exactly.
+- Built the project wheel and imported it in isolated Python mode. The artifact contains the new neural-network façade,
+  analytics, module base, and model sources; `Module` and `DeltaLayer` resolve through `nn.modules` and all sixteen root
+  façade exports survive packaging. The workspace-local wheel audit directory was removed after verification.
