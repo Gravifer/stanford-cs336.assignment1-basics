@@ -1,5 +1,6 @@
 """Tests for decoder composition and course checkpoint compatibility."""
 
+import inspect
 import warnings
 from collections.abc import Callable
 from typing import cast
@@ -14,6 +15,15 @@ from cs336_basics.nn.model import GPTDecoderLayer, TransformerBlock, Transformer
 
 def test_delta_layer_is_owned_by_reusable_modules_surface() -> None:
     assert "DeltaLayer" not in model_module.__all__
+
+
+def test_delta_layer_preserves_authored_forward_introspection() -> None:
+    module_type = GPTDecoderLayer.PrenormRoPEAttention
+    delta = getattr(module_type, "delta")
+
+    assert inspect.signature(module_type.forward) == inspect.signature(delta)
+    assert getattr(module_type.forward, "__wrapped__") is delta
+    assert module_type.forward.__doc__ == "Apply the authored update additively to the input activation."
 
 
 @DeltaLayer

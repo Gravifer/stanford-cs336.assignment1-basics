@@ -1038,27 +1038,53 @@ def _require_tensor(cost: CostRepr, name: str) -> TensorRepr:
     return operand
 
 
-def _same_dimension(left: Any, right: Any, description: str) -> None:
+def _same_dimension(
+    left: Any,
+    right: Any,
+    description: str,
+    bindings: Mapping[Any, Any],
+    relations: list[tuple[Any, Any]],
+) -> None:
+    """Require equal dimensions, retaining an unresolved symbolic condition."""
     sympy = _sympy()
-    if sympy.simplify(left - right) != 0:
+    resolved_left = _substitute(left, bindings)
+    resolved_right = _substitute(right, bindings)
+    difference = sympy.simplify(resolved_left - resolved_right)
+    if difference == 0 or difference.is_zero is True:
+        return
+    if difference.is_zero is False:
         raise ValueError(f"{description} must match, got {left} and {right}")
+    relations.append((left, right))
 
 
-def _require_expandable_to(source: tuple[Any, ...], target: tuple[Any, ...], description: str) -> None:
+def _require_expandable_to(
+    source: tuple[Any, ...],
+    target: tuple[Any, ...],
+    description: str,
+    bindings: Mapping[Any, Any],
+) -> None:
     """Require ``source`` to be provably expandable to the fixed ``target`` shape."""
     sympy = _sympy()
     if len(source) > len(target):
         raise ValueError(f"{description}: source rank exceeds target rank ({source} to {target})")
     padded_source = (sympy.Integer(1),) * (len(target) - len(source)) + source
     for source_axis, target_axis in zip(padded_source, target, strict=True):
-        if sympy.simplify(source_axis - target_axis) == 0:
+        resolved_source = _substitute(source_axis, bindings)
+        resolved_target = _substitute(target_axis, bindings)
+        if sympy.simplify(resolved_source - resolved_target) == 0:
             continue
-        if sympy.simplify(source_axis - 1) == 0:
+        if sympy.simplify(resolved_source - 1) == 0:
             continue
         raise ValueError(f"{description}: {source} cannot expand to {target}")
 
 
-def _mm_flops(cost: CostRepr, left_name: str = "self", right_name: str = "mat2") -> Any:
+def _mm_flops(
+    cost: CostRepr,
+    bindings: Mapping[Any, Any],
+    relations: list[tuple[Any, Any]],
+    left_name: str = "self",
+    right_name: str = "mat2",
+) -> Any:
     """Apply Torch's conventional dense rank-two matrix-product formula."""
     left = _require_tensor(cost, left_name)
     right = _require_tensor(cost, right_name)
@@ -1066,11 +1092,23 @@ def _mm_flops(cost: CostRepr, left_name: str = "self", right_name: str = "mat2")
         raise ValueError(f"{cost.operation} matrix operands must both be rank two")
     rows, inner = left.shape
     other_inner, columns = right.shape
-    _same_dimension(inner, other_inner, f"{cost.operation} inner dimensions")
+    _same_dimension(
+        inner,
+        other_inner,
+        f"{cost.operation} inner dimensions",
+        bindings,
+        relations,
+    )
     return cost.repetitions * rows * columns * 2 * inner
 
 
-def _bmm_flops(cost: CostRepr, left_name: str = "self", right_name: str = "mat2") -> Any:
+def _bmm_flops(
+    cost: CostRepr,
+    bindings: Mapping[Any, Any],
+    relations: list[tuple[Any, Any]],
+    left_name: str = "self",
+    right_name: str = "mat2",
+) -> Any:
     """Apply Torch's conventional dense rank-three batched-product formula."""
     left = _require_tensor(cost, left_name)
     right = _require_tensor(cost, right_name)
@@ -1078,31 +1116,57 @@ def _bmm_flops(cost: CostRepr, left_name: str = "self", right_name: str = "mat2"
         raise ValueError(f"{cost.operation} batch-matrix operands must both be rank three")
     batch, rows, inner = left.shape
     other_batch, other_inner, columns = right.shape
-    _same_dimension(batch, other_batch, f"{cost.operation} batch dimensions")
-    _same_dimension(inner, other_inner, f"{cost.operation} inner dimensions")
+    _same_dimension(
+        batch,
+        other_batch,
+        f"{cost.operation} batch dimensions",
+        bindings,
+        relations,
+    )
+    _same_dimension(
+        inner,
+        other_inner,
+        f"{cost.operation} inner dimensions",
+        bindings,
+        relations,
+    )
     return cost.repetitions * batch * rows * columns * 2 * inner
 
 
-def _addmm_flops(cost: CostRepr) -> Any:
+def _addmm_flops(
+    cost: CostRepr,
+    bindings: Mapping[Any, Any],
+    relations: list[tuple[Any, Any]],
+) -> Any:
     """Count only the matrix product in an ``addmm`` invocation."""
     addend = _require_tensor(cost, "self")
     left = _require_tensor(cost, "mat1")
     right = _require_tensor(cost, "mat2")
-    flops = _mm_flops(cost, "mat1", "mat2")
-    _require_expandable_to(addend.shape, (left.shape[0], right.shape[1]), "aten.addmm addend")
+    flops = _mm_flops(cost, bindings, relations, "mat1", "mat2")
+    _require_expandable_to(
+        addend.shape,
+        (left.shape[0], right.shape[1]),
+        "aten.addmm addend",
+        bindings,
+    )
     return flops
 
 
-def _baddbmm_flops(cost: CostRepr) -> Any:
+def _baddbmm_flops(
+    cost: CostRepr,
+    bindings: Mapping[Any, Any],
+    relations: list[tuple[Any, Any]],
+) -> Any:
     """Count only the batched matrix products in a ``baddbmm`` invocation."""
     addend = _require_tensor(cost, "self")
     left = _require_tensor(cost, "batch1")
     right = _require_tensor(cost, "batch2")
-    flops = _bmm_flops(cost, "batch1", "batch2")
+    flops = _bmm_flops(cost, bindings, relations, "batch1", "batch2")
     _require_expandable_to(
         addend.shape,
         (left.shape[0], left.shape[1], right.shape[2]),
         "aten.baddbmm addend",
+        bindings,
     )
     return flops
 
@@ -1224,7 +1288,7 @@ def _validate_relations(relations: Iterable[tuple[Any, Any]], definitions: Mappi
         if difference.is_zero is False:
             raise ValueError(f"symbolic facts are inconsistent: {resolved_left} != {resolved_right}")
         unresolved.append(sympy.Eq(resolved_left, resolved_right, evaluate=False))
-    return tuple(unresolved)
+    return tuple(dict.fromkeys(unresolved))
 
 
 def matmul_flops(
@@ -1245,6 +1309,11 @@ def matmul_flops(
     terms: list[CostTerm] = []
     unsupported: list[str] = []
 
+    bindings, relations, known_symbols = _tree_facts(tree, call_edges_only=True)
+    if substitutions:
+        _add_substitutions(bindings, relations, substitutions, known_symbols)
+    domains = _tree_domains(tree, call_edges_only=True)
+    _validate_domains(domains, bindings)
     def visit(node: CostTree, path: str, repetition: Any) -> None:
         if node.edge_role == "inventory":
             return
@@ -1255,22 +1324,17 @@ def matmul_flops(
             if policy is None:
                 unsupported.append(f"{path}: no matmul policy for {cost.operation} ({cost.name})")
                 continue
-            expression = sympy.expand(effective_repetition * policy(cost))
+            expression = sympy.expand(effective_repetition * policy(cost, bindings, relations))
             terms.append(CostTerm(path, cost, expression))
         for child in node.children:
             visit(child, f"{path}.{child.name}", effective_repetition)
 
     visit(tree, tree.name, sympy.Integer(1))
+    conditions = _validate_relations(relations, bindings)
     if strict and unsupported:
         raise NotImplementedError("unsupported symbolic costs:\n" + "\n".join(unsupported))
 
     symbolic_total = sympy.expand(sum((term.expression for term in terms), sympy.Integer(0)))
-    bindings, relations, known_symbols = _tree_facts(tree, call_edges_only=True)
-    if substitutions:
-        _add_substitutions(bindings, relations, substitutions, known_symbols)
-    domains = _tree_domains(tree, call_edges_only=True)
-    _validate_domains(domains, bindings)
-    conditions = _validate_relations(relations, bindings)
     return CostReport(
         terms=tuple(terms),
         symbolic_total=symbolic_total,

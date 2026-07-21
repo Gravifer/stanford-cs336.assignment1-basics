@@ -288,6 +288,12 @@ Symbols are local to a module description. Two distant modules may both display 
 identical. Internally, identity-distinct SymPy symbols prevent accidental capture, while immediate parent-child
 arguments establish the identities that the model author intends.
 
+Matrix-product policies use that same constraint plane. Known architectural facts and caller substitutions are applied
+before checking batch and contraction dimensions; an equality that remains symbolic is retained as a report condition
+rather than rejected. Directional broadcasting is different: an addend axis is valid when it equals either one or the
+product axis. Until report conditions represent that disjunction, `addmm` and `baddbmm` addend expansion is accepted
+only when the existing facts prove it directly.
+
 During a module's protected cost hook, `scope.symbols` is a focused mutable view of that module's symbol table.
 `unbound()` introduces invocation dimensions, `bind()` adds instance or architectural definitions, `display()` may assign
 a distinct human-facing label, and attribute or bracket access retrieves the corresponding identity-distinct SymPy
@@ -372,7 +378,8 @@ The following are not prerequisites for the current authored and root-observed w
 - automatic repeated-block folding;
 - FX generation from the authored representation;
 - backend- and fusion-specific estimates;
-- numerical Strassen-like estimates for rectangular products.
+- numerical Strassen-like estimates for rectangular products;
+- disjunctive symbolic shape conditions such as unresolved broadcasting alternatives.
 
 The asymptotic fast-multiplication comparison remains an interesting later policy. It should not be chased before the
 ordinary symbolic representation, course convention, and Torch oracle agree.

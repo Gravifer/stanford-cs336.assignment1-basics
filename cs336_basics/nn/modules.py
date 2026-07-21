@@ -1,6 +1,7 @@
 """Core neural-network modules used by the course implementations."""
 
 from collections.abc import Callable, Iterable, Mapping
+from functools import update_wrapper
 from math import prod
 from typing import Any, Never, NoReturn, cast
 
@@ -99,6 +100,8 @@ def DeltaLayer[ModuleT: nn.Module](module_type: type[ModuleT]) -> type[ModuleT]:
         update = delta(self, x, *args, **kwargs)
         return einx.add("... d_model, ... d_model -> ... d_model", x, update)
 
+    update_wrapper(forward, delta)
+    forward.__doc__ = "Apply the authored update additively to the input activation."
     setattr(module_type, "delta", delta)
     setattr(module_type, "forward", forward)
     return module_type
