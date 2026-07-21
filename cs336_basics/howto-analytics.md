@@ -31,6 +31,10 @@ PyTorch also has a separate build-time parser in
 entries into immutable, semantic dataclasses used by code generation. Torchgen's preference for immutable records and
 lossless round trips is instructive, but Torchgen is not a runtime API on which this package should depend.
 
+Python's exact overload objects do not currently provide a comparably public schema accessor. The initial record
+validation reads `OpOverload._schema`, a narrow version-sensitive dependency kept behind the repository's pinned Torch
+version and direct schema-validation tests; it should not be mistaken for a settled third-party extension contract.
+
 An operator schema does not contain an analytical cost formula. Nor does it preserve a human reason such as "attention
 packed QKV projection." The useful division is consequently:
 
@@ -139,6 +143,11 @@ receiving analytics scope or deliberately specialized to its hint. The current b
 identities. Concrete classes may import SymPy lazily inside their own analytics hooks when their symbolic description
 needs it.
 
+An exported dynamic dimension makes the distinction observable. Its `SymInt` may have a concrete node hint from the
+example input while its node expression is a separate SymPy symbol; `sympy.sympify()` returns that symbol, not the hint.
+Range constraints likewise remain separately attached to the exported program. Importing the expression without its
+scope and constraints would therefore lose provenance even for a backed value.
+
 The [`meta` device](https://docs.pytorch.org/docs/stable/meta.html) stores tensor metadata without allocating tensor data.
 Most operations can produce meta outputs with the shapes, strides, and dtypes that real execution would have produced,
 but no numerical result exists and data-dependent operations such as `item()` cannot succeed. This makes a GPT-scale
@@ -164,16 +173,26 @@ useful quantities differ:
 | one tensor footprint | `numel * element_size` for a known logical tensor | real, fake, or meta tensor metadata |
 | operator allocation traffic | bytes allocated or released by individual executed operators | [`torch.profiler`](https://docs.pytorch.org/tutorials/recipes/recipes/profiler_recipe.html) with `profile_memory=True` |
 | saved-for-backward tensors | tensors autograd explicitly packs for a later backward | [`saved_tensors_hooks`](https://docs.pytorch.org/docs/stable/notes/autograd.html#hooks-for-saved-tensors) |
-| allocator peak | maximum PyTorch tensor bytes allocated on one concrete allocator/device run | [`max_memory_allocated`](https://docs.pytorch.org/docs/stable/generated/torch.cuda.max_memory_allocated.html) after resetting peak statistics |
+| allocator peak | maximum bytes reported as occupied by PyTorch's allocator on one concrete device run | [`max_memory_allocated`](https://docs.pytorch.org/docs/stable/generated/torch.cuda.max_memory_allocated.html) after resetting peak statistics |
 
 Here registered state means all tensors registered as parameters or buffers. It includes nonpersistent buffers that
 `state_dict()` deliberately omits, so it is not synonymous with serialized checkpoint state.
+
+For one symbolic operand, `TensorRepr.numel` is the product of its logical shape and
+`TensorRepr.logical_nbytes` additionally multiplies by the known dtype size. The latter is `None` when dtype is unknown.
+These intrinsic values deliberately do not aggregate operands or claim that a tensor is materialized, retained,
+nonaliasing, or simultaneously live with any other tensor.
 
 The sum of operator output sizes is not generally any of these. An output may alias an input, be a view, be released
 before a later output exists, remain live because the caller retains it, or be saved specifically for backward. The CUDA
 allocator may also round requests, cache freed blocks, and report allocated versus reserved bytes separately. The
 profiler records allocation and release events, then its tables attribute or aggregate their memory effects across
 executed operators; those tables are not by themselves an architectural peak formula.
+
+Allocator observations can also include library workspaces rather than model tensors. In particular, Torch's
+[CUDA semantics](https://docs.pytorch.org/docs/stable/notes/cuda.html#cublas-workspaces) explain that cuBLAS workspaces
+are allocated per handle-and-stream combination and retained for reuse. A stable allocation left after an output is
+released is therefore not sufficient evidence of a retained activation or a leak.
 
 Meta and fake tensors can supply logical shapes and dtypes, so their tensor footprints remain meaningful. They allocate
 no ordinary tensor storage and therefore cannot validate an allocator peak. Conversely, a concrete CUDA peak is useful
@@ -198,6 +217,9 @@ transport future invocation information; the provider need not reinvent executio
 Container registration is not always execution. `Sequential` defines a chained forward and can be interpreted directly;
 `ModuleList` and `ModuleDict` only register slots. Their children may be displayed as an inventory, but a strict static
 cost report remains unresolved until an authored parent states which slots are invoked and with what repetition.
+Inventory edges remain inspectable in the cost tree but do not contribute terms to an execution report. The same
+conservative default applies to registered children of the repository's base `Module`: a concrete delegating module must
+use `scope.child(...)` to identify actual calls.
 
 [`torch.fx`](https://docs.pytorch.org/docs/stable/fx.html) represents executable dataflow as a graph of calls and values.
 [`torch.export`](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/export.html) captures an ahead-of-time
@@ -272,10 +294,12 @@ a distinct human-facing label, and attribute or bracket access retrieves the cor
 symbols. Collection then freezes that builder into immutable records carrying a local name, a display name, the unique
 symbolic identity, and an optional local binding; the mutable view does not escape into the resulting cost tree.
 
-A parent's `scope.child(..., arguments=...)` mapping supplies expressions for the child's formal local symbols. These
-arguments do not overwrite definitions contributed by the child instance. Instead, both facts are retained as an
-equality: a definitely false equality is rejected, while one that still contains unbound symbols appears in the cost
-report as a condition. Caller substitutions are additional facts under the same rule rather than mutable overrides.
+A parent's `scope.child(..., arguments=...)` mapping declares a call edge and supplies expressions for the child's formal
+local symbols. These arguments do not overwrite definitions contributed by the child instance. Instead, both facts are
+retained as an equality: a definitely false equality is rejected, while one that still contains unbound symbols appears
+in the cost report as a condition. Caller substitutions are additional facts under the same rule rather than mutable
+overrides. Registration-only inventory uses a distinct edge role, preserving structure without assigning one fictional
+invocation to every slot.
 
 Call-specific facts can be supplied by a root observation session without changing the authored tree:
 
@@ -302,12 +326,13 @@ forward-hook completion order. The session is single-use and not thread-safe, so
 or report generation. It is deliberately a root-binding facility, not yet a recursive runtime trace: static authored
 parent-child arguments continue to propagate the root facts through a Transformer model.
 
-The model author also owns recursion policy. Ordinary modules contribute only their local work and delegate to their
-children. A repeated Transformer stack may deliberately describe one representative block with symbolic `num_layers`
-repetition and avoid traversing the remaining concrete blocks; embeddings, final normalization, and logit emission are
-still traversed normally. Such authored folding must validate that the concrete layer count and cost-driving
-configuration still match the representative; independently initialized parameter values and cost-irrelevant buffer
-capacity need not match. Automatically discovering and folding repeated siblings is a separate presentation problem.
+The model author also owns recursion policy. Ordinary modules contribute only their local work; modules that actually
+delegate computation author call edges to the relevant children. A repeated Transformer stack may deliberately describe
+one representative block with symbolic `num_layers` repetition and avoid traversing the remaining concrete blocks;
+embeddings, final normalization, and logit emission are still traversed normally. Such authored folding must validate
+that the concrete layer count and cost-driving configuration still match the representative; independently initialized
+parameter values and cost-irrelevant buffer capacity need not match. Automatically discovering and folding repeated
+siblings is a separate presentation problem.
 
 The first representation is matmul-focused. Concrete parameter and buffer counts already come from Torch's module
 introspection. A unified resource record should not be introduced until at least an ordinary parameter, the RoPE

@@ -10,6 +10,7 @@ from torch import nn
 from torch.utils.flop_counter import FlopCounterMode
 
 import cs336_basics.nn.analytics as analytics
+import cs336_basics.nn.modules as module_impl
 from cs336_basics.nn import DeltaLayer, Module
 from cs336_basics.nn.analytics import (
     CostObserver,
@@ -26,8 +27,7 @@ from cs336_basics.nn.analytics import (
 from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
 from cs336_basics.nn.model import GPTDecoderLayer, TransformerLM
-from cs336_basics.nn.modules import DeltaLayer as ModulesDeltaLayer
-from cs336_basics.nn.modules import Linear, Module as ModulesModule
+from cs336_basics.nn.modules import Linear
 
 
 def _tensor(value: object) -> TensorRepr:
@@ -41,8 +41,8 @@ def test_repository_module_base_preserves_torch_identity() -> None:
     assert isinstance(linear, Module)
     assert isinstance(linear, nn.Module)
     assert linear.state_dict().keys() == {"weight"}
-    assert Module is ModulesModule
-    assert DeltaLayer is ModulesDeltaLayer
+    assert Module is module_impl.Module
+    assert DeltaLayer is module_impl.DeltaLayer
     assert not hasattr(analytics, "Module")
 
 
@@ -137,6 +137,23 @@ def test_cost_observer_lifecycle_and_hook_isolation() -> None:
         observer.__enter__()
 
 
+def test_cost_observer_preserves_native_state_loading_and_assignment() -> None:
+    module = Linear(3, 4)
+    replacement = torch.full_like(module.weight, 2.0)
+    observer = module.observe_costs()
+
+    with observer:
+        assert module.state_dict().keys() == {"weight"}
+        incompatible = module.load_state_dict({"weight": replacement}, assign=True)
+        module(torch.ones((2, 3)))
+
+    assert incompatible.missing_keys == []
+    assert incompatible.unexpected_keys == []
+    assert module.weight.data_ptr() == replacement.data_ptr()
+    assert module.state_dict().keys() == {"weight"}
+    assert observer.matmul_flops(strict=True)[0].bound_total == 48
+
+
 def test_cost_observer_does_not_record_a_forward_without_output() -> None:
     class Fails(_ObservableProjection):
         def forward(self, x):
@@ -220,11 +237,12 @@ def test_structural_containers_preserve_repeated_shared_module_invocations() -> 
 
     assert tuple(child.name for child in tree.children) == ("0", "1")
     assert tree.children[0].module_type == tree.children[1].module_type == "Linear"
+    assert all(child.edge_role == "call" for child in tree.children)
     substitutions = {symbol: 5 for symbol in tree.find_symbols("tokens")}
     assert matmul_flops(tree, substitutions=substitutions, strict=True).bound_total == counter.get_total_flops()
 
 
-def test_default_module_recursion_preserves_repeated_registered_child_slots() -> None:
+def test_authored_module_recursion_preserves_repeated_registered_child_calls() -> None:
     class SharedParent(Module):
         def __init__(self) -> None:
             super().__init__()
@@ -238,6 +256,9 @@ def test_default_module_recursion_preserves_repeated_registered_child_slots() ->
         def _cost_repr(self, scope):
             return ()
 
+        def _cost_children(self, scope):
+            return (scope.child("first", self.first), scope.child("second", self.second))
+
     module = SharedParent()
     tree = module.cost_repr()
     counter = FlopCounterMode(display=False)
@@ -248,6 +269,43 @@ def test_default_module_recursion_preserves_repeated_registered_child_slots() ->
     assert tuple(child.name for child in tree.children) == ("first", "second")
     substitutions = {symbol: 5 for symbol in tree.find_symbols("tokens")}
     assert matmul_flops(tree, substitutions=substitutions, strict=True).bound_total == counter.get_total_flops()
+
+
+def test_default_module_children_are_inventory_until_calls_are_authored() -> None:
+    class RegistrationOnly(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.projection = Linear(3, 4)
+
+        def _cost_repr(self, scope):
+            return ()
+
+    tree = RegistrationOnly().cost_repr()
+    report = matmul_flops(tree, strict=True)
+
+    assert tree.children[0].edge_role == "inventory"
+    assert report.terms == ()
+    assert report.bound_total == 0
+    assert matmul_flops(tree.children[0], strict=True).bound_total == 0
+
+
+def test_unresolved_local_work_keeps_explicitly_authored_child_calls() -> None:
+    class Partial(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.projection = Linear(3, 4)
+
+        def _cost_children(self, scope):
+            return (scope.child("projection", self.projection),)
+
+    tree = Partial().cost_repr()
+    report = matmul_flops(tree)
+
+    assert tree.children[0].edge_role == "call"
+    assert len(report.terms) == 1
+    assert len(report.unsupported) == 1
+    with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
+        matmul_flops(tree, strict=True)
 
 
 def test_structural_containers_preserve_authored_slot_names() -> None:
@@ -271,8 +329,10 @@ def test_structural_container_subclasses_must_classify_custom_local_work() -> No
     tree = cost_repr(SpecializedSequential(Linear(3, 3)))
 
     assert tuple(child.name for child in tree.children) == ("0",)
+    assert tree.children[0].edge_role == "inventory"
     assert len(tree.unresolved) == 1
     assert "SpecializedSequential has no static local-cost provider" in tree.unresolved[0]
+    assert matmul_flops(tree).terms == ()
     with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
         matmul_flops(tree, strict=True)
 
@@ -286,10 +346,18 @@ def test_structural_container_subclasses_must_classify_custom_local_work() -> No
 )
 def test_registration_only_torch_containers_do_not_imply_invocation(container: nn.Module) -> None:
     tree = cost_repr(container)
+    report = matmul_flops(tree)
 
     assert len(tree.children) == 2
+    assert all(child.edge_role == "inventory" for child in tree.children)
     assert len(tree.unresolved) == 1
     assert "has no static local-cost provider" in tree.unresolved[0]
+    assert report.terms == ()
+    assert report.bound_total == 0
+    assert report.bindings == {}
+    assert report.known_symbols == frozenset()
+    with pytest.raises(ValueError, match="unknown symbolic identities"):
+        report.substitute({tree.children[0].symbols[0].symbol: 3})
     with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
         matmul_flops(tree, strict=True)
 
@@ -350,6 +418,20 @@ def test_symbolic_tensor_requires_a_torch_dtype() -> None:
         TensorRepr((2, 3), "float32")  # ty: ignore[invalid-argument-type]
 
 
+def test_symbolic_tensor_reports_only_its_intrinsic_logical_footprint() -> None:
+    tokens = sympy.Dummy("tokens", integer=True, nonnegative=True)
+    symbolic = TensorRepr((tokens, 3), torch.float16)
+    symbolic_nbytes = symbolic.logical_nbytes
+
+    assert TensorRepr((), torch.float32).numel == 1
+    assert TensorRepr((), torch.float32).logical_nbytes == 4
+    assert TensorRepr((2, 0, 7), torch.float64).numel == 0
+    assert sympy.simplify(symbolic.numel - 3 * tokens) == 0
+    assert symbolic_nbytes is not None
+    assert sympy.simplify(symbolic_nbytes - 6 * tokens) == 0
+    assert TensorRepr((tokens, 3)).logical_nbytes is None
+
+
 def test_cost_repr_requires_exact_overload_and_schema_arguments() -> None:
     operands = {
         "self": TensorRepr((1, 2, 3)),
@@ -373,6 +455,8 @@ def test_public_cost_records_reject_malformed_structure_at_the_boundary() -> Non
 
     with pytest.raises(ValueError, match="non-empty semantic name"):
         CostRepr(1, torch.ops.aten.mm.default, cost.arguments)  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValueError, match="non-empty semantic name"):
+        CostRepr(" ", torch.ops.aten.mm.default, cost.arguments)
     with pytest.raises(TypeError, match="costs must be CostRepr"):
         analytics.CostTree("tree", "Module", costs=(object(),))  # ty: ignore[invalid-argument-type]
     with pytest.raises(TypeError, match="SymPy Symbol"):
@@ -383,8 +467,16 @@ def test_public_cost_records_reject_malformed_structure_at_the_boundary() -> Non
         CostTerm("tree", cost, [])
     with pytest.raises(TypeError, match="conditions must be SymPy equalities"):
         analytics.CostReport((), 0, 0, {}, conditions=("invalid",))
+    with pytest.raises(ValueError, match="non-empty"):
+        analytics.CostReport((), 0, 0, {}, unsupported=(" ",))
     with pytest.raises(TypeError, match="expects a CostTree"):
         matmul_flops(object())  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValueError, match="edge role"):
+        analytics.CostTree("tree", "Module", edge_role="unknown")  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValueError, match="cannot carry call arguments or repetitions"):
+        analytics.CostTree("tree", "Module", repetitions=2, edge_role="inventory")
+    with pytest.raises(ValueError, match="cannot carry call arguments or repetitions"):
+        analytics._CostChild("child", nn.Identity(), arguments={"tokens": 1}, edge_role="inventory")
 
 
 def test_public_cost_trees_preserve_unambiguous_child_paths_and_symbol_scopes() -> None:
@@ -530,6 +622,55 @@ def test_module_state_footprint_uses_torch_registered_state_traversal() -> None:
         buffer_numel=7,
         buffer_bytes=21,
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("parameter_numel", True, TypeError),
+        ("parameter_bytes", 1.5, TypeError),
+        ("buffer_numel", -1, ValueError),
+    ],
+)
+def test_module_state_footprint_rejects_invalid_concrete_counts(field, value, error) -> None:
+    values = {
+        "parameter_numel": 4,
+        "parameter_bytes": 16,
+        "trainable_parameter_numel": 3,
+        "trainable_parameter_bytes": 12,
+        "buffer_numel": 2,
+        "buffer_bytes": 8,
+    }
+    values[field] = value
+
+    with pytest.raises(error):
+        ModuleStateFootprint(**values)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"parameter_numel": 17},
+        {"buffer_numel": 9},
+        {"trainable_parameter_numel": 5},
+        {"trainable_parameter_bytes": 17},
+        {"trainable_parameter_bytes": 2},
+        {"trainable_parameter_numel": 0},
+    ],
+)
+def test_module_state_footprint_rejects_inconsistent_subtotals(changes: dict[str, int]) -> None:
+    values = {
+        "parameter_numel": 4,
+        "parameter_bytes": 16,
+        "trainable_parameter_numel": 3,
+        "trainable_parameter_bytes": 12,
+        "buffer_numel": 2,
+        "buffer_bytes": 8,
+    }
+    values.update(changes)
+
+    with pytest.raises(ValueError):
+        ModuleStateFootprint(**values)
 
 
 def test_module_state_footprint_works_for_meta_models_and_rejects_nonmodules() -> None:

@@ -65,9 +65,9 @@ class Module(nn.Module):
         return None
 
     def _cost_children(self, scope: _CostScope) -> Iterable[_CostChild]:
-        """Direct symbolic collection into immediate children."""
+        """Expose registered children as inventory until a subclass authors calls."""
         return tuple(
-            scope.child(name, child) for name, child in self._modules.items() if child is not None
+            scope.inventory(name, child) for name, child in self._modules.items() if child is not None
         )
 
     def _cost_call_bindings(

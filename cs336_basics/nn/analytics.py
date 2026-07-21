@@ -6,7 +6,7 @@ import keyword
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Protocol, cast, overload, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, overload, runtime_checkable
 
 import torch
 from torch import nn
@@ -135,6 +135,22 @@ class TensorRepr:
             raise TypeError(f"tensor metadata dtype must be a torch.dtype or None, got {self.dtype!r}")
         object.__setattr__(self, "shape", tuple(_expression(axis) for axis in self.shape))
 
+    @property
+    def numel(self) -> Any:
+        """Return the symbolic number of logical elements in this tensor."""
+        return _sympy().prod(self.shape)
+
+    @property
+    def logical_nbytes(self) -> Any | None:
+        """Return logical dtype-sized bytes, or ``None`` when dtype is unknown.
+
+        This intrinsic extent does not say whether storage is materialized,
+        aliased, retained, or simultaneously live with another tensor.
+        """
+        if self.dtype is None:
+            return None
+        return self.numel * self.dtype.itemsize
+
 
 @dataclass(frozen=True)
 class SymbolRepr:
@@ -146,9 +162,9 @@ class SymbolRepr:
     binding: Any | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.local_name, str) or not self.local_name:
+        if not isinstance(self.local_name, str) or not self.local_name.strip():
             raise ValueError("a symbolic dimension requires a non-empty local name")
-        if not isinstance(self.display_name, str) or not self.display_name:
+        if not isinstance(self.display_name, str) or not self.display_name.strip():
             raise ValueError("a symbolic dimension requires a non-empty display name")
         if not isinstance(self.symbol, _sympy().Symbol):
             raise TypeError("a symbolic dimension identity must be a SymPy Symbol")
@@ -167,6 +183,36 @@ class ModuleStateFootprint:
     buffer_numel: int
     buffer_bytes: int
 
+    def __post_init__(self) -> None:
+        values = {
+            "parameter_numel": self.parameter_numel,
+            "parameter_bytes": self.parameter_bytes,
+            "trainable_parameter_numel": self.trainable_parameter_numel,
+            "trainable_parameter_bytes": self.trainable_parameter_bytes,
+            "buffer_numel": self.buffer_numel,
+            "buffer_bytes": self.buffer_bytes,
+        }
+        for name, value in values.items():
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"module state footprint {name} must be an integer")
+            if value < 0:
+                raise ValueError(f"module state footprint {name} must be nonnegative")
+        if self.parameter_bytes < self.parameter_numel or self.buffer_bytes < self.buffer_numel:
+            raise ValueError("module state footprint bytes cannot be smaller than logical element counts")
+        if self.trainable_parameter_numel > self.parameter_numel:
+            raise ValueError("trainable parameter elements cannot exceed all parameter elements")
+        if self.trainable_parameter_bytes > self.parameter_bytes:
+            raise ValueError("trainable parameter bytes cannot exceed all parameter bytes")
+        if self.trainable_parameter_bytes < self.trainable_parameter_numel:
+            raise ValueError("trainable parameter bytes cannot be smaller than trainable element counts")
+        for category, numel, byte_count in (
+            ("parameter", self.parameter_numel, self.parameter_bytes),
+            ("trainable parameter", self.trainable_parameter_numel, self.trainable_parameter_bytes),
+            ("buffer", self.buffer_numel, self.buffer_bytes),
+        ):
+            if numel == 0 and byte_count != 0:
+                raise ValueError(f"zero {category} elements must occupy zero logical bytes")
+
 
 @dataclass(frozen=True)
 class CostRepr:
@@ -178,7 +224,7 @@ class CostRepr:
     repetitions: Any = 1
 
     def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or not self.name:
+        if not isinstance(self.name, str) or not self.name.strip():
             raise ValueError("a cost representation requires a non-empty semantic name")
         if not isinstance(self.operation, torch._ops.OpOverload):
             raise TypeError("operation must be an exact torch.ops overload, such as torch.ops.aten.bmm.default")
@@ -206,21 +252,27 @@ class CostRepr:
 
 @dataclass(frozen=True)
 class _CostChild:
-    """One directed symbolic invocation of an immediate child module."""
+    """One directed symbolic relationship to an immediate child module."""
 
     name: str
     module: nn.Module
     repetitions: Any = 1
     arguments: Mapping[str, Any] = field(default_factory=dict)
+    edge_role: Literal["call", "inventory"] = "call"
 
     def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or not self.name or "." in self.name:
+        if not isinstance(self.name, str) or not self.name.strip() or "." in self.name:
             raise ValueError("a directed cost child name must be a non-empty string without dots")
         if not isinstance(self.module, nn.Module):
             raise TypeError(f"a directed cost child must be a torch.nn.Module, got {type(self.module).__qualname__}")
         if any(not isinstance(name, str) for name in self.arguments):
             raise TypeError("directed cost child argument names must be strings")
-        object.__setattr__(self, "repetitions", _expression(self.repetitions))
+        if self.edge_role not in ("call", "inventory"):
+            raise ValueError(f"unknown directed cost child edge role: {self.edge_role!r}")
+        repetitions = _expression(self.repetitions)
+        if self.edge_role == "inventory" and (self.arguments or repetitions != 1):
+            raise ValueError("inventory edges cannot carry call arguments or repetitions")
+        object.__setattr__(self, "repetitions", repetitions)
         object.__setattr__(
             self,
             "arguments",
@@ -434,8 +486,18 @@ class _CostScope:
         repetitions: Any = 1,
         arguments: Mapping[str, Any] | None = None,
     ) -> _CostChild:
-        """Pass symbolic arguments into one immediate child module."""
-        return _CostChild(name, module, repetitions, {} if arguments is None else arguments)
+        """Describe one immediate child invocation and pass its symbolic arguments."""
+        return _CostChild(
+            name,
+            module,
+            repetitions,
+            {} if arguments is None else arguments,
+            edge_role="call",
+        )
+
+    def inventory(self, name: str, module: nn.Module) -> _CostChild:
+        """Retain a registered child without claiming that the parent invokes it."""
+        return _CostChild(name, module, edge_role="inventory")
 
 
 @dataclass(frozen=True)
@@ -450,15 +512,16 @@ class CostTree:
     symbols: tuple[SymbolRepr, ...] = ()
     arguments: Mapping[Any, Any] = field(default_factory=dict)
     unresolved: tuple[str, ...] = ()
+    edge_role: Literal["call", "inventory"] = "call"
 
     def __post_init__(self) -> None:
         costs = tuple(self.costs)
         children = tuple(self.children)
         symbols = tuple(self.symbols)
         unresolved = tuple(self.unresolved)
-        if not isinstance(self.name, str) or not self.name:
+        if not isinstance(self.name, str) or not self.name.strip():
             raise ValueError("a cost tree requires a non-empty name")
-        if not isinstance(self.module_type, str) or not self.module_type:
+        if not isinstance(self.module_type, str) or not self.module_type.strip():
             raise ValueError("a cost tree requires a non-empty module type")
         if any(not isinstance(cost, CostRepr) for cost in costs):
             raise TypeError("cost tree costs must be CostRepr values")
@@ -468,6 +531,14 @@ class CostTree:
             raise TypeError("cost tree symbols must be SymbolRepr values")
         if any(not isinstance(message, str) for message in unresolved):
             raise TypeError("cost tree unresolved messages must be strings")
+        if any(not message.strip() for message in unresolved):
+            raise ValueError("cost tree unresolved messages must be non-empty")
+        if self.edge_role not in ("call", "inventory"):
+            raise ValueError(f"unknown cost tree edge role: {self.edge_role!r}")
+        repetitions = _expression(self.repetitions)
+        arguments = dict(self.arguments)
+        if self.edge_role == "inventory" and (arguments or repetitions != 1):
+            raise ValueError("inventory cost trees cannot carry call arguments or repetitions")
         child_names = tuple(child.name for child in children)
         if any("." in name for name in child_names):
             raise ValueError("cost tree child names must not contain dots")
@@ -507,13 +578,12 @@ class CostTree:
                 raise ValueError("cost tree child arguments must use parent-local identities")
             if _metadata_free_symbols(child.repetitions) - local_identity_set:
                 raise ValueError("cost tree child repetitions must use parent-local identities")
-        arguments = dict(self.arguments)
         unknown_arguments = arguments.keys() - set(identities)
         if unknown_arguments:
             raise ValueError("cost tree arguments must target locally declared symbol identities")
         object.__setattr__(self, "costs", costs)
         object.__setattr__(self, "children", children)
-        object.__setattr__(self, "repetitions", _expression(self.repetitions))
+        object.__setattr__(self, "repetitions", repetitions)
         object.__setattr__(self, "symbols", symbols)
         object.__setattr__(
             self,
@@ -544,7 +614,7 @@ class CostTerm:
     expression: Any
 
     def __post_init__(self) -> None:
-        if not isinstance(self.path, str) or not self.path:
+        if not isinstance(self.path, str) or not self.path.strip():
             raise ValueError("a cost term requires a non-empty module path")
         if not isinstance(self.source, CostRepr):
             raise TypeError("a cost term source must be CostRepr")
@@ -572,6 +642,8 @@ class CostReport:
             raise TypeError("cost report terms must be CostTerm values")
         if any(not isinstance(message, str) for message in unsupported):
             raise TypeError("cost report unsupported messages must be strings")
+        if any(not message.strip() for message in unsupported):
+            raise ValueError("cost report unsupported messages must be non-empty")
         if conditions:
             equality_type = _sympy().Equality
             if any(not isinstance(condition, equality_type) for condition in conditions):
@@ -812,6 +884,7 @@ def _collect_cost_tree(
     *,
     repetitions: Any = 1,
     parent_arguments: Mapping[str, Any] | None = None,
+    edge_role: Literal["call", "inventory"] = "call",
     ancestors: frozenset[int] = frozenset(),
 ) -> CostTree:
     module_identity = id(module)
@@ -837,8 +910,12 @@ def _collect_cost_tree(
             unresolved = (f"{type(module).__qualname__} has not classified its static local matmul work",)
     else:
         costs = ()
-        child_specs = tuple(scope.child(child_name, child) for child_name, child in _structural_children(module))
-        if type(module) not in _EXECUTING_TORCH_CONTAINERS:
+        executes_registered_slots = type(module) in _EXECUTING_TORCH_CONTAINERS
+        describe_child = scope.child if executes_registered_slots else scope.inventory
+        child_specs = tuple(
+            describe_child(child_name, child) for child_name, child in _structural_children(module)
+        )
+        if not executes_registered_slots:
             unresolved = (f"{type(module).__qualname__} has no static local-cost provider",)
 
     child_names = tuple(child_spec.name for child_spec in child_specs)
@@ -872,6 +949,7 @@ def _collect_cost_tree(
             child_spec.name,
             repetitions=child_spec.repetitions,
             parent_arguments=child_spec.arguments,
+            edge_role=child_spec.edge_role,
             ancestors=child_ancestors,
         )
         for child_spec in child_specs
@@ -886,6 +964,7 @@ def _collect_cost_tree(
         symbols=symbol_records,
         arguments=arguments,
         unresolved=unresolved,
+        edge_role=edge_role,
     )
 
 
@@ -1036,13 +1115,19 @@ _MATMUL_POLICIES = {
 }
 
 
-def _tree_facts(tree: CostTree) -> tuple[dict[Any, Any], list[tuple[Any, Any]], frozenset[Any]]:
+def _tree_facts(
+    tree: CostTree,
+    *,
+    call_edges_only: bool = False,
+) -> tuple[dict[Any, Any], list[tuple[Any, Any]], frozenset[Any]]:
     """Collect canonical definitions, consistency relations, and known identities."""
     definitions: dict[Any, Any] = {}
     relations: list[tuple[Any, Any]] = []
     known_symbols: set[Any] = set()
 
     def visit(node: CostTree) -> None:
+        if call_edges_only and node.edge_role == "inventory":
+            return
         local_bindings = dict(node.bindings)
         for record in node.symbols:
             symbol = record.symbol
@@ -1072,8 +1157,10 @@ def _metadata_dimensions(value: Any) -> tuple[Any, ...]:
     return ()
 
 
-def _tree_domains(tree: CostTree) -> tuple[Any, ...]:
+def _tree_domains(tree: CostTree, *, call_edges_only: bool = False) -> tuple[Any, ...]:
     """Collect every expression whose value is a tensor dimension or repetition."""
+    if call_edges_only and tree.edge_role == "inventory":
+        return ()
     local = [record.symbol for record in tree.symbols]
     local.extend(record.binding for record in tree.symbols if record.binding is not None)
     local.extend(tree.arguments.values())
@@ -1081,7 +1168,11 @@ def _tree_domains(tree: CostTree) -> tuple[Any, ...]:
     for cost in tree.costs:
         local.extend(_metadata_dimensions(cost.arguments))
         local.append(cost.repetitions)
-    return tuple(local) + tuple(expression for child in tree.children for expression in _tree_domains(child))
+    return tuple(local) + tuple(
+        expression
+        for child in tree.children
+        for expression in _tree_domains(child, call_edges_only=call_edges_only)
+    )
 
 
 def _validate_domains(expressions: Iterable[Any], bindings: Mapping[Any, Any]) -> None:
@@ -1142,7 +1233,12 @@ def matmul_flops(
     substitutions: Mapping[Any, Any] | None = None,
     strict: bool = False,
 ) -> CostReport:
-    """Apply the course's conventional matrix-operation FLOP policy."""
+    """Apply the course's matrix-operation policy to call edges in a cost tree.
+
+    Inventory edges remain available for structural inspection but contribute
+    no terms. With ``strict=False``, unsupported executed work is reported next
+    to the sum of supported terms; that sum is not a complete execution total.
+    """
     if not isinstance(tree, CostTree):
         raise TypeError(f"matmul_flops expects a CostTree, got {type(tree).__qualname__}")
     sympy = _sympy()
@@ -1150,6 +1246,8 @@ def matmul_flops(
     unsupported: list[str] = []
 
     def visit(node: CostTree, path: str, repetition: Any) -> None:
+        if node.edge_role == "inventory":
+            return
         effective_repetition = repetition * node.repetitions
         unsupported.extend(f"{path}: {message}" for message in node.unresolved)
         for cost in node.costs:
@@ -1167,10 +1265,10 @@ def matmul_flops(
         raise NotImplementedError("unsupported symbolic costs:\n" + "\n".join(unsupported))
 
     symbolic_total = sympy.expand(sum((term.expression for term in terms), sympy.Integer(0)))
-    bindings, relations, known_symbols = _tree_facts(tree)
+    bindings, relations, known_symbols = _tree_facts(tree, call_edges_only=True)
     if substitutions:
         _add_substitutions(bindings, relations, substitutions, known_symbols)
-    domains = _tree_domains(tree)
+    domains = _tree_domains(tree, call_edges_only=True)
     _validate_domains(domains, bindings)
     conditions = _validate_relations(relations, bindings)
     return CostReport(

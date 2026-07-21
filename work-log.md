@@ -136,3 +136,28 @@ or source of repository policy.
 - A follow-up public-API and memo audit found no code defect, but corrected five documentation boundaries: symbolic
   `SymInt` remapping, root binding versus operator observation, exact Torch overload terminology, deferred observation
   failures, and registered buffers versus serialized checkpoint state.
+- A registration-only container audit found that non-strict reports still summed every registered slot once. Directed
+  cost edges now distinguish actual calls from structural inventory; inventory remains inspectable but contributes no
+  execution terms until a model author declares the calls.
+- Tightened the new edge-role boundary: inventory cannot carry symbolic call arguments or repetitions, preventing an
+  extension provider or manually constructed public tree from smuggling invocation semantics into structural slots.
+- Added one non-aggregating tensor-footprint primitive: symbolic logical element count and optional dtype-sized bytes.
+  Its API and memo explicitly avoid activation-lifetime or allocator-peak claims.
+- Hardened the public concrete state-footprint record against negative, non-integral, and impossible byte/subset totals;
+  normal module traversal continues to produce the same values.
+- A Torch export probe confirmed that backed dynamic `SymInt` values still sympify to foreign `ShapeEnv` symbols while
+  concrete hints and range constraints remain separate. The memo records the evidence; remapping remains deferred.
+- Aligned public analytics record boundaries so whitespace-only names, paths, module types, and diagnostic messages no
+  longer satisfy their documented non-empty contracts.
+- Refined inventory semantics so ignored structural subtrees no longer leak symbols, bindings, or domain constraints
+  into execution reports; full-tree validation still checks them when the static representation is collected.
+- A concrete CUDA probe separated logical model/output bytes from allocator observations. Repeated forwards retained a
+  stable 8,519,680-byte allocation; Torch's private diagnostic clear for cuBLAS workspaces returned allocated memory
+  exactly to the pre-forward level. This confirms why allocator peaks and persistent library workspaces must not be
+  reported as activation footprints; no private CUDA API enters the package implementation.
+- Final broad student regression: 346 passed and 6 skipped. The only three failures remain the deliberately disarmed
+  SwiGLU course-key warning assertions; all analytics, model, attention, loading, adapter, and typing coverage passed.
+- Checked the homogeneous-layer container idea against Torch. Python's `TransformerEncoder` and `TransformerDecoder`
+  deep-copy one prototype through a private `_get_clones()` helper into `ModuleList`, while the public generic choices
+  remain `Sequential` and `ModuleList`. That same-initial-state policy differs from this model's independently
+  constructed layers, so no generic cloned-stack abstraction was added during the audit.
