@@ -1,6 +1,8 @@
 """SwiGLU feed-forward modules and compatible checkpoint translation."""
 
 import warnings  # noqa: F401
+from collections.abc import Mapping
+from math import prod
 from pathlib import Path
 from typing import Any, Literal
 
@@ -29,6 +31,21 @@ _COURSE_SWIGLU_KEY_TO_ROLE = {
     "w2.weight": "output",
     "w3.weight": "value",
 }
+
+
+def _swiglu_call_bindings(
+    args: tuple[Any, ...],
+    kwargs: Mapping[str, Any],
+    output: Any,
+) -> Mapping[str, Any]:
+    """Bind one SwiGLU call's mapped axes without retaining its tensors."""
+    del output
+    x = args[0] if args else kwargs["x"]
+    if not isinstance(x, torch.Tensor):
+        raise TypeError("SwiGLU cost observation requires a tensor with a model-feature axis")
+    if x.ndim < 1:
+        raise ValueError("SwiGLU cost observation requires a model-feature axis")
+    return {"tokens": prod(x.shape[:-1], start=1)}
 
 
 def _projection_cost(
@@ -226,6 +243,15 @@ class SwiGLU_delegate(Module):
         """Classify all local work as non-matmul and delegate projections."""
         return ()
 
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]:
+        """Bind mapped token axes from the feed-forward interface."""
+        return _swiglu_call_bindings(args, kwargs, output)
+
     def _cost_children(self, scope: _CostScope) -> tuple[_CostChild, ...]:
         """Pass one SwiGLU invocation shape to all delegated projections."""
         s = scope.symbols
@@ -331,6 +357,15 @@ class SwiGLU_own_weights(Module):
             _projection_cost("SwiGLU output projection", s.tokens, s.d_ff, s.d_model, self.out_weight.dtype),
         )
 
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]:
+        """Bind mapped token axes from the feed-forward interface."""
+        return _swiglu_call_bindings(args, kwargs, output)
+
     def extra_repr(self) -> str:
         """Return widths and owned-storage information for module repr."""
         return f"d_model={self.d_model}, d_ff={self.d_ff}; weights owned"
@@ -414,6 +449,15 @@ class SwiGLU_packed_input(Module):
             ),
             _projection_cost("SwiGLU output projection", s.tokens, s.d_ff, s.d_model, self.out_weight.dtype),
         )
+
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]:
+        """Bind mapped token axes from the feed-forward interface."""
+        return _swiglu_call_bindings(args, kwargs, output)
 
     def extra_repr(self) -> str:
         """Return widths and packed-input storage information for module repr."""

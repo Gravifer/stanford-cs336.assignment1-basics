@@ -1,6 +1,7 @@
 """Core neural-network modules used by the course implementations."""
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
+from math import prod
 from typing import Any, Never, NoReturn, cast
 
 import einx
@@ -16,6 +17,7 @@ from typing_extensions import deprecated  # ? ruff doesn't see that python 3.13 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
 from cs336_basics.nn.analytics import (
+    CostObserver,
     CostRepr,
     CostTree,
     ModuleStateFootprint,
@@ -24,6 +26,7 @@ from cs336_basics.nn.analytics import (
     _CostScope,
     cost_repr,
     module_state_footprint,
+    observe_costs,
 )
 
 # from .feed_forward import SwiGLU  # ! would be circular
@@ -53,6 +56,10 @@ class Module(nn.Module):
         """Return the logical footprint of registered parameters and buffers."""
         return module_state_footprint(self)
 
+    def observe_costs(self) -> CostObserver:
+        """Create a call-specific symbolic-cost observation session."""
+        return observe_costs(self)
+
     def _cost_repr(self, scope: _CostScope) -> Iterable[CostRepr] | None:
         """Return local operations, or ``None`` until local work is classified."""
         return None
@@ -62,6 +69,16 @@ class Module(nn.Module):
         return tuple(
             scope.child(name, child) for name, child in self._modules.items() if child is not None
         )
+
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]:
+        """Leave invocation dimensions symbolic unless a concrete class binds them."""
+        del args, kwargs, output
+        return {}
 
 
 def DeltaLayer[ModuleT: nn.Module](module_type: type[ModuleT]) -> type[ModuleT]:  # noqa: N802
@@ -510,6 +527,21 @@ class Linear(Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
                 },
             ),
         )
+
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]:
+        """Bind the product of mapped input axes as the logical token count."""
+        del output
+        x = args[0] if args else kwargs["x"]
+        if not isinstance(x, torch.Tensor):
+            raise TypeError("Linear cost observation requires a tensor with a feature axis")
+        if x.ndim < 1:
+            raise ValueError("Linear cost observation requires a feature axis")
+        return {"tokens": prod(x.shape[:-1], start=1)}
 
     def extra_repr(self) -> str:
         """Return input/output widths and the bias-free contract for module repr."""

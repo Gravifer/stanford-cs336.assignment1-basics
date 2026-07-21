@@ -41,9 +41,10 @@ cost policy            one interpretation of those operands
 semantic name          why this operation exists in the model
 ```
 
-Using actual ATen identities avoids creating a second, weaker operation namespace. A semantic name remains separate
-because one logical operation may lower differently across implementations, and several semantic operations may share
-the same ATen overload.
+Using exact Torch operator identities--normally ATen overloads for built-in tensor work--avoids creating a second,
+weaker operation namespace. A semantic name remains separate because one logical operation may lower differently across
+implementations, and several semantic operations may share the same operator overload. Exact custom Torch overloads can
+remain visible too, even when the initial policies do not know how to interpret them.
 
 ## Dispatch and Torch's FLOP counter
 
@@ -65,8 +66,9 @@ set under exact ATen overload identities, while meta execution under `FlopCounte
 The counter uses [`ModuleTracker`](https://github.com/pytorch/pytorch/blob/main/torch/utils/module_tracker.py) to attribute
 observed operations to fully qualified module names. The
 [`ModuleTracker` documentation](https://docs.pytorch.org/docs/stable/module_tracker.html) explicitly describes this use.
-This is strong evidence for using Torch's official hooks and tracking machinery when invocation observation is added.
-It is not a reason to install permanent analytics hooks in every module constructor.
+Root invocation binding already uses an ordinary official forward hook; any later recursive observation should likewise
+prefer Torch's tracking machinery. This is not a reason to install permanent analytics hooks in every module
+constructor.
 
 Torch's registry is intentionally incomplete. When an unregistered operation has a decomposition, the counter may enter
 that decomposition; an operation without a registered formula or usable decomposition contributes no recorded FLOPs.
@@ -131,10 +133,11 @@ which tracks hints, constraints, guards, and symbol provenance. This is substant
 
 That machinery is appropriate for dimensions discovered while tracing tensor programs. It is less natural as the
 canonical algebra for architectural quantities such as an unbound layer count. The authored representation therefore
-uses SymPy expressions directly. Concrete or backed `SymInt` values can be normalized at its boundary; a genuinely
-symbolic `ShapeEnv` identity must first be remapped into the receiving analytics scope. That remapping belongs with
-future invocation observation rather than bypassing lexical symbol identity today. Concrete classes may import SymPy
-lazily inside their own analytics hooks when their symbolic description needs it.
+uses SymPy expressions directly. Ordinary integers and SymPy-compatible constant expressions can be normalized at its
+boundary. A symbolic `ShapeEnv` identity, whether its `SymInt` is backed or unbacked, must instead be remapped into the
+receiving analytics scope or deliberately specialized to its hint. The current boundary rejects such foreign symbolic
+identities. Concrete classes may import SymPy lazily inside their own analytics hooks when their symbolic description
+needs it.
 
 The [`meta` device](https://docs.pytorch.org/docs/stable/meta.html) stores tensor metadata without allocating tensor data.
 Most operations can produce meta outputs with the shapes, strides, and dtypes that real execution would have produced,
@@ -149,6 +152,41 @@ and decompositions have overhead.
 Neither representation supplies the human semantics of an architectural formula. A meta forward answers what one
 configured model executed. It does not by itself reconstruct the family expression containing symbols such as
 `num_layers`.
+
+## Memory quantities are not interchangeable
+
+"Activation memory" is ambiguous unless the report names both the lifetime model and the execution mode. At least five
+useful quantities differ:
+
+| Quantity | What it measures | Suitable Torch evidence |
+|---|---|---|
+| registered state | logical parameter and buffer elements or dtype-sized bytes | module parameter/buffer traversal |
+| one tensor footprint | `numel * element_size` for a known logical tensor | real, fake, or meta tensor metadata |
+| operator allocation traffic | bytes allocated or released by individual executed operators | [`torch.profiler`](https://docs.pytorch.org/tutorials/recipes/recipes/profiler_recipe.html) with `profile_memory=True` |
+| saved-for-backward tensors | tensors autograd explicitly packs for a later backward | [`saved_tensors_hooks`](https://docs.pytorch.org/docs/stable/notes/autograd.html#hooks-for-saved-tensors) |
+| allocator peak | maximum PyTorch tensor bytes allocated on one concrete allocator/device run | [`max_memory_allocated`](https://docs.pytorch.org/docs/stable/generated/torch.cuda.max_memory_allocated.html) after resetting peak statistics |
+
+Here registered state means all tensors registered as parameters or buffers. It includes nonpersistent buffers that
+`state_dict()` deliberately omits, so it is not synonymous with serialized checkpoint state.
+
+The sum of operator output sizes is not generally any of these. An output may alias an input, be a view, be released
+before a later output exists, remain live because the caller retains it, or be saved specifically for backward. The CUDA
+allocator may also round requests, cache freed blocks, and report allocated versus reserved bytes separately. The
+profiler records allocation and release events, then its tables attribute or aggregate their memory effects across
+executed operators; those tables are not by themselves an architectural peak formula.
+
+Meta and fake tensors can supply logical shapes and dtypes, so their tensor footprints remain meaningful. They allocate
+no ordinary tensor storage and therefore cannot validate an allocator peak. Conversely, a concrete CUDA peak is useful
+systems evidence for one implementation, dtype, device, allocator configuration, and call shape, but it does not recover
+a symbolic family expression.
+
+Training retention is a separate plane again. Autograd saved-tensor hooks can inventory what a concrete forward saves
+for backward, but installing them can change Tensor-object packing behavior, and saved objects may share storage. They
+are an executable oracle for a later training analysis rather than a substitute for a module-authored retention formula.
+
+A symbolic peak requires an execution schedule, alias information, and liveness intervals. FX/export metadata may
+eventually provide an observed graph on which to perform that analysis. Until then, reports should keep registered state,
+logical tensor footprints, allocation traffic, saved-for-backward bytes, and allocator peaks as separately named results.
 
 ## Module structure, FX, and export
 
@@ -220,8 +258,9 @@ $$
 2 \cdot 48 \cdot B \cdot 25 \cdot S^2 \cdot 64,
 $$
 
-and finally evaluated for a particular invocation. The static declaration remains useful without running the model;
-future observation can bind it and check its chosen ATen lowering.
+and finally evaluated for a particular invocation. The static declaration remains useful without running the model.
+Root observation can bind invocation dimensions; meta execution under `FlopCounterMode`, or a later recursive operator
+observer, separately checks the selected ATen lowering.
 
 Symbols are local to a module description. Two distant modules may both display `d_model` without their variables being
 identical. Internally, identity-distinct SymPy symbols prevent accidental capture, while immediate parent-child
@@ -237,6 +276,31 @@ A parent's `scope.child(..., arguments=...)` mapping supplies expressions for th
 arguments do not overwrite definitions contributed by the child instance. Instead, both facts are retained as an
 equality: a definitely false equality is rejected, while one that still contains unbound symbols appears in the cost
 report as a condition. Caller substitutions are additional facts under the same rule rather than mutable overrides.
+
+Call-specific facts can be supplied by a root observation session without changing the authored tree:
+
+```python
+with model.observe_costs() as observation:
+    logits = model(token_ids)
+
+report, = observation.matmul_flops(strict=True)
+```
+
+The session snapshots the static tree on entry and uses an ordinary per-module Torch forward hook with keyword support.
+After each root forward reaches the hook, the concrete class maps its interface arguments to its own local symbolic
+names. `TransformerLM`, for example, binds `sequence` from the final token-ID axis and binds `batch` to the product of
+all preceding axes. The generic observer then converts those names to the root's identity-distinct symbols and applies
+the same report policy used for explicit substitutions. Each report consequently retains its symbolic total alongside
+the total bound for that call.
+
+Reports correspond only to calls whose bindings were collected successfully. A binding error never turns an otherwise
+valid forward into a failure: the observer records the error, excludes that call from `call_count`, and raises the
+deferred failure when report generation is requested.
+
+Only normalized scalar facts are retained; argument and output tensors are not. Multiple root calls remain separate in
+forward-hook completion order. The session is single-use and not thread-safe, so forwards must not overlap context exit
+or report generation. It is deliberately a root-binding facility, not yet a recursive runtime trace: static authored
+parent-child arguments continue to propagate the root facts through a Transformer model.
 
 The model author also owns recursion policy. Ordinary modules contribute only their local work and delegate to their
 children. A repeated Transformer stack may deliberately describe one representative block with symbolic `num_layers`
@@ -260,8 +324,9 @@ Several useful descriptions coexist:
 5. fused or backend-specific kernels.
 
 A report must name the level it interprets. Counting one semantic operation and then also counting all operations into
-which it decomposes is double counting. The authored plane may keep a human name and an expected eager-ATen anchor; the
-observed plane determines whether that expectation still matches the implementation.
+which it decomposes is double counting. The authored plane may keep a human name and an expected eager-ATen anchor;
+`FlopCounterMode` or a future operator-level observer determines whether that expectation still matches the
+implementation. Root `CostObserver` sessions bind call dimensions but do not inspect operator lowering.
 
 An expected eager anchor is not a promise that every concrete shape reaches that operator. In particular, einx may
 strength-reduce a contraction whose reduced axis has size one into elementwise multiplication. The authored record still
@@ -272,9 +337,9 @@ changing the architectural formula.
 
 ## Deliberately deferred questions
 
-The following are not prerequisites for the current static work:
+The following are not prerequisites for the current authored and root-observed work:
 
-- binding call-specific variables with hooks or a context manager;
+- recursively observing and reconciling submodule invocations;
 - importing and remapping symbolic `ShapeEnv`/`SymInt` identities during observation;
 - training and backward-pass costs;
 - exact activation lifetime and peak-memory analysis;

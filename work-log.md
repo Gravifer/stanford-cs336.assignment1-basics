@@ -112,3 +112,27 @@ or source of repository policy.
 - Hardened the exported analytics records as construction boundaries. Symbol identities and expressions are normalized
   eagerly, reports validate known binding identities, and directly assembled trees preserve local symbol and child-path
   uniqueness rather than failing later inside aggregation.
+- Began invocation observation as a private lifecycle experiment. One official per-module forward hook snapshots and
+  binds only root-local scalar facts for each completed call; reports remain readable after exit, repeated calls stay
+  separate, hook failures do not alter a successful forward, and tensors are not retained. Public naming/export remains
+  deferred until the lifecycle contract survives review.
+- Exposed the reviewed root-session surface as `CostObserver`, `observe_costs(module)`, and the repository `Module`
+  convenience method. Concrete classes still opt into call bindings through the protected local-name mapping hook.
+- Added the first concrete invocation binding at the model interface. `TransformerLM` maps all leading token-ID axes to
+  flattened `batch` and the final axis to `sequence`; positional and keyword meta forwards produce separate fully bound
+  reports whose combined total matches Torch's observed FLOP counter.
+- Extended the same interface-local binding to direct `Linear`, all three SwiGLU representations, self-attention, and
+  decoder-layer roots. Multi-axis meta calls for each now resolve their authored symbols and agree with Torch's FLOP
+  counter without recursive runtime tracing.
+- Reassessed activation-memory terminology against Torch's profiler, CUDA allocator peaks, meta/fake tensors, and
+  autograd saved-tensor hooks. The memo now keeps registered state, logical tensor footprints, operator allocation
+  traffic, training retention, and concrete allocator peaks distinct; no output-volume proxy is labeled as peak memory.
+- Broad student regression after observation work: 333 passed and 6 skipped. The only three failures remain the
+  deliberately disarmed SwiGLU course-key warnings from `cb9dc06`; translation, loading, analytics, model, attention,
+  adapter, and typing coverage otherwise passed.
+- Independent final audit found no concrete analytics/observation gaps. Additional probes confirmed forward and
+  gradient transparency, complete hook removal, unchanged native state-dict keys, and `load_state_dict(assign=True)`
+  behavior during an active session. Documented non-thread-safety and deferred recursive/SymInt work remain explicit.
+- A follow-up public-API and memo audit found no code defect, but corrected five documentation boundaries: symbolic
+  `SymInt` remapping, root binding versus operator observation, exact Torch overload terminology, deferred observation
+  failures, and registered buffers versus serialized checkpoint state.
