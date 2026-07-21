@@ -131,7 +131,9 @@ which tracks hints, constraints, guards, and symbol provenance. This is substant
 
 That machinery is appropriate for dimensions discovered while tracing tensor programs. It is less natural as the
 canonical algebra for architectural quantities such as an unbound layer count. The authored representation therefore
-uses SymPy expressions directly and accepts observed `SymInt` values at its boundary. Concrete classes may import SymPy
+uses SymPy expressions directly. Concrete or backed `SymInt` values can be normalized at its boundary; a genuinely
+symbolic `ShapeEnv` identity must first be remapped into the receiving analytics scope. That remapping belongs with
+future invocation observation rather than bypassing lexical symbol identity today. Concrete classes may import SymPy
 lazily inside their own analytics hooks when their symbolic description needs it.
 
 The [`meta` device](https://docs.pytorch.org/docs/stable/meta.html) stores tensor metadata without allocating tensor data.
@@ -154,6 +156,10 @@ Torch's module tree carries parameters, buffers, state-dict prefixes, and a usef
 hooks and `ModuleTracker` can associate a successful call with that hierarchy. Torch has no standard hook asking a module
 for an authored symbolic cost description, so a small protected provider remains necessary. Official hooks should still
 transport future invocation information; the provider need not reinvent execution interception.
+
+Container registration is not always execution. `Sequential` defines a chained forward and can be interpreted directly;
+`ModuleList` and `ModuleDict` only register slots. Their children may be displayed as an inventory, but a strict static
+cost report remains unresolved until an authored parent states which slots are invoked and with what repetition.
 
 [`torch.fx`](https://docs.pytorch.org/docs/stable/fx.html) represents executable dataflow as a graph of calls and values.
 [`torch.export`](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/export.html) captures an ahead-of-time
@@ -235,7 +241,9 @@ report as a condition. Caller substitutions are additional facts under the same 
 The model author also owns recursion policy. Ordinary modules contribute only their local work and delegate to their
 children. A repeated Transformer stack may deliberately describe one representative block with symbolic `num_layers`
 repetition and avoid traversing the remaining concrete blocks; embeddings, final normalization, and logit emission are
-still traversed normally. Automatically discovering and folding repeated siblings is a separate presentation problem.
+still traversed normally. Such authored folding must validate that the concrete layer count and cost-driving
+configuration still match the representative; independently initialized parameter values and cost-irrelevant buffer
+capacity need not match. Automatically discovering and folding repeated siblings is a separate presentation problem.
 
 The first representation is matmul-focused. Concrete parameter and buffer counts already come from Torch's module
 introspection. A unified resource record should not be introduced until at least an ordinary parameter, the RoPE
@@ -255,11 +263,19 @@ A report must name the level it interprets. Counting one semantic operation and 
 which it decomposes is double counting. The authored plane may keep a human name and an expected eager-ATen anchor; the
 observed plane determines whether that expectation still matches the implementation.
 
+An expected eager anchor is not a promise that every concrete shape reaches that operator. In particular, einx may
+strength-reduce a contraction whose reduced axis has size one into elementwise multiplication. The authored record still
+describes the logical matrix product and the course formula still assigns it $2mnp$ work; a concrete
+`FlopCounterMode` run then reports the strength-reduced eager program. Exact oracle-equality tests therefore use
+nondegenerate contraction axes, while degenerate tests preserve and explain the distinction rather than conditionally
+changing the architectural formula.
+
 ## Deliberately deferred questions
 
 The following are not prerequisites for the current static work:
 
 - binding call-specific variables with hooks or a context manager;
+- importing and remapping symbolic `ShapeEnv`/`SymInt` identities during observation;
 - training and backward-pass costs;
 - exact activation lifetime and peak-memory analysis;
 - public third-party extension contracts;

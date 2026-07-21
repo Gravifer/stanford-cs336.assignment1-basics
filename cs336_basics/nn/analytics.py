@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import keyword
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Protocol, overload, runtime_checkable
@@ -12,7 +13,7 @@ from torch import nn
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Mapping
+    from collections.abc import Iterable, Iterator
 
 
 __all__ = [
@@ -40,20 +41,84 @@ def _sympy() -> Any:
     return sympy
 
 
+def _immutable_value(value: Any) -> Any:
+    """Copy and freeze standard containers used in symbolic metadata."""
+    if isinstance(value, torch.Tensor):
+        raise TypeError("symbolic cost metadata must use TensorRepr rather than live torch.Tensor values")
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _immutable_value(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_immutable_value(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_immutable_value(item) for item in value)
+    return value
+
+
 def _immutable_mapping(mapping: Mapping[Any, Any]) -> Mapping[Any, Any]:
-    """Copy a mapping before exposing an immutable view of it."""
-    return MappingProxyType(dict(mapping))
+    """Recursively copy a mapping before exposing an immutable view of it."""
+    return MappingProxyType({key: _immutable_value(value) for key, value in mapping.items()})
 
 
 def _expression(value: object) -> Any:
     """Normalize a nonnegative integer or symbolic value into a SymPy expression."""
     sympy = _sympy()
-    expression = sympy.sympify(value)
+    try:
+        expression = sympy.sympify(value)
+    except (TypeError, sympy.SympifyError) as error:
+        raise TypeError(f"cost dimensions and repetitions must be scalar symbolic expressions, got {value!r}") from error
+    if getattr(expression, "is_Boolean", False):
+        raise TypeError(f"cost dimensions and repetitions cannot be booleans, got {value!r}")
+    if not isinstance(expression, sympy.Expr):
+        raise TypeError(f"cost dimensions and repetitions must be scalar symbolic expressions, got {value!r}")
+    if expression.is_number and expression.is_integer is not True:
+        raise TypeError(f"concrete cost dimensions and repetitions must be integers, got {value!r}")
     if expression.is_integer is False:
         raise TypeError(f"cost dimensions and repetitions must be integer expressions, got {value!r}")
     if expression.is_nonnegative is False:
         raise ValueError(f"cost dimensions and repetitions must be nonnegative, got {value!r}")
     return expression
+
+
+def _validate_tensor_argument(schema_type: Any, value: Any, operation: Any, name: str) -> None:
+    """Validate symbolic tensor compatibility with one ATen schema argument."""
+    if isinstance(schema_type, torch.TensorType):
+        if not isinstance(value, TensorRepr):
+            raise TypeError(f"{operation} tensor argument {name!r} must be represented by TensorRepr")
+        return
+    if isinstance(schema_type, torch.OptionalType):
+        if value is not None:
+            _validate_tensor_argument(schema_type.getElementType(), value, operation, name)
+        return
+    if isinstance(schema_type, torch.ListType):
+        element_type = schema_type.getElementType()
+        if _schema_contains_tensor(element_type):
+            if not isinstance(value, (list, tuple)):
+                raise TypeError(f"{operation} tensor-list argument {name!r} must be a sequence of TensorRepr values")
+            for item in value:
+                _validate_tensor_argument(element_type, item, operation, name)
+            return
+    if _contains_tensor_repr(value):
+        raise TypeError(f"{operation} non-tensor argument {name!r} cannot contain TensorRepr")
+
+
+def _schema_contains_tensor(schema_type: Any) -> bool:
+    """Return whether optional/list composition ultimately contains Tensor."""
+    if isinstance(schema_type, torch.TensorType):
+        return True
+    if isinstance(schema_type, (torch.OptionalType, torch.ListType)):
+        return _schema_contains_tensor(schema_type.getElementType())
+    return False
+
+
+def _contains_tensor_repr(value: Any) -> bool:
+    """Find tensor metadata nested in standard symbolic containers."""
+    if isinstance(value, TensorRepr):
+        return True
+    if isinstance(value, Mapping):
+        return any(_contains_tensor_repr(item) for item in value.values())
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return any(_contains_tensor_repr(item) for item in value)
+    return False
 
 
 @dataclass(frozen=True)
@@ -64,6 +129,8 @@ class TensorRepr:
     dtype: torch.dtype | None = None
 
     def __post_init__(self) -> None:
+        if self.dtype is not None and not isinstance(self.dtype, torch.dtype):
+            raise TypeError(f"tensor metadata dtype must be a torch.dtype or None, got {self.dtype!r}")
         object.__setattr__(self, "shape", tuple(_expression(axis) for axis in self.shape))
 
 
@@ -77,10 +144,12 @@ class SymbolRepr:
     binding: Any | None = None
 
     def __post_init__(self) -> None:
-        if not self.local_name:
+        if not isinstance(self.local_name, str) or not self.local_name:
             raise ValueError("a symbolic dimension requires a non-empty local name")
-        if not self.display_name:
+        if not isinstance(self.display_name, str) or not self.display_name:
             raise ValueError("a symbolic dimension requires a non-empty display name")
+        if not isinstance(self.symbol, _sympy().Symbol):
+            raise TypeError("a symbolic dimension identity must be a SymPy Symbol")
         if self.binding is not None:
             object.__setattr__(self, "binding", _expression(self.binding))
 
@@ -107,7 +176,7 @@ class CostRepr:
     repetitions: Any = 1
 
     def __post_init__(self) -> None:
-        if not self.name:
+        if not isinstance(self.name, str) or not self.name:
             raise ValueError("a cost representation requires a non-empty semantic name")
         if not isinstance(self.operation, torch._ops.OpOverload):
             raise TypeError("operation must be an exact torch.ops overload, such as torch.ops.aten.bmm.default")
@@ -126,6 +195,8 @@ class CostRepr:
         if missing:
             names = ", ".join(sorted(missing))
             raise ValueError(f"{self.operation} requires schema arguments: {names}")
+        for name, value in arguments.items():
+            _validate_tensor_argument(schema_arguments[name].type, value, self.operation, name)
 
         object.__setattr__(self, "arguments", _immutable_mapping(arguments))
         object.__setattr__(self, "repetitions", _expression(self.repetitions))
@@ -141,13 +212,43 @@ class _CostChild:
     arguments: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("a directed cost child requires a non-empty name")
+        if not isinstance(self.name, str) or not self.name or "." in self.name:
+            raise ValueError("a directed cost child name must be a non-empty string without dots")
+        if not isinstance(self.module, nn.Module):
+            raise TypeError(f"a directed cost child must be a torch.nn.Module, got {type(self.module).__qualname__}")
+        if any(not isinstance(name, str) for name in self.arguments):
+            raise TypeError("directed cost child argument names must be strings")
         object.__setattr__(self, "repetitions", _expression(self.repetitions))
         object.__setattr__(
             self,
             "arguments",
             _immutable_mapping({name: _expression(value) for name, value in self.arguments.items()}),
+        )
+
+
+def _metadata_free_symbols(value: Any) -> frozenset[Any]:
+    """Find SymPy identities used by supported symbolic metadata containers."""
+    if isinstance(value, TensorRepr):
+        return frozenset().union(*(axis.free_symbols for axis in value.shape))
+    if isinstance(value, Mapping):
+        return frozenset().union(*(_metadata_free_symbols(item) for item in value.values()))
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return frozenset().union(*(_metadata_free_symbols(item) for item in value))
+    return frozenset(getattr(value, "free_symbols", ()))
+
+
+def _require_local_symbols(
+    module: nn.Module,
+    local_symbols: frozenset[Any],
+    value: Any,
+    description: str,
+) -> None:
+    """Reject symbolic identities that were not declared by this module scope."""
+    foreign = _metadata_free_symbols(value) - local_symbols
+    if foreign:
+        names = ", ".join(sorted(map(str, foreign)))
+        raise ValueError(
+            f"{type(module).__qualname__} {description} references undeclared scoped symbols: {names}"
         )
 
 
@@ -349,12 +450,75 @@ class CostTree:
     unresolved: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "costs", tuple(self.costs))
-        object.__setattr__(self, "children", tuple(self.children))
+        costs = tuple(self.costs)
+        children = tuple(self.children)
+        symbols = tuple(self.symbols)
+        unresolved = tuple(self.unresolved)
+        if not isinstance(self.name, str) or not self.name:
+            raise ValueError("a cost tree requires a non-empty name")
+        if not isinstance(self.module_type, str) or not self.module_type:
+            raise ValueError("a cost tree requires a non-empty module type")
+        if any(not isinstance(cost, CostRepr) for cost in costs):
+            raise TypeError("cost tree costs must be CostRepr values")
+        if any(not isinstance(child, CostTree) for child in children):
+            raise TypeError("cost tree children must be CostTree values")
+        if any(not isinstance(symbol, SymbolRepr) for symbol in symbols):
+            raise TypeError("cost tree symbols must be SymbolRepr values")
+        if any(not isinstance(message, str) for message in unresolved):
+            raise TypeError("cost tree unresolved messages must be strings")
+        child_names = tuple(child.name for child in children)
+        if any("." in name for name in child_names):
+            raise ValueError("cost tree child names must not contain dots")
+        if len(set(child_names)) != len(child_names):
+            raise ValueError("cost tree child names must be unique")
+        local_names = tuple(symbol.local_name for symbol in symbols)
+        display_names = tuple(symbol.display_name for symbol in symbols)
+        identities = tuple(symbol.symbol for symbol in symbols)
+        if len(set(local_names)) != len(local_names):
+            raise ValueError("cost tree local symbol names must be unique")
+        if len(set(display_names)) != len(display_names):
+            raise ValueError("cost tree display symbol names must be unique")
+        if len(set(identities)) != len(identities):
+            raise ValueError("cost tree symbol identities must be unique")
+        subtree_identities = list(identities)
+
+        def append_child_identities(child: CostTree) -> None:
+            subtree_identities.extend(symbol.symbol for symbol in child.symbols)
+            for descendant in child.children:
+                append_child_identities(descendant)
+
+        for child in children:
+            append_child_identities(child)
+        if len(set(subtree_identities)) != len(subtree_identities):
+            raise ValueError("cost tree symbol identities must be unique across the subtree")
+        local_identity_set = frozenset(identities)
+        for symbol in symbols:
+            if symbol.binding is not None and _metadata_free_symbols(symbol.binding) - local_identity_set:
+                raise ValueError("cost tree symbol bindings must use locally declared identities")
+        for cost in costs:
+            if _metadata_free_symbols(cost.arguments) - local_identity_set:
+                raise ValueError("cost tree local costs must use locally declared identities")
+            if _metadata_free_symbols(cost.repetitions) - local_identity_set:
+                raise ValueError("cost tree local cost repetitions must use locally declared identities")
+        for child in children:
+            if _metadata_free_symbols(child.arguments) - local_identity_set:
+                raise ValueError("cost tree child arguments must use parent-local identities")
+            if _metadata_free_symbols(child.repetitions) - local_identity_set:
+                raise ValueError("cost tree child repetitions must use parent-local identities")
+        arguments = dict(self.arguments)
+        unknown_arguments = arguments.keys() - set(identities)
+        if unknown_arguments:
+            raise ValueError("cost tree arguments must target locally declared symbol identities")
+        object.__setattr__(self, "costs", costs)
+        object.__setattr__(self, "children", children)
         object.__setattr__(self, "repetitions", _expression(self.repetitions))
-        object.__setattr__(self, "symbols", tuple(self.symbols))
-        object.__setattr__(self, "arguments", _immutable_mapping(self.arguments))
-        object.__setattr__(self, "unresolved", tuple(self.unresolved))
+        object.__setattr__(self, "symbols", symbols)
+        object.__setattr__(
+            self,
+            "arguments",
+            _immutable_mapping({symbol: _expression(value) for symbol, value in arguments.items()}),
+        )
+        object.__setattr__(self, "unresolved", unresolved)
 
     @property
     def bindings(self) -> Mapping[Any, Any]:
@@ -377,6 +541,13 @@ class CostTerm:
     source: CostRepr
     expression: Any
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.path, str) or not self.path:
+            raise ValueError("a cost term requires a non-empty module path")
+        if not isinstance(self.source, CostRepr):
+            raise TypeError("a cost term source must be CostRepr")
+        object.__setattr__(self, "expression", _expression(self.expression))
+
 
 @dataclass(frozen=True)
 class CostReport:
@@ -389,19 +560,96 @@ class CostReport:
     unsupported: tuple[str, ...] = ()
     conditions: tuple[Any, ...] = ()
     known_symbols: frozenset[Any] = field(default_factory=frozenset, repr=False)
+    _domain_expressions: tuple[Any, ...] = field(default=(), repr=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "terms", tuple(self.terms))
-        object.__setattr__(self, "bindings", _immutable_mapping(self.bindings))
-        object.__setattr__(self, "unsupported", tuple(self.unsupported))
-        object.__setattr__(self, "conditions", tuple(self.conditions))
-        object.__setattr__(self, "known_symbols", frozenset(self.known_symbols))
+        terms = tuple(self.terms)
+        unsupported = tuple(self.unsupported)
+        conditions = tuple(self.conditions)
+        if any(not isinstance(term, CostTerm) for term in terms):
+            raise TypeError("cost report terms must be CostTerm values")
+        if any(not isinstance(message, str) for message in unsupported):
+            raise TypeError("cost report unsupported messages must be strings")
+        if conditions:
+            equality_type = _sympy().Equality
+            if any(not isinstance(condition, equality_type) for condition in conditions):
+                raise TypeError("cost report conditions must be SymPy equalities")
+        sympy = _sympy()
+        known_symbols = frozenset(self.known_symbols)
+        if any(not isinstance(symbol, _sympy().Symbol) for symbol in known_symbols):
+            raise TypeError("cost report known symbols must be SymPy Symbol identities")
+        bindings = dict(self.bindings)
+        if any(not isinstance(symbol, _sympy().Symbol) for symbol in bindings):
+            raise TypeError("cost report binding keys must be SymPy Symbol identities")
+        if bindings.keys() - known_symbols:
+            raise ValueError("cost report bindings must target known symbolic identities")
+        normalized_bindings = {symbol: _expression(value) for symbol, value in bindings.items()}
+        _check_definition_cycles(normalized_bindings)
+        symbolic_total = _expression(self.symbolic_total)
+        bound_total = _expression(self.bound_total)
+        source_domains = tuple(
+            expression
+            for term in terms
+            for expression in (
+                *_metadata_dimensions(term.source.arguments),
+                term.source.repetitions,
+            )
+        )
+        domain_expressions = tuple(
+            dict.fromkeys(
+                _expression(expression)
+                for expression in (
+                    *self._domain_expressions,
+                    *known_symbols,
+                    *normalized_bindings.values(),
+                    *source_domains,
+                )
+            )
+        )
+        report_metadata: tuple[Any, ...] = (
+            symbolic_total,
+            bound_total,
+            tuple(term.expression for term in terms),
+            tuple(term.source.arguments for term in terms),
+            tuple(term.source.repetitions for term in terms),
+            tuple(normalized_bindings.values()),
+            conditions,
+            domain_expressions,
+        )
+        foreign_symbols = _metadata_free_symbols(report_metadata) - known_symbols
+        if foreign_symbols:
+            names = ", ".join(sorted(map(str, foreign_symbols)))
+            raise ValueError(f"cost report expressions reference unknown symbolic identities: {names}")
+        expected_symbolic_total = sympy.expand(sum((term.expression for term in terms), sympy.Integer(0)))
+        if sympy.simplify(symbolic_total - expected_symbolic_total) != 0:
+            raise ValueError("cost report symbolic total must equal the sum of its terms")
+        expected_bound_total = _substitute(symbolic_total, normalized_bindings)
+        if sympy.simplify(bound_total - expected_bound_total) != 0:
+            raise ValueError("cost report bound total must equal its symbolic total under its bindings")
+        conditions = _validate_relations(
+            ((condition.lhs, condition.rhs) for condition in conditions),
+            normalized_bindings,
+        )
+        _validate_domains(domain_expressions, normalized_bindings)
+        object.__setattr__(self, "terms", terms)
+        object.__setattr__(self, "symbolic_total", symbolic_total)
+        object.__setattr__(self, "bound_total", bound_total)
+        object.__setattr__(
+            self,
+            "bindings",
+            _immutable_mapping(normalized_bindings),
+        )
+        object.__setattr__(self, "unsupported", unsupported)
+        object.__setattr__(self, "conditions", conditions)
+        object.__setattr__(self, "known_symbols", known_symbols)
+        object.__setattr__(self, "_domain_expressions", domain_expressions)
 
     def substitute(self, bindings: Mapping[Any, Any]) -> CostReport:
         """Return a report with additional symbolic bindings applied."""
         combined = dict(self.bindings)
         relations = [(condition.lhs, condition.rhs) for condition in self.conditions]
         _add_substitutions(combined, relations, bindings, self.known_symbols)
+        _validate_domains(self._domain_expressions, combined)
         conditions = _validate_relations(relations, combined)
         return replace(
             self,
@@ -427,7 +675,15 @@ class _CostProvider(Protocol):
     def _cost_children(self, scope: _CostScope) -> Iterable[_CostChild]: ...
 
 
-_STRUCTURAL_TORCH_MODULES = (nn.ModuleDict, nn.ModuleList, nn.Sequential)
+_REGISTERED_SLOT_CONTAINERS = (nn.ModuleDict, nn.ModuleList, nn.Sequential)
+_EXECUTING_TORCH_CONTAINERS = (nn.Sequential,)
+
+
+def _structural_children(module: nn.Module) -> tuple[tuple[str, nn.Module], ...]:
+    """Preserve every registered slot in Torch's public structural containers."""
+    if isinstance(module, _REGISTERED_SLOT_CONTAINERS):
+        return tuple((name, child) for name, child in module._modules.items() if child is not None)
+    return tuple(module.named_children())
 
 
 def _collect_cost_tree(
@@ -436,7 +692,12 @@ def _collect_cost_tree(
     *,
     repetitions: Any = 1,
     parent_arguments: Mapping[str, Any] | None = None,
+    ancestors: frozenset[int] = frozenset(),
 ) -> CostTree:
+    module_identity = id(module)
+    if module_identity in ancestors:
+        raise ValueError("the directed symbolic cost child graph contains a module cycle")
+    child_ancestors = ancestors | {module_identity}
     scope = _CostScope()
     unresolved: tuple[str, ...] = ()
 
@@ -444,15 +705,38 @@ def _collect_cost_tree(
         local_costs = module._cost_repr(scope)
         costs = () if local_costs is None else tuple(local_costs)
         child_specs = tuple(module._cost_children(scope))
+        if any(not isinstance(cost, CostRepr) for cost in costs):
+            raise TypeError(
+                f"{type(module).__qualname__}._cost_repr() must return CostRepr values or None"
+            )
+        if any(not isinstance(child, _CostChild) for child in child_specs):
+            raise TypeError(
+                f"{type(module).__qualname__}._cost_children() must return directed cost children"
+            )
         if local_costs is None:
             unresolved = (f"{type(module).__qualname__} has not classified its static local matmul work",)
     else:
         costs = ()
-        child_specs = tuple(scope.child(child_name, child) for child_name, child in module.named_children())
-        if not isinstance(module, _STRUCTURAL_TORCH_MODULES):
+        child_specs = tuple(scope.child(child_name, child) for child_name, child in _structural_children(module))
+        if type(module) not in _EXECUTING_TORCH_CONTAINERS:
             unresolved = (f"{type(module).__qualname__} has no static local-cost provider",)
 
+    child_names = tuple(child_spec.name for child_spec in child_specs)
+    if len(set(child_names)) != len(child_names):
+        raise ValueError(f"{type(module).__qualname__} describes duplicate directed cost child names")
+
     symbol_records = scope.symbols._freeze()
+    local_symbols = frozenset(record.symbol for record in symbol_records)
+    for record in symbol_records:
+        if record.binding is not None:
+            _require_local_symbols(module, local_symbols, record.binding, f"binding for {record.local_name!r}")
+    for cost in costs:
+        _require_local_symbols(module, local_symbols, cost.arguments, f"cost {cost.name!r}")
+        _require_local_symbols(module, local_symbols, cost.repetitions, f"cost {cost.name!r} repetitions")
+    for child_spec in child_specs:
+        _require_local_symbols(module, local_symbols, child_spec.arguments, f"child {child_spec.name!r} arguments")
+        _require_local_symbols(module, local_symbols, child_spec.repetitions, f"child {child_spec.name!r} repetitions")
+
     by_name = {record.local_name: record.symbol for record in symbol_records}
     arguments: dict[Any, Any] = {}
     if parent_arguments:
@@ -468,6 +752,7 @@ def _collect_cost_tree(
             child_spec.name,
             repetitions=child_spec.repetitions,
             parent_arguments=child_spec.arguments,
+            ancestors=child_ancestors,
         )
         for child_spec in child_specs
     ]
@@ -490,6 +775,7 @@ def cost_repr(module: nn.Module) -> CostTree:
         raise TypeError(f"cost_repr expects a torch.nn.Module, got {type(module).__qualname__}")
     tree = _collect_cost_tree(module, type(module).__qualname__)
     definitions, relations, _ = _tree_facts(tree)
+    _validate_domains(_tree_domains(tree), definitions)
     _validate_relations(relations, definitions)
     return tree
 
@@ -559,18 +845,18 @@ def _same_dimension(left: Any, right: Any, description: str) -> None:
         raise ValueError(f"{description} must match, got {left} and {right}")
 
 
-def _require_broadcastable(left: tuple[Any, ...], right: tuple[Any, ...], description: str) -> None:
-    """Require every aligned dimension to be provably equal or singleton."""
+def _require_expandable_to(source: tuple[Any, ...], target: tuple[Any, ...], description: str) -> None:
+    """Require ``source`` to be provably expandable to the fixed ``target`` shape."""
     sympy = _sympy()
-    rank = max(len(left), len(right))
-    padded_left = (sympy.Integer(1),) * (rank - len(left)) + left
-    padded_right = (sympy.Integer(1),) * (rank - len(right)) + right
-    for left_axis, right_axis in zip(padded_left, padded_right, strict=True):
-        if sympy.simplify(left_axis - right_axis) == 0:
+    if len(source) > len(target):
+        raise ValueError(f"{description}: source rank exceeds target rank ({source} to {target})")
+    padded_source = (sympy.Integer(1),) * (len(target) - len(source)) + source
+    for source_axis, target_axis in zip(padded_source, target, strict=True):
+        if sympy.simplify(source_axis - target_axis) == 0:
             continue
-        if sympy.simplify(left_axis - 1) == 0 or sympy.simplify(right_axis - 1) == 0:
+        if sympy.simplify(source_axis - 1) == 0:
             continue
-        raise ValueError(f"{description} are not broadcastable: {left} and {right}")
+        raise ValueError(f"{description}: {source} cannot expand to {target}")
 
 
 def _mm_flops(cost: CostRepr, left_name: str = "self", right_name: str = "mat2") -> Any:
@@ -604,7 +890,7 @@ def _addmm_flops(cost: CostRepr) -> Any:
     left = _require_tensor(cost, "mat1")
     right = _require_tensor(cost, "mat2")
     flops = _mm_flops(cost, "mat1", "mat2")
-    _require_broadcastable(addend.shape, (left.shape[0], right.shape[1]), "aten.addmm addend and product")
+    _require_expandable_to(addend.shape, (left.shape[0], right.shape[1]), "aten.addmm addend")
     return flops
 
 
@@ -614,12 +900,10 @@ def _baddbmm_flops(cost: CostRepr) -> Any:
     left = _require_tensor(cost, "batch1")
     right = _require_tensor(cost, "batch2")
     flops = _bmm_flops(cost, "batch1", "batch2")
-    if len(addend.shape) > 3:
-        raise ValueError("aten.baddbmm addend must have rank at most three")
-    _require_broadcastable(
+    _require_expandable_to(
         addend.shape,
         (left.shape[0], left.shape[1], right.shape[2]),
-        "aten.baddbmm addend and product",
+        "aten.baddbmm addend",
     )
     return flops
 
@@ -657,6 +941,41 @@ def _tree_facts(tree: CostTree) -> tuple[dict[Any, Any], list[tuple[Any, Any]], 
     return definitions, relations, frozenset(known_symbols)
 
 
+def _metadata_dimensions(value: Any) -> tuple[Any, ...]:
+    """Collect tensor-axis expressions without treating arbitrary integer arguments as dimensions."""
+    if isinstance(value, TensorRepr):
+        return value.shape
+    if isinstance(value, Mapping):
+        return tuple(axis for item in value.values() for axis in _metadata_dimensions(item))
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return tuple(axis for item in value for axis in _metadata_dimensions(item))
+    return ()
+
+
+def _tree_domains(tree: CostTree) -> tuple[Any, ...]:
+    """Collect every expression whose value is a tensor dimension or repetition."""
+    local = [record.symbol for record in tree.symbols]
+    local.extend(record.binding for record in tree.symbols if record.binding is not None)
+    local.extend(tree.arguments.values())
+    local.append(tree.repetitions)
+    for cost in tree.costs:
+        local.extend(_metadata_dimensions(cost.arguments))
+        local.append(cost.repetitions)
+    return tuple(local) + tuple(expression for child in tree.children for expression in _tree_domains(child))
+
+
+def _validate_domains(expressions: Iterable[Any], bindings: Mapping[Any, Any]) -> None:
+    """Reject dimensions or repetitions that become definitely non-integral or negative."""
+    for expression in expressions:
+        resolved = _substitute(expression, bindings)
+        if resolved.is_Boolean or resolved.is_integer is False:
+            raise ValueError(f"resolved cost dimensions and repetitions must be integers, got {resolved}")
+        if resolved.is_number and resolved.is_integer is not True:
+            raise ValueError(f"resolved cost dimensions and repetitions must be integers, got {resolved}")
+        if resolved.is_nonnegative is False:
+            raise ValueError(f"resolved cost dimensions and repetitions must be nonnegative, got {resolved}")
+
+
 def _add_substitutions(
     definitions: dict[Any, Any],
     relations: list[tuple[Any, Any]],
@@ -670,6 +989,10 @@ def _add_substitutions(
         raise ValueError(f"substitutions contain unknown symbolic identities: {names}")
     for symbol, value in substitutions.items():
         expression = _expression(value)
+        foreign = expression.free_symbols - known_symbols
+        if foreign:
+            names = ", ".join(sorted(map(str, foreign)))
+            raise ValueError(f"substitution values contain unknown symbolic identities: {names}")
         if symbol in definitions:
             relations.append((expression, definitions[symbol]))
         else:
@@ -700,6 +1023,8 @@ def matmul_flops(
     strict: bool = False,
 ) -> CostReport:
     """Apply the course's conventional matrix-operation FLOP policy."""
+    if not isinstance(tree, CostTree):
+        raise TypeError(f"matmul_flops expects a CostTree, got {type(tree).__qualname__}")
     sympy = _sympy()
     terms: list[CostTerm] = []
     unsupported: list[str] = []
@@ -725,6 +1050,8 @@ def matmul_flops(
     bindings, relations, known_symbols = _tree_facts(tree)
     if substitutions:
         _add_substitutions(bindings, relations, substitutions, known_symbols)
+    domains = _tree_domains(tree)
+    _validate_domains(domains, bindings)
     conditions = _validate_relations(relations, bindings)
     return CostReport(
         terms=tuple(terms),
@@ -734,4 +1061,5 @@ def matmul_flops(
         unsupported=tuple(unsupported),
         conditions=conditions,
         known_symbols=known_symbols,
+        _domain_expressions=domains,
     )

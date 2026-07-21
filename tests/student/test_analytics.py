@@ -1,5 +1,8 @@
 """Tests for static symbolic model analytics."""
 
+from collections import OrderedDict
+from typing import Literal
+
 import pytest
 import sympy
 import torch
@@ -20,7 +23,7 @@ from cs336_basics.nn.analytics import (
 )
 from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
-from cs336_basics.nn.model import TransformerLM
+from cs336_basics.nn.model import GPTDecoderLayer, TransformerLM
 from cs336_basics.nn.modules import DeltaLayer as ModulesDeltaLayer
 from cs336_basics.nn.modules import Linear, Module as ModulesModule
 
@@ -66,6 +69,136 @@ def test_external_torch_module_can_implement_cost_provider_structurally() -> Non
     assert matmul_flops(tree, substitutions={tree.find_symbols("tokens")[0]: 5}, strict=True).bound_total == 120
 
 
+@pytest.mark.parametrize("provider_method", ["_cost_repr", "_cost_children"])
+def test_structural_cost_providers_reject_malformed_results(provider_method: str) -> None:
+    class Malformed(nn.Module):
+        def _cost_repr(self, scope):
+            return (object(),) if provider_method == "_cost_repr" else ()
+
+        def _cost_children(self, scope):
+            return (object(),) if provider_method == "_cost_children" else ()
+
+    with pytest.raises(TypeError, match=provider_method):
+        cost_repr(Malformed())
+
+
+def test_structural_containers_preserve_repeated_shared_module_invocations() -> None:
+    shared = Linear(3, 3, device=torch.device("meta"))
+    module = nn.Sequential(shared, shared)
+    tree = cost_repr(module)
+    counter = FlopCounterMode(display=False)
+
+    with counter:
+        module(torch.empty((5, 3), device="meta"))
+
+    assert tuple(child.name for child in tree.children) == ("0", "1")
+    assert tree.children[0].module_type == tree.children[1].module_type == "Linear"
+    substitutions = {symbol: 5 for symbol in tree.find_symbols("tokens")}
+    assert matmul_flops(tree, substitutions=substitutions, strict=True).bound_total == counter.get_total_flops()
+
+
+def test_default_module_recursion_preserves_repeated_registered_child_slots() -> None:
+    class SharedParent(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            shared = Linear(3, 3, device=torch.device("meta"))
+            self.first = shared
+            self.second = shared
+
+        def forward(self, x):
+            return self.second(self.first(x))
+
+        def _cost_repr(self, scope):
+            return ()
+
+    module = SharedParent()
+    tree = module.cost_repr()
+    counter = FlopCounterMode(display=False)
+
+    with counter:
+        module(torch.empty((5, 3), device="meta"))
+
+    assert tuple(child.name for child in tree.children) == ("first", "second")
+    substitutions = {symbol: 5 for symbol in tree.find_symbols("tokens")}
+    assert matmul_flops(tree, substitutions=substitutions, strict=True).bound_total == counter.get_total_flops()
+
+
+def test_structural_containers_preserve_authored_slot_names() -> None:
+    module = nn.Sequential(OrderedDict((name, Linear(3, 3)) for name in ("attention", "feed_forward")))
+
+    assert tuple(child.name for child in cost_repr(module).children) == ("attention", "feed_forward")
+
+
+def test_structural_container_cycles_reach_the_collector_guard() -> None:
+    module = nn.Sequential()
+    module.add_module("loop", module)
+
+    with pytest.raises(ValueError, match="child graph contains a module cycle"):
+        cost_repr(module)
+
+
+def test_structural_container_subclasses_must_classify_custom_local_work() -> None:
+    class SpecializedSequential(nn.Sequential):
+        pass
+
+    tree = cost_repr(SpecializedSequential(Linear(3, 3)))
+
+    assert tuple(child.name for child in tree.children) == ("0",)
+    assert len(tree.unresolved) == 1
+    assert "SpecializedSequential has no static local-cost provider" in tree.unresolved[0]
+    with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
+        matmul_flops(tree, strict=True)
+
+
+@pytest.mark.parametrize(
+    "container",
+    [
+        nn.ModuleList([Linear(3, 4), Linear(4, 5)]),
+        nn.ModuleDict({"input": Linear(3, 4), "output": Linear(4, 5)}),
+    ],
+)
+def test_registration_only_torch_containers_do_not_imply_invocation(container: nn.Module) -> None:
+    tree = cost_repr(container)
+
+    assert len(tree.children) == 2
+    assert len(tree.unresolved) == 1
+    assert "has no static local-cost provider" in tree.unresolved[0]
+    with pytest.raises(NotImplementedError, match="unsupported symbolic costs"):
+        matmul_flops(tree, strict=True)
+
+
+def test_directed_cost_child_graph_rejects_active_ancestor_cycles() -> None:
+    class Cyclic(Module):
+        def _cost_repr(self, scope):
+            return ()
+
+        def _cost_children(self, scope):
+            return (scope.child("self", self),)
+
+    with pytest.raises(ValueError, match="child graph contains a module cycle"):
+        Cyclic().cost_repr()
+
+
+def test_directed_cost_children_require_unambiguous_paths() -> None:
+    child = Linear(3, 4)
+
+    class InvalidChildren(Module):
+        def __init__(self, names: tuple[str, ...]) -> None:
+            super().__init__()
+            self.names = names
+
+        def _cost_repr(self, scope):
+            return ()
+
+        def _cost_children(self, scope):
+            return tuple(scope.child(name, child) for name in self.names)
+
+    with pytest.raises(ValueError, match="without dots"):
+        InvalidChildren(("nested.child",)).cost_repr()
+    with pytest.raises(ValueError, match="duplicate directed cost child names"):
+        InvalidChildren(("child", "child")).cost_repr()
+
+
 def test_symbolic_tensor_and_arguments_are_immutable_copies() -> None:
     arguments: dict[str, object] = {
         "self": TensorRepr((1, 2, 3), torch.float32),
@@ -77,6 +210,17 @@ def test_symbolic_tensor_and_arguments_are_immutable_copies() -> None:
     assert cost.arguments["self"] == TensorRepr((1, 2, 3), torch.float32)
     with pytest.raises(TypeError):
         cost.arguments["self"] = TensorRepr((1, 9, 3), torch.float32)  # ty: ignore[invalid-assignment]
+
+    tensors = [TensorRepr((2, 3)), TensorRepr((2, 4))]
+    concatenation = CostRepr("concatenation", torch.ops.aten.cat.default, {"tensors": tensors})
+    tensors.append(TensorRepr((2, 5)))
+
+    assert concatenation.arguments["tensors"] == (TensorRepr((2, 3)), TensorRepr((2, 4)))
+
+
+def test_symbolic_tensor_requires_a_torch_dtype() -> None:
+    with pytest.raises(TypeError, match="torch.dtype or None"):
+        TensorRepr((2, 3), "float32")  # ty: ignore[invalid-argument-type]
 
 
 def test_cost_repr_requires_exact_overload_and_schema_arguments() -> None:
@@ -91,6 +235,152 @@ def test_cost_repr_requires_exact_overload_and_schema_arguments() -> None:
         CostRepr("incomplete", torch.ops.aten.bmm.default, {"self": operands["self"]})
     with pytest.raises(ValueError, match="no schema arguments named: right"):
         CostRepr("conflict", torch.ops.aten.bmm.default, {**operands, "right": operands["mat2"]})
+
+
+def test_public_cost_records_reject_malformed_structure_at_the_boundary() -> None:
+    cost = CostRepr(
+        "valid",
+        torch.ops.aten.mm.default,
+        {"self": TensorRepr((2, 3)), "mat2": TensorRepr((3, 4))},
+    )
+
+    with pytest.raises(ValueError, match="non-empty semantic name"):
+        CostRepr(1, torch.ops.aten.mm.default, cost.arguments)  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match="costs must be CostRepr"):
+        analytics.CostTree("tree", "Module", costs=(object(),))  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match="SymPy Symbol"):
+        SymbolRepr("width", "width", object())
+    with pytest.raises(TypeError, match="source must be CostRepr"):
+        CostTerm("tree", object(), sympy.Integer(1))  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match="scalar symbolic expressions"):
+        CostTerm("tree", cost, [])
+    with pytest.raises(TypeError, match="conditions must be SymPy equalities"):
+        analytics.CostReport((), 0, 0, {}, conditions=("invalid",))
+    with pytest.raises(TypeError, match="expects a CostTree"):
+        matmul_flops(object())  # ty: ignore[invalid-argument-type]
+
+
+def test_public_cost_trees_preserve_unambiguous_child_paths_and_symbol_scopes() -> None:
+    identity = sympy.Dummy("width", integer=True, nonnegative=True)
+    symbol = SymbolRepr("width", "width", identity)
+    child = analytics.CostTree("child", "Module")
+
+    with pytest.raises(ValueError, match="must not contain dots"):
+        analytics.CostTree("parent", "Module", children=(analytics.CostTree("nested.child", "Module"),))
+    with pytest.raises(ValueError, match="child names must be unique"):
+        analytics.CostTree("parent", "Module", children=(child, child))
+    with pytest.raises(ValueError, match="locally declared"):
+        analytics.CostTree("tree", "Module", symbols=(symbol,), arguments={sympy.Dummy("other"): 3})
+
+    shared_identity = sympy.Symbol("shared", integer=True, nonnegative=True)
+    first = analytics.CostTree(
+        "first",
+        "Module",
+        symbols=(SymbolRepr("width", "width", shared_identity, 2),),
+    )
+    second = analytics.CostTree(
+        "second",
+        "Module",
+        symbols=(SymbolRepr("width", "width", shared_identity, 3),),
+    )
+    with pytest.raises(ValueError, match="unique across the subtree"):
+        analytics.CostTree("parent", "Module", children=(first, second))
+
+
+def test_public_cost_reports_validate_closed_consistent_symbolic_results() -> None:
+    identity = sympy.Dummy("tokens", integer=True, nonnegative=True)
+    foreign = sympy.Dummy("foreign", integer=True, nonnegative=True)
+    cost = CostRepr(
+        "projection",
+        torch.ops.aten.mm.default,
+        {"self": TensorRepr((identity, 3)), "mat2": TensorRepr((3, 4))},
+    )
+    term = CostTerm("model", cost, 24 * identity)
+
+    with pytest.raises(ValueError, match="symbolic total"):
+        analytics.CostReport((term,), 25 * identity, 50, {identity: 2}, known_symbols=frozenset({identity}))
+    with pytest.raises(ValueError, match="bound total"):
+        analytics.CostReport((term,), 24 * identity, 999, {identity: 2}, known_symbols=frozenset({identity}))
+    with pytest.raises(ValueError, match="unknown symbolic identities"):
+        analytics.CostReport((term,), 24 * identity, 24 * foreign, {}, known_symbols=frozenset({identity}))
+    with pytest.raises(ValueError, match="definitions contain a cycle"):
+        analytics.CostReport(
+            (term,),
+            24 * identity,
+            24 * identity,
+            {identity: foreign, foreign: identity},
+            known_symbols=frozenset({identity, foreign}),
+        )
+    with pytest.raises(ValueError, match="symbolic facts are inconsistent"):
+        analytics.CostReport(
+            (term,),
+            24 * identity,
+            48,
+            {identity: 2},
+            conditions=(sympy.Eq(identity, 3, evaluate=False),),
+            known_symbols=frozenset({identity}),
+        )
+
+    dependent = sympy.Dummy("dependent", integer=True, nonnegative=True)
+    deferred_domain = analytics.CostReport(
+        (),
+        0,
+        0,
+        {identity: dependent - 1},
+        known_symbols=frozenset({identity, dependent}),
+    )
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        deferred_domain.substitute({dependent: 0})
+
+
+def test_cost_repr_requires_symbolic_metadata_for_tensor_schema_arguments() -> None:
+    with pytest.raises(TypeError, match="must be represented by TensorRepr"):
+        CostRepr("live tensor", torch.ops.aten.sin.default, {"self": torch.empty(2, 3)})
+    with pytest.raises(TypeError, match="sequence of TensorRepr"):
+        CostRepr("not a sequence", torch.ops.aten.cat.default, {"tensors": TensorRepr((2, 3))})
+    with pytest.raises(TypeError, match="must be represented by TensorRepr"):
+        CostRepr(
+            "live tensor list",
+            torch.ops.aten.cat.default,
+            {"tensors": [TensorRepr((2, 3)), torch.empty(2, 4)]},
+        )
+    with pytest.raises(TypeError, match="rather than live torch.Tensor"):
+        CostRepr(
+            "tensor in scalar slot",
+            torch.ops.aten.cat.default,
+            {"tensors": [TensorRepr((2, 3))], "dim": torch.tensor(0)},
+        )
+    with pytest.raises(TypeError, match="non-tensor argument 'dim'"):
+        CostRepr(
+            "tensor metadata in scalar slot",
+            torch.ops.aten.cat.default,
+            {"tensors": [TensorRepr((2, 3))], "dim": TensorRepr(())},
+        )
+
+
+def test_cost_repr_recurses_through_optional_tensor_lists() -> None:
+    valid = CostRepr(
+        "advanced index",
+        torch.ops.aten.index.Tensor,
+        {"self": TensorRepr((3, 4)), "indices": [TensorRepr((2,)), None]},
+    )
+
+    assert valid.arguments["indices"] == (TensorRepr((2,)), None)
+    with pytest.raises(TypeError, match="must be represented by TensorRepr"):
+        CostRepr(
+            "invalid advanced index",
+            torch.ops.aten.index.Tensor,
+            {"self": TensorRepr((3, 4)), "indices": [1, None]},
+        )
+
+
+def test_cost_repr_rejects_tensor_metadata_nested_in_nontensor_lists() -> None:
+    with pytest.raises(TypeError, match="non-tensor argument 'shape'"):
+        CostRepr(
+            "invalid reshape",
+            torch.ops.aten.reshape.default,
+            {"self": TensorRepr((2, 3)), "shape": [TensorRepr(())]},
+        )
 
 
 def test_module_state_footprint_uses_torch_registered_state_traversal() -> None:
@@ -294,6 +584,44 @@ def test_symbol_environment_rejects_incompatible_definitions_and_cycles() -> Non
         Cyclic().cost_repr()
 
 
+@pytest.mark.parametrize("location", ["binding", "cost", "child_argument", "child_repetition"])
+def test_cost_providers_cannot_introduce_undeclared_symbol_identities(location: str) -> None:
+    foreign = sympy.Symbol("foreign", integer=True, nonnegative=True)
+
+    class ForeignSymbol(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.child = Linear(3, 4)
+
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("tokens")
+            if location == "binding":
+                s.bind(width=foreign)
+            if location == "cost":
+                return (
+                    CostRepr(
+                        "foreign projection",
+                        torch.ops.aten.bmm.default,
+                        {
+                            "self": TensorRepr((1, s.tokens, foreign)),
+                            "mat2": TensorRepr((1, foreign, 4)),
+                        },
+                    ),
+                )
+            return ()
+
+        def _cost_children(self, scope):
+            if location == "child_argument":
+                return (scope.child("child", self.child, arguments={"d_in": foreign}),)
+            if location == "child_repetition":
+                return (scope.child("child", self.child, repetitions=foreign),)
+            return ()
+
+    with pytest.raises(ValueError, match="references undeclared scoped symbols: foreign"):
+        ForeignSymbol().cost_repr()
+
+
 def test_symbolic_dimensions_and_repetitions_reject_definite_negative_values() -> None:
     with pytest.raises(ValueError, match="must be nonnegative"):
         TensorRepr((-1, 3))
@@ -304,6 +632,131 @@ def test_symbolic_dimensions_and_repetitions_reject_definite_negative_values() -
             {"self": TensorRepr((1, 2, 3)), "mat2": TensorRepr((1, 3, 4))},
             repetitions=-1,
         )
+
+
+@pytest.mark.parametrize("value", [True, False, 1.0, 1.5, float("nan"), float("inf"), sympy.true])
+def test_symbolic_dimensions_reject_concrete_noninteger_values(value) -> None:
+    with pytest.raises(TypeError):
+        TensorRepr((value,))
+
+
+def test_symbolic_dimensions_retain_unresolved_symbolic_expressions() -> None:
+    dimension = sympy.Symbol("dimension")
+
+    assert TensorRepr((dimension,)).shape == (dimension,)
+
+
+@pytest.mark.parametrize("location", ["axis", "cost_repetition", "child_repetition"])
+def test_domain_checks_reject_values_that_become_invalid_after_binding(location: str) -> None:
+    class DeferredDomain(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.child = Linear(2, 2)
+
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("tokens")
+            axis = s.tokens / 2 if location == "axis" else s.tokens
+            repetitions = s.tokens / 2 if location == "cost_repetition" else 1
+            return (
+                CostRepr(
+                    "deferred domain",
+                    torch.ops.aten.bmm.default,
+                    {
+                        "self": TensorRepr((1, axis, 2)),
+                        "mat2": TensorRepr((1, 2, 2)),
+                    },
+                    repetitions=repetitions,
+                ),
+            )
+
+        def _cost_children(self, scope):
+            if location != "child_repetition":
+                return ()
+            return (scope.child("child", self.child, repetitions=scope.symbols.tokens / 2),)
+
+    tree = DeferredDomain().cost_repr()
+    tokens = tree.find_symbols("tokens")[0]
+    report = matmul_flops(tree, strict=True)
+
+    assert tokens in report.bound_total.free_symbols
+    with pytest.raises(ValueError, match="must be integers"):
+        report.substitute({tokens: 3})
+
+
+def test_domain_checks_reject_values_that_become_negative_after_binding() -> None:
+    class DeferredDomain(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("tokens")
+            return (
+                CostRepr(
+                    "deferred domain",
+                    torch.ops.aten.bmm.default,
+                    {
+                        "self": TensorRepr((1, s.tokens - 10, 2)),
+                        "mat2": TensorRepr((1, 2, 2)),
+                    },
+                ),
+            )
+
+    tree = DeferredDomain().cost_repr()
+    tokens = tree.find_symbols("tokens")[0]
+
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        matmul_flops(tree, substitutions={tokens: 3}, strict=True)
+
+
+def test_domain_checks_retain_child_bindings_shadowed_by_parent_arguments() -> None:
+    class Child(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("width", "offset")
+            s.bind(width=s.offset - 10)
+            return ()
+
+    class Parent(Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.child = Child()
+
+        def _cost_repr(self, scope):
+            scope.symbols.unbound("width")
+            return ()
+
+        def _cost_children(self, scope):
+            return (scope.child("child", self.child, arguments={"width": scope.symbols.width}),)
+
+    tree = Parent().cost_repr()
+    offset = tree.find_symbols("offset")[0]
+
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        matmul_flops(tree, substitutions={offset: 3}, strict=True)
+
+
+def test_domain_expressions_survive_incremental_report_substitution() -> None:
+    class DeferredDomains(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("tokens", "width")
+            return (
+                CostRepr(
+                    "deferred domains",
+                    torch.ops.aten.bmm.default,
+                    {
+                        "self": TensorRepr((1, s.tokens / 2, s.width - 10)),
+                        "mat2": TensorRepr((1, s.width - 10, 2)),
+                    },
+                ),
+            )
+
+    tree = DeferredDomains().cost_repr()
+    tokens = tree.find_symbols("tokens")[0]
+    width = tree.find_symbols("width")[0]
+    partly_bound = matmul_flops(tree, strict=True).substitute({tokens: 4})
+
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        partly_bound.substitute({width: 3})
 
 
 class _DirectedLinearParent(Module):
@@ -359,6 +812,7 @@ def test_child_arguments_preserve_and_validate_instance_bindings() -> None:
 
 def test_report_substitutions_are_additive_facts_not_overrides() -> None:
     tree = Linear(3, 5).cost_repr()
+    tokens = tree.find_symbols("tokens")[0]
     d_in = tree.find_symbols("d_in")[0]
 
     assert matmul_flops(tree, substitutions={d_in: 3}).conditions == ()
@@ -366,6 +820,16 @@ def test_report_substitutions_are_additive_facts_not_overrides() -> None:
         matmul_flops(tree, substitutions={d_in: 4})
     with pytest.raises(ValueError, match="unknown symbolic identities"):
         matmul_flops(tree, substitutions={sympy.Dummy("external", integer=True): 1})
+    with pytest.raises(ValueError, match="substitution values contain unknown symbolic identities"):
+        matmul_flops(tree, substitutions={tokens: sympy.Dummy("external", integer=True)})
+
+
+def test_report_substitutions_may_relate_known_scoped_symbols() -> None:
+    tree = Linear(3, 5).cost_repr()
+    tokens = tree.find_symbols("tokens")[0]
+    d_in = tree.find_symbols("d_in")[0]
+
+    assert matmul_flops(tree, substitutions={tokens: d_in}, strict=True).bound_total == 90
 
 
 def test_report_substitutions_reject_symbolic_definition_cycles() -> None:
@@ -547,6 +1011,62 @@ def test_dense_product_policies_reject_structurally_invalid_operands(cost) -> No
         matmul_flops(Described().cost_repr(), strict=True)
 
 
+@pytest.mark.parametrize(
+    ("cost", "invoke"),
+    [
+        (
+            CostRepr(
+                "directionally invalid addmm addend",
+                torch.ops.aten.addmm.default,
+                {
+                    "self": TensorRepr((2, 4)),
+                    "mat1": TensorRepr((1, 3)),
+                    "mat2": TensorRepr((3, 4)),
+                },
+            ),
+            lambda: torch.addmm(torch.empty((2, 4)), torch.empty((1, 3)), torch.empty((3, 4))),
+        ),
+        (
+            CostRepr(
+                "directionally invalid baddbmm addend",
+                torch.ops.aten.baddbmm.default,
+                {
+                    "self": TensorRepr((2, 1, 4)),
+                    "batch1": TensorRepr((1, 1, 3)),
+                    "batch2": TensorRepr((1, 3, 4)),
+                },
+            ),
+            lambda: torch.baddbmm(
+                torch.empty((2, 1, 4)),
+                torch.empty((1, 1, 3)),
+                torch.empty((1, 3, 4)),
+            ),
+        ),
+        (
+            CostRepr(
+                "over-ranked addmm addend",
+                torch.ops.aten.addmm.default,
+                {
+                    "self": TensorRepr((1, 2, 4)),
+                    "mat1": TensorRepr((2, 3)),
+                    "mat2": TensorRepr((3, 4)),
+                },
+            ),
+            lambda: torch.addmm(torch.empty((1, 2, 4)), torch.empty((2, 3)), torch.empty((3, 4))),
+        ),
+    ],
+)
+def test_added_product_policy_matches_torch_directional_expansion(cost, invoke) -> None:
+    class Described(Module):
+        def _cost_repr(self, scope):
+            return (cost,)
+
+    with pytest.raises(RuntimeError):
+        invoke()
+    with pytest.raises(ValueError, match="addend"):
+        matmul_flops(Described().cost_repr(), strict=True)
+
+
 def test_linear_symbolic_cost_matches_meta_flop_counter() -> None:
     linear = Linear(3, 5, device=torch.device("meta"))
     tree = linear.cost_repr()
@@ -558,6 +1078,33 @@ def test_linear_symbolic_cost_matches_meta_flop_counter() -> None:
 
     assert set(counter.get_flop_counts()["Global"]) == {torch.ops.aten.bmm}
     assert matmul_flops(tree, substitutions={tokens: 7}).bound_total == counter.get_total_flops()
+
+
+def test_logical_matmul_cost_survives_einx_unit_axis_strength_reduction() -> None:
+    linear = Linear(1, 5, device=torch.device("meta"))
+    linear_tree = linear.cost_repr()
+    linear_tokens = linear_tree.find_symbols("tokens")[0]
+    linear_counter = FlopCounterMode(display=False)
+
+    with linear_counter:
+        linear(torch.empty((8, 1), device="meta"))
+
+    linear_report = matmul_flops(linear_tree, substitutions={linear_tokens: 8}, strict=True)
+    assert linear_tree.costs[0].operation is torch.ops.aten.bmm.default
+    assert linear_report.bound_total == 80
+    assert linear_counter.get_total_flops() == 0
+
+    swiglu = SwiGLU_packed_input(1, 5, device=torch.device("meta"))
+    swiglu_tree = swiglu.cost_repr()
+    swiglu_tokens = swiglu_tree.find_symbols("tokens")[0]
+    swiglu_counter = FlopCounterMode(display=False)
+
+    with swiglu_counter:
+        swiglu(torch.empty((8, 1), device="meta"))
+
+    swiglu_report = matmul_flops(swiglu_tree, substitutions={swiglu_tokens: 8}, strict=True)
+    assert swiglu_report.bound_total == 240
+    assert swiglu_counter.get_total_flops() == 80
 
 
 def test_unsupported_operations_and_external_modules_remain_visible() -> None:
@@ -635,6 +1182,40 @@ def test_self_attention_symbolic_cost_matches_meta_flop_counter(num_kv_heads: in
     assert set(counter.get_flop_counts()["Global"]) == {torch.ops.aten.bmm}
 
 
+@pytest.mark.parametrize("activation_layout", ["head_before_sequence", "head_after_sequence"])
+@pytest.mark.parametrize("num_kv_heads", [4, 2, 1])
+def test_self_attention_cost_matches_generalized_batch_and_head_layouts(
+    activation_layout: Literal["head_before_sequence", "head_after_sequence"],
+    num_kv_heads: int,
+) -> None:
+    module = MultiheadSelfAttention(
+        d_model=12,
+        num_heads=4,
+        num_kv_heads=num_kv_heads,
+        d_k=4,
+        d_v=2,
+        rope=RotaryPositionalEmbedding(10_000.0, 4, 8, device=torch.device("meta")),
+        _layout_strategy=activation_layout,
+        device=torch.device("meta"),
+    )
+    tree = module.cost_repr()
+    report = matmul_flops(
+        tree,
+        substitutions={
+            tree.find_symbols("batch")[0]: 6,
+            tree.find_symbols("sequence")[0]: 5,
+        },
+        strict=True,
+    )
+    counter = FlopCounterMode(display=False)
+
+    with counter:
+        module(torch.empty((2, 3, 5, 12), device="meta"))
+
+    assert report.bound_total == counter.get_total_flops()
+    assert set(counter.get_flop_counts()["Global"]) == {torch.ops.aten.bmm}
+
+
 def test_grouped_attention_encodes_batching_and_heads_in_operands() -> None:
     tree = MultiheadSelfAttention(8, 4, num_kv_heads=2, d_k=2, d_v=2).cost_repr()
     scores = tree.costs[1]
@@ -693,6 +1274,67 @@ def test_transformer_lm_keeps_invocation_shape_symbolic_until_bound() -> None:
     assert batch in report.bound_total.free_symbols
     assert sequence in report.bound_total.free_symbols
     assert report.substitute({batch: 1, sequence: 8}).bound_total.is_Integer
+
+
+def test_transformer_lm_folding_rejects_layer_count_drift() -> None:
+    model = TransformerLM(17, 8, 8, 2, 4, 12, 10_000.0, device=torch.device("meta"))
+    model.num_layers = 3
+
+    with pytest.raises(ValueError, match="num_layers to match the registered layer count"):
+        model.cost_repr()
+
+
+def test_transformer_lm_folding_requires_structure_not_weight_identity() -> None:
+    model = TransformerLM(17, 8, 8, 2, 4, 12, 10_000.0, device=torch.device("meta"))
+    model.layers[1] = GPTDecoderLayer(8, 4, 12, 8, 10_000.0, device=torch.device("meta"))
+
+    model.cost_repr()
+
+    model.layers[1] = GPTDecoderLayer(8, 4, 16, 8, 10_000.0, device=torch.device("meta"))
+    with pytest.raises(ValueError, match="requires homogeneous cost-driving configuration"):
+        model.cost_repr()
+
+
+def test_transformer_lm_folding_checks_same_shape_attention_configurations() -> None:
+    model = TransformerLM(17, 8, 4, 2, 2, 12, 10_000.0, device=torch.device("meta"))
+    configurations = ((1, 1, 2, 4), (2, 1, 2, 2))
+    for layer, (query_heads, kv_heads, d_k, d_v) in zip(model.layers, configurations, strict=True):
+        assert isinstance(layer, GPTDecoderLayer)
+        layer.attn.update = MultiheadSelfAttention(
+            d_model=4,
+            num_heads=query_heads,
+            num_kv_heads=kv_heads,
+            d_k=d_k,
+            d_v=d_v,
+            rope=RotaryPositionalEmbedding(10_000.0, d_k, 8, device=torch.device("meta")),
+            device=torch.device("meta"),
+        )
+
+    first_layer, second_layer = model.layers
+    assert isinstance(first_layer, GPTDecoderLayer)
+    assert isinstance(second_layer, GPTDecoderLayer)
+    first_state = tuple(parameter.shape for parameter in first_layer.attn.update.parameters())
+    second_state = tuple(parameter.shape for parameter in second_layer.attn.update.parameters())
+    assert first_state == second_state
+    with pytest.raises(ValueError, match="requires homogeneous cost-driving configuration"):
+        model.cost_repr()
+
+
+def test_transformer_lm_folding_ignores_rope_capacity_when_cost_is_unchanged() -> None:
+    model = TransformerLM(17, 8, 8, 2, 4, 12, 10_000.0, device=torch.device("meta"))
+    model.layers[1] = GPTDecoderLayer(8, 4, 12, 16, 10_000.0, device=torch.device("meta"))
+
+    model.cost_repr()
+
+
+def test_transformer_lm_folding_checks_delegated_module_types() -> None:
+    model = TransformerLM(17, 8, 8, 2, 4, 12, 10_000.0, device=torch.device("meta"))
+    second_layer = model.layers[1]
+    assert isinstance(second_layer, GPTDecoderLayer)
+    second_layer.attn.norm = Linear(8, 8, device=torch.device("meta"))
+
+    with pytest.raises(ValueError, match="requires homogeneous cost-driving configuration"):
+        model.cost_repr()
 
 
 def test_transformer_lm_state_footprint_matches_architectural_formula() -> None:
