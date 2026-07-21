@@ -6,6 +6,36 @@ This note records how PyTorch represents and observes computation, which parts c
 description, and which semantic information still has to come from the model author. It is a research memo and a set of
 refined minutes. Names and interfaces mentioned here are not stability promises.
 
+## Reference map
+
+The most useful introductions to the machinery discussed below are:
+
+- [How Does the Dispatcher Work?](https://docs.pytorch.org/devlogs/dispatcher/2026-04-16-how-does-the-dispatcher-work/)
+  develops the current dispatcher model from first principles.
+- [PyTorch internals](https://blog.ezyang.com/2019/05/pytorch-internals/) gives the broader conceptual map of
+  tensors, storage, autograd, ATen, and generated bindings. Some implementation details are historical.
+- [Let's talk about the PyTorch dispatcher](https://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/)
+  explains dispatch keys, registration, boxing, and redispatch in greater depth.
+- [Extending PyTorch](https://docs.pytorch.org/docs/stable/notes/extending.html) introduces `__torch_function__`,
+  `__torch_dispatch__`, modes, and the boundaries among the extension mechanisms.
+- [`torch.library`](https://docs.pytorch.org/docs/stable/library.html) and the
+  [custom-operator guide](https://docs.pytorch.org/tutorials/advanced/custom_ops_landing_page.html) cover the public
+  operator-registration system, including schemas, fake implementations, autograd, transforms, and `opcheck`.
+- The [meta-device guide](https://docs.pytorch.org/docs/stable/meta.html),
+  [`ShapeEnv` reference](https://docs.pytorch.org/docs/main/generated/torch.fx.experimental.symbolic_shapes.ShapeEnv.html),
+  and [`torch.export` programming model](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/export/programming_model.html)
+  cover metadata-only execution and Torch's symbolic-shape machinery.
+- The [`torch.export` overview](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/export.html),
+  [API reference](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/export/api_reference.html),
+  [Export IR specification](https://docs.pytorch.org/docs/stable/user_guide/torch_compiler/export/ir_spec.html), and
+  [Core ATen and Prims IR catalog](https://docs.pytorch.org/docs/stable/torch.compiler_ir.html) describe successively
+  more explicit captured representations and decomposition levels.
+- The [`FlopCounterMode` source](https://github.com/pytorch/pytorch/blob/main/torch/utils/flop_counter.py) is the closest
+  existing analogue to the observer and formula-policy split used here.
+
+These sources do not all describe the same PyTorch release. The current official documentation should govern public API
+usage; the older internals essays remain valuable for their conceptual explanations.
+
 ## ATen operators and their schemas
 
 ATen is the operator layer reached after Python conveniences such as tensor methods have entered the PyTorch dispatcher.
@@ -16,8 +46,9 @@ For example, an annotation such as `Tensor(a!)` says that the tensor belongs to 
 path is implemented by the C++ [`SchemaParser`](https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/frontend/function_schema_parser.cpp),
 which delegates type and alias annotations to `SchemaTypeParser`. `torch.library.Library.define()` passes operator-schema
 strings into this machinery; its Python entry point lives in
-[`torch/library.py`](https://github.com/pytorch/pytorch/blob/main/torch/library.py). A private Python binding is useful for
-inspection:
+[`torch/library.py`](https://github.com/pytorch/pytorch/blob/main/torch/library.py), while the supported interface is
+documented under [`torch.library`](https://docs.pytorch.org/docs/stable/library.html). A private Python binding is useful
+for inspection:
 
 ```python
 schema = torch._C.parse_schema(
@@ -54,7 +85,9 @@ remain visible too, even when the initial policies do not know how to interpret 
 
 `TorchDispatchMode` observes calls after Python tensor syntax has been normalized into dispatcher operations. PyTorch's
 [extension notes](https://docs.pytorch.org/docs/stable/notes/extending.html#extending-torch-native-api) explain that, at
-this level, `torch.add(a, 2)` and `a + 2` arrive as the same ATen call.
+this level, `torch.add(a, 2)` and `a + 2` arrive as the same ATen call. The current
+[dispatcher walkthrough](https://docs.pytorch.org/devlogs/dispatcher/2026-04-16-how-does-the-dispatcher-work/) explains
+how per-tensor keys, thread-local included and excluded sets, and operator dispatch tables select an implementation.
 
 [`FlopCounterMode`](https://github.com/pytorch/pytorch/blob/main/torch/utils/flop_counter.py) is a particularly close
 precedent. It is a context manager backed by `TorchDispatchMode`. Its registry is keyed by ATen operator packets, while
@@ -89,6 +122,9 @@ an implicit zero.
 ## `mm`, `bmm`, and related vocabularies
 
 PyTorch operator names and traditional BLAS routine names overlap conceptually but are not one namespace.
+PyTorch groups the relevant public functions under its
+[BLAS and LAPACK operations](https://docs.pytorch.org/docs/stable/torch.html#blas-and-lapack-operations) index, but their
+Python and ATen names need not be classic BLAS routine names.
 
 | PyTorch/ATen name | Meaning |
 |---|---|
@@ -146,7 +182,10 @@ needs it.
 An exported dynamic dimension makes the distinction observable. Its `SymInt` may have a concrete node hint from the
 example input while its node expression is a separate SymPy symbol; `sympy.sympify()` returns that symbol, not the hint.
 Range constraints likewise remain separately attached to the exported program. Importing the expression without its
-scope and constraints would therefore lose provenance even for a backed value.
+scope and constraints would therefore lose provenance even for a backed value. The
+[`torch.export` symbolic-shape model](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/export/programming_model.html#basics-of-symbolic-shapes)
+describes how fake implementations propagate expressions such as sums of input dimensions and how `ShapeEnv` records
+guards over them.
 
 The [`meta` device](https://docs.pytorch.org/docs/stable/meta.html) stores tensor metadata without allocating tensor data.
 Most operations can produce meta outputs with the shapes, strides, and dtypes that real execution would have produced,
@@ -214,6 +253,14 @@ hooks and `ModuleTracker` can associate a successful call with that hierarchy. T
 for an authored symbolic cost description, so a small protected provider remains necessary. Official hooks should still
 transport future invocation information; the provider need not reinvent execution interception.
 
+The module-specific [`register_forward_pre_hook()`](https://docs.pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_forward_pre_hook)
+and [`register_forward_hook()`](https://docs.pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_forward_hook)
+methods return removable handles, making a temporary context-managed observer possible without permanent instrumentation.
+These hooks participate in `module(...)`; callers that invoke `module.forward(...)` directly bypass `Module.__call__`
+and therefore the hook machinery. [`ModuleTracker`](https://docs.pytorch.org/docs/stable/module_tracker.html) is the
+official context manager for associating execution with the active module hierarchy and is already used by
+`FlopCounterMode`.
+
 Container registration is not always execution. `Sequential` defines a chained forward and can be interpreted directly;
 `ModuleList` and `ModuleDict` only register slots. Their children may be displayed as an inventory, but a strict static
 cost report remains unresolved until an authored parent states which slots are invoked and with what repetition.
@@ -224,10 +271,15 @@ use `scope.child(...)` to identify actual calls.
 [`torch.fx`](https://docs.pytorch.org/docs/stable/fx.html) represents executable dataflow as a graph of calls and values.
 [`torch.export`](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/export.html) captures an ahead-of-time
 `ExportedProgram` backed by FX. It lifts parameters and buffers into a graph signature, records shape constraints, and
-normalizes tensor computation into ATen and custom operators. Export can retain the default training-oriented ATen IR,
-functionalize it, or decompose it into the smaller Core ATen operator set; the
+normalizes tensor computation into ATen and custom operators. The
+[`export()` API](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/export/api_reference.html#torch.export.export)
+accepts example inputs and a `dynamic_shapes` specification and returns the program together with its captured state and
+constraints. Export can retain the default training-oriented ATen IR, functionalize it, or decompose it into the smaller
+Core ATen operator set; the
 [Export IR specification](https://docs.pytorch.org/docs/stable/user_guide/torch_compiler/export/ir_spec.html) describes the
-resulting graph and state.
+resulting graph and state. The separate
+[Core ATen and Prims IR catalog](https://docs.pytorch.org/docs/stable/torch.compiler_ir.html) lists their schemas and
+explains that Prims makes type promotion and broadcasting more explicit than Core ATen.
 
 Export is a valuable observed frontend and lowering inspector. It also specializes parameter shapes and concrete Python
 structure: a `ModuleList` length is normally unrolled, and semantic labels such as "packed QKV projection" are not the
