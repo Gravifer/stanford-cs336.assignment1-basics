@@ -8,7 +8,16 @@ from torch.utils.flop_counter import FlopCounterMode
 
 import cs336_basics.nn.analytics as analytics
 from cs336_basics.nn import DeltaLayer, Module
-from cs336_basics.nn.analytics import CostRepr, CostTerm, SymbolRepr, TensorRepr, cost_repr, matmul_flops
+from cs336_basics.nn.analytics import (
+    CostRepr,
+    CostTerm,
+    ModuleStateFootprint,
+    SymbolRepr,
+    TensorRepr,
+    cost_repr,
+    matmul_flops,
+    module_state_footprint,
+)
 from cs336_basics.nn.attention import MultiheadAttention, MultiheadSelfAttention, RotaryPositionalEmbedding
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
 from cs336_basics.nn.model import TransformerLM
@@ -84,6 +93,80 @@ def test_cost_repr_requires_exact_overload_and_schema_arguments() -> None:
         CostRepr("conflict", torch.ops.aten.bmm.default, {**operands, "right": operands["mat2"]})
 
 
+def test_module_state_footprint_uses_torch_registered_state_traversal() -> None:
+    class MixedState(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.trainable = nn.Parameter(torch.empty((2, 3), dtype=torch.float32))
+            self.frozen = nn.Parameter(torch.empty(4, dtype=torch.float16), requires_grad=False)
+            self.register_buffer("persistent", torch.empty(5, dtype=torch.uint8))
+            self.register_buffer("temporary", torch.empty(2, dtype=torch.float64), persistent=False)
+
+    module = MixedState()
+    report = module_state_footprint(nn.ModuleList([module, module]))
+
+    assert report == ModuleStateFootprint(
+        parameter_numel=10,
+        parameter_bytes=32,
+        trainable_parameter_numel=6,
+        trainable_parameter_bytes=24,
+        buffer_numel=7,
+        buffer_bytes=21,
+    )
+
+
+def test_module_state_footprint_works_for_meta_models_and_rejects_nonmodules() -> None:
+    module = Linear(3, 5, device=torch.device("meta"), dtype=torch.float16)
+    report = module_state_footprint(module)
+
+    assert report.parameter_numel == 15
+    assert report.parameter_bytes == 30
+    assert report.trainable_parameter_numel == 15
+    assert report.buffer_numel == 0
+    assert module.state_footprint() == report
+    with pytest.raises(TypeError, match="torch.nn.Module"):
+        module_state_footprint(object())  # ty: ignore[invalid-argument-type]
+
+
+def test_module_state_footprint_counts_logical_views_and_deduplicates_tied_parameters() -> None:
+    class TiedAndViewed(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            shared = nn.Parameter(torch.empty((1, 6)))
+            self.first = nn.Linear(6, 1, bias=False)
+            self.second = nn.Linear(6, 1, bias=False)
+            self.first.weight = shared
+            self.second.weight = shared
+
+            storage = torch.empty(8)
+            self.register_buffer("left", storage[:6])
+            self.register_buffer("right", storage[2:])
+
+    report = module_state_footprint(TiedAndViewed())
+
+    assert report.parameter_numel == 6
+    assert report.parameter_bytes == 24
+    assert report.buffer_numel == 12
+    assert report.buffer_bytes == 48
+
+
+def test_module_state_footprint_counts_cross_category_registration_per_category() -> None:
+    module = nn.Module()
+    tensor = nn.Parameter(torch.empty(3, dtype=torch.float16))
+    module.register_parameter("weight", tensor)
+    module.register_buffer("mirror", tensor)
+
+    report = module_state_footprint(module)
+
+    assert report.parameter_numel == report.buffer_numel == 3
+    assert report.parameter_bytes == report.buffer_bytes == 6
+
+
+def test_module_state_footprint_rejects_uninitialized_lazy_state() -> None:
+    with pytest.raises(ValueError, match="requires initialized"):
+        module_state_footprint(nn.LazyLinear(4))
+
+
 def test_linear_cost_uses_symbolic_aten_operands() -> None:
     tree = Linear(3, 5).cost_repr()
     cost = tree.costs[0]
@@ -133,6 +216,51 @@ def test_symbol_environment_is_a_focused_builder_for_immutable_records() -> None
     assert records[3].binding == 2 * records[2].symbol
     with pytest.raises(RuntimeError, match="environment is frozen"):
         captured["symbols"].unbound("late")  # ty: ignore[unresolved-attribute]
+
+
+def test_symbol_environment_keeps_display_names_separate_from_local_identity() -> None:
+    class Named(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("query_heads", "kv_heads")
+            assert s.display(query_heads="H_q", kv_heads="H_kv") is s
+            return ()
+
+    tree = Named().cost_repr()
+
+    assert tuple(record.local_name for record in tree.symbols) == ("query_heads", "kv_heads")
+    assert tuple(record.display_name for record in tree.symbols) == ("H_q", "H_kv")
+    assert tree.find_symbols("H_q") == (tree.symbols[0].symbol,)
+    assert tree.find_symbols("query_heads") == ()
+
+
+def test_symbol_environment_rejects_invalid_display_names() -> None:
+    class InvalidDisplay(Module):
+        def __init__(self, local_name: str, display_name: str) -> None:
+            super().__init__()
+            self.local_name = local_name
+            self.display_name = display_name
+
+        def _cost_repr(self, scope):
+            scope.symbols.unbound("width")
+            scope.symbols.display(**{self.local_name: self.display_name})
+            return ()
+
+    with pytest.raises(ValueError, match="undeclared"):
+        InvalidDisplay("depth", "D").cost_repr()
+    with pytest.raises(ValueError, match="non-empty"):
+        InvalidDisplay("width", "").cost_repr()
+    with pytest.raises(ValueError, match="non-empty"):
+        InvalidDisplay("width", "   ").cost_repr()
+
+    class CollidingDisplay(Module):
+        def _cost_repr(self, scope):
+            scope.symbols.unbound("width", "depth")
+            scope.symbols.display(width="depth")
+            return ()
+
+    with pytest.raises(ValueError, match="unique"):
+        CollidingDisplay().cost_repr()
 
 
 @pytest.mark.parametrize("name", ["bind", "_private", "not-valid", "class"])
@@ -266,6 +394,157 @@ def test_course_policy_keeps_symbolic_and_bound_views() -> None:
     assert report.substitute({tokens: 7}).bound_total == 210
     assert report.unsupported == ()
     assert isinstance(report.terms[0], CostTerm)
+
+    resolved = report.substitute({tokens: 7})
+    assert sympy.simplify(resolved.terms[0].expression - 2 * tokens * d_in * d_out) == 0
+    assert resolved.bound_terms[0].expression == 210
+    assert sum(term.expression for term in resolved.bound_terms) == resolved.bound_total
+
+
+@pytest.mark.parametrize(
+    ("cost", "invoke", "packet"),
+    [
+        (
+            CostRepr(
+                "matrix product",
+                torch.ops.aten.mm.default,
+                {"self": TensorRepr((2, 3)), "mat2": TensorRepr((3, 4))},
+            ),
+            lambda: torch.mm(torch.empty((2, 3), device="meta"), torch.empty((3, 4), device="meta")),
+            torch.ops.aten.mm,
+        ),
+        (
+            CostRepr(
+                "added matrix product",
+                torch.ops.aten.addmm.default,
+                {
+                    "self": TensorRepr(()),
+                    "mat1": TensorRepr((2, 3)),
+                    "mat2": TensorRepr((3, 4)),
+                },
+            ),
+            lambda: torch.addmm(
+                torch.empty((), device="meta"),
+                torch.empty((2, 3), device="meta"),
+                torch.empty((3, 4), device="meta"),
+                beta=0,
+                alpha=0,
+            ),
+            torch.ops.aten.addmm,
+        ),
+        (
+            CostRepr(
+                "added batched matrix product",
+                torch.ops.aten.baddbmm.default,
+                {
+                    "self": TensorRepr((1, 2, 1)),
+                    "batch1": TensorRepr((5, 2, 3)),
+                    "batch2": TensorRepr((5, 3, 4)),
+                },
+            ),
+            lambda: torch.baddbmm(
+                torch.empty((1, 2, 1), device="meta"),
+                torch.empty((5, 2, 3), device="meta"),
+                torch.empty((5, 3, 4), device="meta"),
+                beta=0,
+                alpha=0,
+            ),
+            torch.ops.aten.baddbmm,
+        ),
+    ],
+)
+def test_torch_registered_dense_product_policies_match_flop_counter(cost, invoke, packet) -> None:
+    class Described(Module):
+        def _cost_repr(self, scope):
+            return (cost,)
+
+    counter = FlopCounterMode(display=False)
+    with counter:
+        invoke()
+
+    report = matmul_flops(Described().cost_repr(), strict=True)
+    assert report.bound_total == counter.get_total_flops()
+    assert set(counter.get_flop_counts()["Global"]) == {packet}
+
+
+def test_dense_product_policy_preserves_symbolic_dimensions_and_operation_repetition() -> None:
+    class SymbolicProduct(Module):
+        def _cost_repr(self, scope):
+            s = scope.symbols
+            s.unbound("rows", "inner", "columns", "calls")
+            return (
+                CostRepr(
+                    "repeated matrix product",
+                    torch.ops.aten.mm.default,
+                    {
+                        "self": TensorRepr((s.rows, s.inner)),
+                        "mat2": TensorRepr((s.inner, s.columns)),
+                    },
+                    repetitions=s.calls,
+                ),
+            )
+
+    tree = SymbolicProduct().cost_repr()
+    rows, inner, columns, calls = (tree.find_symbols(name)[0] for name in ("rows", "inner", "columns", "calls"))
+    report = matmul_flops(tree, strict=True)
+
+    assert sympy.simplify(report.symbolic_total - 2 * calls * rows * inner * columns) == 0
+    assert report.substitute({rows: 3, inner: 0, columns: 5, calls: 7}).bound_total == 0
+
+
+@pytest.mark.parametrize(
+    "cost",
+    [
+        CostRepr(
+            "wrong-rank matrix product",
+            torch.ops.aten.mm.default,
+            {"self": TensorRepr((1, 2, 3)), "mat2": TensorRepr((3, 4))},
+        ),
+        CostRepr(
+            "mismatched added product",
+            torch.ops.aten.addmm.default,
+            {
+                "self": TensorRepr((2, 4)),
+                "mat1": TensorRepr((2, 3)),
+                "mat2": TensorRepr((5, 4)),
+            },
+        ),
+        CostRepr(
+            "unbroadcastable added product",
+            torch.ops.aten.addmm.default,
+            {
+                "self": TensorRepr((3, 5)),
+                "mat1": TensorRepr((2, 3)),
+                "mat2": TensorRepr((3, 4)),
+            },
+        ),
+        CostRepr(
+            "mismatched batched product",
+            torch.ops.aten.baddbmm.default,
+            {
+                "self": TensorRepr((5, 2, 4)),
+                "batch1": TensorRepr((5, 2, 3)),
+                "batch2": TensorRepr((7, 3, 4)),
+            },
+        ),
+        CostRepr(
+            "over-ranked batched addend",
+            torch.ops.aten.baddbmm.default,
+            {
+                "self": TensorRepr((1, 5, 2, 4)),
+                "batch1": TensorRepr((5, 2, 3)),
+                "batch2": TensorRepr((5, 3, 4)),
+            },
+        ),
+    ],
+)
+def test_dense_product_policies_reject_structurally_invalid_operands(cost) -> None:
+    class Described(Module):
+        def _cost_repr(self, scope):
+            return (cost,)
+
+    with pytest.raises(ValueError):
+        matmul_flops(Described().cost_repr(), strict=True)
 
 
 def test_linear_symbolic_cost_matches_meta_flop_counter() -> None:
@@ -414,3 +693,36 @@ def test_transformer_lm_keeps_invocation_shape_symbolic_until_bound() -> None:
     assert batch in report.bound_total.free_symbols
     assert sequence in report.bound_total.free_symbols
     assert report.substitute({batch: 1, sequence: 8}).bound_total.is_Integer
+
+
+def test_transformer_lm_state_footprint_matches_architectural_formula() -> None:
+    vocab_size = 17
+    context_length = 8
+    d_model = 8
+    num_layers = 3
+    num_heads = 4
+    d_ff = 12
+    model = TransformerLM(
+        vocab_size,
+        context_length,
+        d_model,
+        num_layers,
+        num_heads,
+        d_ff,
+        10_000.0,
+        device=torch.device("meta"),
+        dtype=torch.float16,
+    )
+
+    expected_parameters = (
+        2 * vocab_size * d_model
+        + num_layers * (4 * d_model**2 + 3 * d_model * d_ff + 2 * d_model)
+        + d_model
+    )
+    expected_rope_buffers = num_layers * context_length * (d_model // num_heads)
+    footprint = model.state_footprint()
+
+    assert footprint.parameter_numel == footprint.trainable_parameter_numel == expected_parameters
+    assert footprint.parameter_bytes == footprint.trainable_parameter_bytes == 2 * expected_parameters
+    assert footprint.buffer_numel == expected_rope_buffers
+    assert footprint.buffer_bytes == 4 * expected_rope_buffers

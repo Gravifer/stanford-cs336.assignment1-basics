@@ -20,10 +20,12 @@ __all__ = [
     "CostRepr",
     "CostTerm",
     "CostTree",
+    "ModuleStateFootprint",
     "SymbolRepr",
     "TensorRepr",
     "cost_repr",
     "matmul_flops",
+    "module_state_footprint",
 ]
 
 
@@ -81,6 +83,18 @@ class SymbolRepr:
             raise ValueError("a symbolic dimension requires a non-empty display name")
         if self.binding is not None:
             object.__setattr__(self, "binding", _expression(self.binding))
+
+
+@dataclass(frozen=True)
+class ModuleStateFootprint:
+    """Logical element and byte counts for a module's registered tensor state."""
+
+    parameter_numel: int
+    parameter_bytes: int
+    trainable_parameter_numel: int
+    trainable_parameter_bytes: int
+    buffer_numel: int
+    buffer_bytes: int
 
 
 @dataclass(frozen=True)
@@ -190,6 +204,7 @@ class _SymbolEnvironment:
     def __init__(self) -> None:
         self._symbols: dict[str, Any] = {}
         self._bindings: dict[str, Any] = {}
+        self._display_names: dict[str, str] = {}
         self._frozen = False
 
     def _validate_name(self, name: str) -> None:
@@ -235,6 +250,29 @@ class _SymbolEnvironment:
             self._bindings[name] = binding
         return self
 
+    def display(self, **names: str) -> _SymbolEnvironment:
+        """Assign human-facing names to symbols already declared in this scope."""
+        self._ensure_mutable()
+        if not names:
+            raise ValueError("display() requires at least one symbol name")
+        proposed = dict(self._display_names)
+        for local_name, display_name in names.items():
+            if local_name not in self._symbols:
+                raise ValueError(f"cannot name undeclared symbol {local_name!r}")
+            if not isinstance(display_name, str) or not display_name.strip():
+                raise ValueError(f"display name for {local_name!r} must be a non-empty string")
+            existing = self._display_names.get(local_name)
+            if existing is not None and existing != display_name:
+                raise ValueError(
+                    f"symbol {local_name!r} already has display name {existing!r}, got {display_name!r}"
+                )
+            proposed[local_name] = display_name
+        effective_names = [proposed.get(local_name, local_name) for local_name in self._symbols]
+        if len(set(effective_names)) != len(effective_names):
+            raise ValueError("display names must be unique within one symbolic scope")
+        self._display_names = proposed
+        return self
+
     def __getattr__(self, name: str) -> Any:
         try:
             return self._symbols[name]
@@ -274,7 +312,8 @@ class _SymbolEnvironment:
         self._check_cycles()
         self._frozen = True
         return tuple(
-            SymbolRepr(name, name, symbol, self._bindings.get(name)) for name, symbol in self._symbols.items()
+            SymbolRepr(name, self._display_names.get(name, name), symbol, self._bindings.get(name))
+            for name, symbol in self._symbols.items()
         )
 
 
@@ -371,6 +410,13 @@ class CostReport:
             conditions=conditions,
         )
 
+    @property
+    def bound_terms(self) -> tuple[CostTerm, ...]:
+        """Return component terms after applying this report's known bindings."""
+        return tuple(
+            replace(term, expression=_substitute(term.expression, self.bindings)) for term in self.terms
+        )
+
 
 @runtime_checkable
 class _CostProvider(Protocol):
@@ -448,6 +494,46 @@ def cost_repr(module: nn.Module) -> CostTree:
     return tree
 
 
+def _tensor_footprint_totals(tensors: Iterable[torch.Tensor]) -> tuple[int, int]:
+    """Count logical tensor elements and their dtype-sized bytes."""
+    count = 0
+    byte_count = 0
+    for tensor in tensors:
+        if torch.nn.parameter.is_lazy(tensor):
+            raise ValueError("module state footprint requires initialized parameters and buffers")
+        count += tensor.numel()
+        byte_count += tensor.numel() * tensor.element_size()
+    return count, byte_count
+
+
+def module_state_footprint(module: nn.Module) -> ModuleStateFootprint:
+    """Summarize registered parameters and buffers without allocating tensor data.
+
+    Byte counts are logical ``numel * element_size`` values aggregated across
+    devices and dtypes, not allocator peaks or sparse/compressed physical-storage
+    measurements. Torch suppresses duplicate identities within each parameter or
+    buffer traversal; distinct views sharing storage are counted separately, and
+    an object registered in both categories contributes to both.
+    """
+    if not isinstance(module, nn.Module):
+        raise TypeError(f"module_state_footprint expects a torch.nn.Module, got {type(module).__qualname__}")
+
+    parameters = tuple(module.parameters())
+    parameter_numel, parameter_bytes = _tensor_footprint_totals(parameters)
+    trainable_parameter_numel, trainable_parameter_bytes = _tensor_footprint_totals(
+        parameter for parameter in parameters if parameter.requires_grad
+    )
+    buffer_numel, buffer_bytes = _tensor_footprint_totals(module.buffers())
+    return ModuleStateFootprint(
+        parameter_numel=parameter_numel,
+        parameter_bytes=parameter_bytes,
+        trainable_parameter_numel=trainable_parameter_numel,
+        trainable_parameter_bytes=trainable_parameter_bytes,
+        buffer_numel=buffer_numel,
+        buffer_bytes=buffer_bytes,
+    )
+
+
 def _substitute(expression: Any, bindings: Mapping[Any, Any]) -> Any:
     """Apply transitive bindings until substitution reaches a fixed point."""
     sympy = _sympy()
@@ -473,19 +559,77 @@ def _same_dimension(left: Any, right: Any, description: str) -> None:
         raise ValueError(f"{description} must match, got {left} and {right}")
 
 
-def _bmm_flops(cost: CostRepr) -> Any:
-    left = _require_tensor(cost, "self")
-    right = _require_tensor(cost, "mat2")
+def _require_broadcastable(left: tuple[Any, ...], right: tuple[Any, ...], description: str) -> None:
+    """Require every aligned dimension to be provably equal or singleton."""
+    sympy = _sympy()
+    rank = max(len(left), len(right))
+    padded_left = (sympy.Integer(1),) * (rank - len(left)) + left
+    padded_right = (sympy.Integer(1),) * (rank - len(right)) + right
+    for left_axis, right_axis in zip(padded_left, padded_right, strict=True):
+        if sympy.simplify(left_axis - right_axis) == 0:
+            continue
+        if sympy.simplify(left_axis - 1) == 0 or sympy.simplify(right_axis - 1) == 0:
+            continue
+        raise ValueError(f"{description} are not broadcastable: {left} and {right}")
+
+
+def _mm_flops(cost: CostRepr, left_name: str = "self", right_name: str = "mat2") -> Any:
+    """Apply Torch's conventional dense rank-two matrix-product formula."""
+    left = _require_tensor(cost, left_name)
+    right = _require_tensor(cost, right_name)
+    if len(left.shape) != 2 or len(right.shape) != 2:
+        raise ValueError(f"{cost.operation} matrix operands must both be rank two")
+    rows, inner = left.shape
+    other_inner, columns = right.shape
+    _same_dimension(inner, other_inner, f"{cost.operation} inner dimensions")
+    return cost.repetitions * rows * columns * 2 * inner
+
+
+def _bmm_flops(cost: CostRepr, left_name: str = "self", right_name: str = "mat2") -> Any:
+    """Apply Torch's conventional dense rank-three batched-product formula."""
+    left = _require_tensor(cost, left_name)
+    right = _require_tensor(cost, right_name)
     if len(left.shape) != 3 or len(right.shape) != 3:
-        raise ValueError("aten.bmm operands must both be rank three")
+        raise ValueError(f"{cost.operation} batch-matrix operands must both be rank three")
     batch, rows, inner = left.shape
     other_batch, other_inner, columns = right.shape
-    _same_dimension(batch, other_batch, "aten.bmm batch dimensions")
-    _same_dimension(inner, other_inner, "aten.bmm inner dimensions")
+    _same_dimension(batch, other_batch, f"{cost.operation} batch dimensions")
+    _same_dimension(inner, other_inner, f"{cost.operation} inner dimensions")
     return cost.repetitions * batch * rows * columns * 2 * inner
 
 
-_MATMUL_POLICIES = {torch.ops.aten.bmm.default: _bmm_flops}
+def _addmm_flops(cost: CostRepr) -> Any:
+    """Count only the matrix product in an ``addmm`` invocation."""
+    addend = _require_tensor(cost, "self")
+    left = _require_tensor(cost, "mat1")
+    right = _require_tensor(cost, "mat2")
+    flops = _mm_flops(cost, "mat1", "mat2")
+    _require_broadcastable(addend.shape, (left.shape[0], right.shape[1]), "aten.addmm addend and product")
+    return flops
+
+
+def _baddbmm_flops(cost: CostRepr) -> Any:
+    """Count only the batched matrix products in a ``baddbmm`` invocation."""
+    addend = _require_tensor(cost, "self")
+    left = _require_tensor(cost, "batch1")
+    right = _require_tensor(cost, "batch2")
+    flops = _bmm_flops(cost, "batch1", "batch2")
+    if len(addend.shape) > 3:
+        raise ValueError("aten.baddbmm addend must have rank at most three")
+    _require_broadcastable(
+        addend.shape,
+        (left.shape[0], left.shape[1], right.shape[2]),
+        "aten.baddbmm addend and product",
+    )
+    return flops
+
+
+_MATMUL_POLICIES = {
+    torch.ops.aten.mm.default: _mm_flops,
+    torch.ops.aten.addmm.default: _addmm_flops,
+    torch.ops.aten.bmm.default: _bmm_flops,
+    torch.ops.aten.baddbmm.default: _baddbmm_flops,
+}
 
 
 def _tree_facts(tree: CostTree) -> tuple[dict[Any, Any], list[tuple[Any, Any]], frozenset[Any]]:

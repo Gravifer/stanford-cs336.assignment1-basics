@@ -18,10 +18,12 @@ from cs336_basics.nn import initializer as init
 from cs336_basics.nn.analytics import (
     CostRepr,
     CostTree,
+    ModuleStateFootprint,
     TensorRepr,
     _CostChild,
     _CostScope,
     cost_repr,
+    module_state_footprint,
 )
 
 # from .feed_forward import SwiGLU  # ! would be circular
@@ -46,6 +48,10 @@ class Module(nn.Module):
     def cost_repr(self) -> CostTree:
         """Collect this module's static symbolic cost representation."""
         return cost_repr(self)
+
+    def state_footprint(self) -> ModuleStateFootprint:
+        """Return the logical footprint of registered parameters and buffers."""
+        return module_state_footprint(self)
 
     def _cost_repr(self, scope: _CostScope) -> Iterable[CostRepr] | None:
         """Return local operations, or ``None`` until local work is classified."""
