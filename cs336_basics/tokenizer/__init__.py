@@ -1,4 +1,6 @@
 #! /usr/bin/env python3
+"""Byte-pair encoding training and tokenization."""
+
 import functools
 import heapq
 import json
@@ -311,20 +313,27 @@ def train_bpe(
 
 
 class TextTokenizer(ABC):
+    """Abstract interface for text tokenizers."""
+
     @abstractmethod
     def encode(self, text: str) -> list[int]:
+        """Encode text into token IDs."""
         raise NotImplementedError
 
     @abstractmethod
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+        """Lazily encode text chunks into token IDs."""
         raise NotImplementedError
 
     @abstractmethod
     def decode(self, ids: list[int]) -> str:
+        """Decode token IDs into text."""
         raise NotImplementedError
 
 
 class BPETokenizer(TextTokenizer):
+    """Byte-level BPE tokenizer with optional user-defined special tokens."""
+
     def __init__(
         self,
         vocab: dict[int, bytes],
@@ -390,6 +399,7 @@ class BPETokenizer(TextTokenizer):
         *,
         report_progress: bool = True,
     ):
+        """Load a pickled vocabulary and merge list, then construct a tokenizer."""
         with open(vocab_filepath, "rb") as f:
             vocab: dict[int, bytes] = pickle.load(f)  # ! we should let any exception propagate
             # assert isinstance(vocab, dict) and all(isinstance(k, int) and isinstance(v, bytes) for k, v in vocab.items()), (
@@ -458,6 +468,7 @@ class BPETokenizer(TextTokenizer):
         disallowed_special: Literal["all"] | Collection[str] = set(),
         report_progress: bool = True,
     ) -> list[int]:
+        """Encode text while enforcing the configured special-token policy."""
         # TODO: address <https://github.com/Gravifer/stanford-cs336.assignment1-basics/pull/4#discussion_r3409233519>
         if allowed_special == "all":  # even then we don't allow ones that are not supplied to __init__
             allowed_special: set[str] = set(self._user_defined_special_tokens.keys())
@@ -511,6 +522,7 @@ class BPETokenizer(TextTokenizer):
     def encode_iterable(
         self, iterable: Iterable[str], *, report_progress: bool = True, estimate_total: float | None = None
     ) -> Iterator[int]:
+        """Lazily encode text chunks, optionally reporting estimated progress."""
         # call self.encode() on each
         if report_progress:
             print()

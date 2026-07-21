@@ -259,6 +259,7 @@ dev = [
     { name = "rich" },
     { name = "scalene" },
     { name = "subword-nmt" },
+    { name = "sympy" },
     { name = "types-regex" },
     { name = "uv" },
 ]
@@ -300,6 +301,7 @@ dev = [
     { name = "rich", specifier = ">=15.0.0" },
     { name = "scalene", specifier = ">=2.3.0" },
     { name = "subword-nmt", specifier = ">=0.3.8" },
+    { name = "sympy", specifier = ">=1.14.0" },
     { name = "types-regex", specifier = ">=2026.5.9.20260518" },
     { name = "uv", specifier = ">=0.11.29" },
 ]

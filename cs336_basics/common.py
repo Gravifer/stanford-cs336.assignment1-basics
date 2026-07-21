@@ -1,3 +1,5 @@
+"""Shared display, memory-monitoring, and streaming helpers."""
+
 import os
 import sys
 import threading
@@ -88,6 +90,7 @@ class PeakMemoryMonitor:
 
     @property
     def peak_mb(self) -> float:
+        """Highest observed aggregate resident memory in mebibytes."""
         return self._peak_mb
 
 

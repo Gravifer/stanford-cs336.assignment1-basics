@@ -1,4 +1,9 @@
-from typing import Never, NoReturn
+"""Core neural-network modules used by the course implementations."""
+
+from collections.abc import Callable, Iterable, Mapping
+from functools import update_wrapper
+from math import prod
+from typing import Any, Never, NoReturn, cast
 
 import einx
 import einx._src.namedtensor.stage1 as einx_stage1
@@ -12,13 +17,99 @@ from typing_extensions import deprecated  # ? ruff doesn't see that python 3.13 
 
 from cs336_basics.nn import functional as F
 from cs336_basics.nn import initializer as init
+from cs336_basics.nn.analytics import (
+    CostObserver,
+    CostRepr,
+    CostTree,
+    ModuleStateFootprint,
+    TensorRepr,
+    _CostChild,
+    _CostScope,
+    cost_repr,
+    module_state_footprint,
+    observe_costs,
+)
 
 # from .feed_forward import SwiGLU  # ! would be circular
 
 type ModelVec = Float[torch.Tensor, "{self.d_model}"]  # ruff takes issue with this # noqa: F821
 
 
-class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torch.nn.sparse`
+__all__ = [
+    "DeltaLayer",
+    "Embedding",
+    "Linear",
+    "Module",
+    "RMSNorm",
+    "SiLU",
+    "SoftMax",
+]
+
+
+class Module(nn.Module):
+    """Torch module with an optional, composable symbolic-cost description."""
+
+    def cost_repr(self) -> CostTree:
+        """Collect this module's static symbolic cost representation."""
+        return cost_repr(self)
+
+    def state_footprint(self) -> ModuleStateFootprint:
+        """Return the logical footprint of registered parameters and buffers."""
+        return module_state_footprint(self)
+
+    def observe_costs(self) -> CostObserver:
+        """Create a call-specific symbolic-cost observation session."""
+        return observe_costs(self)
+
+    def _cost_repr(self, scope: _CostScope) -> Iterable[CostRepr] | None:
+        """Return local operations, or ``None`` until local work is classified."""
+        return None
+
+    def _cost_children(self, scope: _CostScope) -> Iterable[_CostChild]:
+        """Expose registered children as inventory until a subclass authors calls."""
+        return tuple(
+            scope.inventory(name, child) for name, child in self._modules.items() if child is not None
+        )
+
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]:
+        """Leave invocation dimensions symbolic unless a concrete class binds them."""
+        del args, kwargs, output
+        return {}
+
+
+def DeltaLayer[ModuleT: nn.Module](module_type: type[ModuleT]) -> type[ModuleT]:  # noqa: N802
+    """Turn an ordinary module forward pass into an additive layer.
+
+    The module's authored ``forward`` is exposed as ``delta``. The decorator
+    replaces the public forward pass with ``forward(x) = x + delta(x)``. It
+    introduces no wrapper module, parameters, child prefixes, or state-loading
+    behavior.
+    """
+    delta = cast(Callable[..., torch.Tensor] | None, module_type.__dict__.get("forward"))
+    if delta is None:
+        raise TypeError("a DeltaLayer must define its own forward method")
+    if "delta" in module_type.__dict__:
+        raise TypeError("a DeltaLayer cannot define delta separately from forward")
+
+    def forward(self: ModuleT, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        update = delta(self, x, *args, **kwargs)
+        return einx.add("... d_model, ... d_model -> ... d_model", x, update)
+
+    update_wrapper(forward, delta)
+    forward.__doc__ = "Apply the authored update additively to the input activation."
+    setattr(module_type, "delta", delta)
+    setattr(module_type, "forward", forward)
+    return module_type
+
+
+class Embedding(Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torch.nn.sparse`
+    """Lookup table mapping token IDs to learned embedding vectors."""
+
     __constants__ = ["num_embeddings", "embedding_dim"]
     num_embeddings: int  # vocab_size
     embedding_dim: int  # d_model
@@ -59,7 +150,12 @@ class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`t
         """Apply the embedding transformation to the input."""
         return F.embedding(token_ids, self.weight)
 
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Classify embedding lookup as containing no matrix products."""
+        return ()
+
     def extra_repr(self) -> str:
+        """Return vocabulary size and embedding width for module repr."""
         return f"num_embeddings={self.num_embeddings}, embedding_dim={self.embedding_dim}"
 
     @classmethod
@@ -88,7 +184,7 @@ class Embedding(nn.Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`t
         return embedding
 
 
-class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer normalization
+class RMSNorm(Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer normalization
     """RMSNorm (B. Zhang et al. NeurIPS 2019 <https://arxiv.org/abs/1910.07467>, eq 4) for layer normalization.
 
     Given a vector :math:`𝑎 ∈ ℝ^{𝑑_model}` of activations,
@@ -135,10 +231,16 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
             nn.init.ones_(self.weight)
 
     def forward(self, x: Shaped[ModelVec, "*batch sequence_length"]) -> Shaped[ModelVec, "*batch sequence_length"]:
+        """Normalize the final model-width axis and preserve the input dtype."""
         in_dtype = x.dtype
         return self.rms_norm(x, (self.d_model,), self.weight, self.eps).to(in_dtype)
 
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Classify RMS normalization as containing no matrix products."""
+        return ()
+
     def extra_repr(self) -> str:
+        """Return width, epsilon, and affine configuration for module repr."""
         return f"d_model={self.d_model}, eps={self.eps}, elementwise_affine={self.elementwise_affine}"
 
     @staticmethod
@@ -333,7 +435,7 @@ class RMSNorm(nn.Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer n
         return normed
 
 
-class SoftMax(nn.Module):  # mimicking :cls:`torch.nn.Softmax`
+class SoftMax(Module):  # mimicking :cls:`torch.nn.Softmax`
     """Applies softmax to the input along dim.
 
     the static method softmax_einx allows more flexible operation.
@@ -357,7 +459,12 @@ class SoftMax(nn.Module):  # mimicking :cls:`torch.nn.Softmax`
         """Apply the softmax transformation to the input."""
         return F.softmax(in_features, dim=self.dim, _stacklevel=5)  # pytorch sets an extra high stacklevel for this
 
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Classify softmax as containing no matrix products."""
+        return ()
+
     def extra_repr(self) -> str:
+        """Return the configured softmax dimension for module repr."""
         return f"dim={self.dim}"
 
     @staticmethod
@@ -375,7 +482,7 @@ class SoftMax(nn.Module):  # mimicking :cls:`torch.nn.Softmax`
         return einx.softmax(desc, in_features, **kwargs)
 
 
-class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
+class Linear(Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
     """Applies a linear transformation to the incoming data: :math:`y = x A^T` where :math:`A` is the learnable weight matrix."""
 
     __constants__ = ["in_features", "out_features"]
@@ -408,20 +515,56 @@ class Linear(nn.Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
         # return torch.nn.functional.linear(x, self.weight)
         return F.linear(x, self.weight)
 
+    def _cost_repr(self, scope: _CostScope) -> tuple[CostRepr, ...]:
+        """Describe the backend contraction used by this linear projection."""
+        s = scope.symbols
+        s.unbound("tokens")
+        s.bind(d_in=self.in_features, d_out=self.out_features)
+        return (
+            CostRepr(
+                name="linear projection",
+                operation=torch.ops.aten.bmm.default,
+                arguments={
+                    "self": TensorRepr((1, s.tokens, s.d_in), self.weight.dtype),
+                    "mat2": TensorRepr((1, s.d_in, s.d_out), self.weight.dtype),
+                },
+            ),
+        )
+
+    def _cost_call_bindings(
+        self,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        output: Any,
+    ) -> Mapping[str, Any]:
+        """Bind the product of mapped input axes as the logical token count."""
+        del output
+        x = args[0] if args else kwargs["x"]
+        if not isinstance(x, torch.Tensor):
+            raise TypeError("Linear cost observation requires a tensor with a feature axis")
+        if x.ndim < 1:
+            raise ValueError("Linear cost observation requires a feature axis")
+        return {"tokens": prod(x.shape[:-1], start=1)}
+
     def extra_repr(self) -> str:
+        """Return input/output widths and the bias-free contract for module repr."""
         return f"in_features={self.in_features}, out_features={self.out_features}, NO bias"
 
     @property
     def shape(self) -> tuple[int, ...]:
+        """Shape of the underlying weight matrix."""
         return self.weight.shape
 
     @property
     def dtype(self) -> dtype:
+        """Dtype of the underlying weight matrix."""
         return self.weight.dtype
 
 
 @deprecated("we won't have a SiLU module; without the in-place option, not using the functional version is moot.")
-class SiLU(nn.Module):
+class SiLU(Module):
+    """Deprecated module placeholder; use the functional SiLU operation."""
+
     def __init__(self, inplace: bool = False) -> NoReturn:
         raise NotImplementedError(
             "we won't have a SiLU module; without the in-place option, not using the functional version is moot."
