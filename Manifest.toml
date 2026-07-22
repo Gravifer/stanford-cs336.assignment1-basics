@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "af858e58d4da73ebfa09e445ad777937d53844af"
+project_hash = "8a32cf4dabb9a22d792855aa3f762e653f8634eb"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "ec6be48a85c93d995563b84bff8a86bc98df45ce"
@@ -180,6 +180,12 @@ deps = ["Artifacts", "CUDA_Driver_jll", "JLLWrappers", "LazyArtifacts", "Libdl",
 git-tree-sha1 = "2e0352eb2a8321e46e1de54059bed9be8fd9391c"
 uuid = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
 version = "0.23.0+1"
+
+[[deps.CUDNN_jll]]
+deps = ["Artifacts", "CUDA_Runtime_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "TOML"]
+git-tree-sha1 = "77b169898d4cdc234b1cd9afc1d0a8cac1017a24"
+uuid = "62b44479-cb7b-5706-934f-f13b2eb2e645"
+version = "9.24.0+0"
 
 [[deps.CUPTI]]
 deps = ["CEnum", "CUDACore", "CUDA_Runtime_Discovery", "CUDA_Runtime_jll", "GPUToolbox"]
@@ -630,6 +636,12 @@ version = "1.31.4"
     SimpleChains = "de6bee2f-e2f4-4ec7-b6ed-219cc6f6e9e5"
     Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
     Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+
+[[deps.LuxCUDA]]
+deps = ["CUDA", "Reexport", "cuDNN"]
+git-tree-sha1 = "8f4b360da604b166d34220ee94ab83244da11e6d"
+uuid = "d0bbae9a-e099-4d5b-a835-1c6931763bda"
+version = "0.3.6"
 
 [[deps.LuxCore]]
 deps = ["DispatchDoctor", "Random", "SciMLPublic"]
@@ -1239,6 +1251,12 @@ weakdeps = ["EnzymeCore"]
 
     [deps.cuBLAS.extensions]
     EnzymeCoreExt = "EnzymeCore"
+
+[[deps.cuDNN]]
+deps = ["BFloat16s", "CEnum", "CUDACore", "CUDA_Runtime_Discovery", "CUDNN_jll"]
+git-tree-sha1 = "8f19c850019ae6b01644056d41dc3e37405fe635"
+uuid = "02a925ec-e4fe-4b08-9a7e-0d78e3d38ccd"
+version = "6.2.1"
 
 [[deps.cuFFT]]
 deps = ["AbstractFFTs", "CEnum", "CUDACore", "CUDA_Runtime_Discovery", "CUDA_Runtime_jll", "GPUToolbox", "LinearAlgebra", "Reexport"]
