@@ -8,6 +8,8 @@ using Zygote
 include("fixture_contract.jl")
 using .FixtureContract
 
+include("tokenizer_tests.jl")
+
 @testset "CS336 package smoke test" begin
     @test nameof(CS336) === :CS336
     @test Base.pkgversion(CS336) == v"0.1.0"
