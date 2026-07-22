@@ -4,6 +4,8 @@ This is the evolving scope ledger for the Julia package under `CS336.jl/`. It re
 
 Status vocabulary: **inventory** means present in Python but not yet scaffolded in Julia; **planned** means assigned to a phase in `JULIA_PORT_PLAN.md`; **deferred** means deliberately outside the first baseline.
 
+Harness status as of 2026-07-22: the root Julia workspace can read every existing `.npz` snapshot through test-only NPZ v0.4.3. Tests lock the complete set of 14 filenames, the sole `array` key, `Float32` element type, and Python-order logical shapes. This proves fixture transport only; none of the operations below gains parity status until its Julia outputs and gradients are compared independently.
+
 ## Public parity surface on `dev`
 
 | Area | Current Python adapter or evidence | Julia phase | Initial status | Parity evidence |
@@ -38,6 +40,27 @@ The matrix follows the adapter boundary because that is the stable course-facing
 - Verify mathematical results before performance. Matching an output snapshot is insufficient when the backward representation or optimizer semantics are part of the question.
 - Establish explicit dtype, indexing, seed, and tensor-axis conventions at the boundary. Julia's one-based indexing and column-major storage must not leak into externally visible token IDs or silently change the benchmark workload.
 - Preserve a distinction between course-authored reference paths and best practical library/compiler paths.
+
+Current numeric snapshot inventory:
+
+| Snapshot | Stored logical shape |
+| --- | --- |
+| `test_4d_scaled_dot_product_attention.npz` | `(2, 2, 12, 64)` |
+| `test_adamw.npz` | `(2, 3)` |
+| `test_embedding.npz` | `(4, 12, 64)` |
+| `test_linear.npz` | `(4, 12, 128)` |
+| `test_multihead_self_attention.npz` | `(4, 12, 64)` |
+| `test_multihead_self_attention_with_rope.npz` | `(4, 12, 64)` |
+| `test_positionwise_feedforward.npz` | `(4, 12, 64)` |
+| `test_rmsnorm.npz` | `(4, 12, 64)` |
+| `test_rope.npz` | `(4, 12, 64)` |
+| `test_scaled_dot_product_attention.npz` | `(4, 12, 64)` |
+| `test_swiglu.npz` | `(4, 12, 64)` |
+| `test_transformer_block.npz` | `(4, 12, 64)` |
+| `test_transformer_lm.npz` | `(4, 12, 10000)` |
+| `test_transformer_lm_truncated_input.npz` | `(4, 6, 10000)` |
+
+NPZ.jl returns these arrays with the same logical dimension order stored by NumPy. Import adapters must convert Python `(batch, sequence, feature)` tensors to the canonical Julia `(feature, sequence, batch)` layout exactly once. The fixture tests intentionally do not perform that conversion.
 
 ## Ecosystem tracks
 
