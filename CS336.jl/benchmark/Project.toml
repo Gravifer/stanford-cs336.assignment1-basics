@@ -1,0 +1,8 @@
+[deps]
+CS336 = "39ccc5dd-36ad-402e-b592-2c67158c70ea"
+
+[sources]
+CS336 = {path = ".."}
+
+[compat]
+julia = "1.12"
