@@ -50,7 +50,7 @@ The baseline ML integration is likewise isolated from the runtime package:
 julia --project=CS336.jl/environments/lux -e 'using Lux, NNlib, Optimisers, Zygote, CS336; println((Lux=pkgversion(Lux), NNlib=pkgversion(NNlib), Optimisers=pkgversion(Optimisers), Zygote=pkgversion(Zygote)))'
 ```
 
-The lock currently resolves Lux 1.31.4, NNlib 0.9.38, Optimisers 0.4.7, and Zygote 0.7.11. This environment is for integration experiments until a course implementation actually needs a justified runtime dependency.
+The lock currently resolves Lux 1.31.4, NNlib 0.9.38, Optimisers 0.4.7, and Zygote 0.7.11. This environment is for integration experiments until the direct port actually needs a justified runtime dependency.
 
 Run its committed integration smoke with:
 
@@ -116,7 +116,7 @@ Before adding a package or relying on an API:
 5. resolve from repository root and inspect the root-manifest change;
 6. add a minimal integration test and record the decision in `work-log.md`.
 
-Lux, NNlib, Optimisers, and Zygote now exist only in their isolated compatibility environment and have passed a documented interface smoke test. Do not move them into runtime or CPU-test dependencies before a course implementation requires them. Reactant and Enzyme remain uninstalled until the compiled-path phase exercises them. CUDA likewise remains isolated until an accelerator implementation requires it.
+Lux, NNlib, Optimisers, and Zygote now exist only in their isolated compatibility environment and have passed a documented interface smoke test. Do not move them into runtime or CPU-test dependencies before the port requires them. Reactant and Enzyme remain uninstalled until the compiled-path phase exercises them. CUDA likewise remains isolated until an accelerator implementation requires it.
 
 ## Planning records
 

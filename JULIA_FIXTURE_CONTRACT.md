@@ -69,7 +69,7 @@ Embedding baseline fixtures use dense weight gradients because the current cours
 5. Run the selected Julia AD backend and compare all declared gradients.
 6. Only after correctness passes, admit the case to the benchmark suite.
 
-The Python producer and Julia consumer must both validate the same metadata contract. This repository's academic-integrity policy means the student remains responsible for implementing the producer and course operations; review can focus on schema compliance, invariants, and discrepancies.
+The Python producer and Julia consumer must both validate the same metadata contract. These are maintainer parity artifacts only; they are not grading adapters or a starter harness for a Julia course.
 
 JSON Schema references checked for the machine-readable contract:
 

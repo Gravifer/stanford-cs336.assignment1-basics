@@ -14,9 +14,9 @@ Report each available lane separately:
 
 | Lane | Purpose | Included costs |
 | --- | --- | --- |
-| PyTorch eager | course baseline | steady execution; separate process startup |
+| PyTorch eager | implemented adapter baseline | steady execution; separate process startup |
 | PyTorch compiled | mature compiled reference | graph capture/compile reported separately from warm execution |
-| Julia reference | educational implementation | native Julia/Lux execution without claiming production fusion |
+| Julia reference | direct port | native Julia/Lux execution without claiming production fusion |
 | Julia practical eager | best supported eager/library path | vendor-backed NNlib/accelerator operations where appropriate |
 | Julia compiled | Reactant+Enzyme experiment | compilation reported separately from warm execution |
 

@@ -6,7 +6,7 @@
 - Base at creation: local `dev` at `8c032c9` (`chore: prepare for training`), matching `origin/dev` on 2026-07-22.
 - Branch policy: grow only from `dev`. Do not merge or rebase Python feature branches into this branch.
 - Verified toolchain: Juliaup 1.20.8 with the stable `release` channel at Julia 1.12.6. `juliaup update release` reported no update on 2026-07-22.
-- Current stage: Phase 0 infrastructure complete; the first self-contained Python-to-Julia numerical parity bundle remains pending a student-authored producer. The root workspace, `CS336.jl` package boundary, test project, fixture readers, machine-readable neutral-fixture schema and test-only consumer, benchmark project, sole root manifest, CUDA readiness environment, and Lux compatibility environment are committed. The runtime package remains dependency-free and no assignment operation has been added.
+- Current stage: Phase 0 infrastructure is complete and the first self-contained Python linear parity bundle has been generated for validation. The root workspace, `CS336.jl` package boundary, maintainer test project, fixture readers, machine-readable neutral-fixture schema and test-only consumer, benchmark project, sole root manifest, CUDA readiness environment, and Lux compatibility environment are committed. The runtime package remains dependency-free and its first adapter-matched operation is next.
 
 When resuming, first run:
 
@@ -21,9 +21,15 @@ Before rebasing, require a clean worktree or make a normal checkpoint commit. Do
 
 ## Objective
 
-Build a Julia package parallel to the repository's `cs336_basics` Python package, following the CS336 assignment sequence. Preserve mathematical behavior and course intent, but use idiomatic Julia rather than mechanically cloning PyTorch's object model. At the end of the syllabus, benchmark correctness, eager performance, compiled performance, memory, and startup/compilation costs against the Python/PyTorch implementation.
+Build a Julia package containing an idiomatic port of the student implementation already reachable through the working functions in `tests/adapters.py`. Preserve mathematical behavior without mechanically cloning PyTorch's object model. Benchmark correctness, eager performance, compiled performance, memory, and startup/compilation costs against the Python/PyTorch implementation.
 
-This project is about language/framework architecture as well as completing the course. Keep low-level educational implementations visible even when Julia or a vendor library has a faster built-in implementation.
+This project is about language/framework architecture and a direct implementation comparison. Keep the port's explicit mathematical implementation visible even when Julia or a vendor library has a faster built-in implementation.
+
+## Scope and non-goals
+
+`tests/adapters.py` is the authoritative progress boundary. Port a surface only when its adapter has a working Python body. An adapter that still raises `NotImplementedError` remains out of scope even if an old plan, snapshot filename, Python test, or implementation file suggests future work.
+
+The Julia package is not a second CS336 course distribution. Do not recreate assignment prompts, TODOs, grading adapters, submission hooks, or a student-facing starter harness. Julia tests are maintainer regression and cross-language parity tests. Shared fixture producers exist only to make comparisons reproducible.
 
 ## Companion records
 
@@ -101,7 +107,7 @@ Avoid an open-ended matrix of interchangeable frameworks. Start with one path:
 
 - Julia's stable `release` channel managed by Juliaup (currently Julia 1.12.6).
 - `Lux.jl` for model/layer structure and explicit parameters/state.
-- `NNlib.jl` for established neural-network primitives where using a library is consistent with the assignment.
+- `NNlib.jl` for established neural-network primitives where a library-backed comparison is useful.
 - `Zygote.jl` for the initial reverse-mode AD baseline.
 - Julia's `Test` plus `BenchmarkTools.jl` for tests and measurements.
 - A small fixture reader such as `NPZ.jl` and `JSON3.jl` only if needed to consume the existing Python snapshots.
@@ -121,13 +127,13 @@ This is useful here because:
 
 1. Parameters, non-trainable state, and architecture are not hidden behind mutable `nn.Module` registration rules.
 2. The same parameter tree can be passed explicitly to differentiation, optimizers, serialization, CPU/GPU transfer, and benchmarks.
-3. A course-authored primitive can remain a plain Julia function; a small Lux layer can wrap it without making the framework own the math.
+3. A directly ported primitive can remain a plain Julia function; a small Lux layer can wrap it without making the framework own the math.
 4. The explicit interface is suitable for Reactant/Enzyme whole-step compilation later.
 5. It becomes easier to compare identical weights and state across the Python and Julia implementations.
 
-Lux is not intended to replace the educational code. Implement softmax, RMSNorm, RoPE, attention, SwiGLU, AdamW, and related assignment targets explicitly first. Use Lux to compose and initialize the resulting layers. Keep an optimized/library-backed variant separate when it helps answer the performance question.
+Lux is not intended to replace the direct port. Implement the currently exposed softmax, RMSNorm, RoPE, attention, and SwiGLU behavior explicitly first. Use Lux to compose and initialize the resulting layers. Keep an optimized/library-backed variant separate when it helps answer the performance question. AdamW and other adapters that still raise `NotImplementedError` are not current targets.
 
-## Syllabus-aligned phases
+## Adapter-aligned phases
 
 ### Phase 0: scaffold and cross-language fixtures — infrastructure complete; numerical parity bundle pending
 
@@ -135,9 +141,9 @@ Lux is not intended to replace the educational code. Implement softmax, RMSNorm,
 - Use the verified Julia 1.12.6 runtime and record any later runtime upgrade in this plan and the benchmark metadata.
 - Read existing `.npz`, JSON, text, vocabulary, and merge fixtures without rewriting them.
 - Establish deterministic seeds, dtype conventions, tensor-axis conventions, and tolerances.
-- Add one self-contained Python-to-Julia numerical parity test before implementing the model stack. The schema/consumer infrastructure may be prepared here, but the Python producer and course operation remain student-owned under the repository policy.
+- Add one self-contained Python-to-Julia numerical parity test before implementing the model stack. The fixture producer is maintainer comparison infrastructure, not starter code.
 
-### Phase 1: tokenizer and data
+### Phase 1: tokenizer
 
 - Port BPE training, encoding, decoding, special-token behavior, and document chunking.
 - Match existing fixture semantics byte-for-byte where practical.
@@ -145,7 +151,7 @@ Lux is not intended to replace the educational code. Implement softmax, RMSNorm,
 
 ### Phase 2: numerical primitives
 
-- Stable softmax, linear, embedding, SiLU/SwiGLU, RMSNorm, cross-entropy, gradient clipping, and initialization.
+- Stable softmax, linear, embedding, SiLU/SwiGLU, and RMSNorm.
 - Test output values, edge cases, gradients, dtype promotion, allocations, and CPU/GPU behavior.
 - For embedding, test both gradient values and the physical gradient representation; a mathematically row-sparse result is not necessarily stored sparsely by either framework.
 - Keep array shapes explicit in docstrings and tests; Julia does not need a direct imitation of `jaxtyping`.
@@ -156,17 +162,17 @@ Lux is not intended to replace the educational code. Implement softmax, RMSNorm,
 - Decide and document one canonical Julia axis layout. Boundary adapters may transpose imported PyTorch weights or fixtures; do not scatter layout conversions through kernels.
 - Match existing Python snapshots and gradient checks before optimizing.
 
-### Phase 4: optimization and training
+### Phase 4: optimization and training — gated by Python adapters
 
-- Port AdamW, learning-rate scheduling, batching, checkpoint state, training loop, and sampling as they land on `dev`.
-- Because this branch follows `dev`, rebase when the syllabus implementation advances there; do not import the intermediate Python feature branch.
-- Add a one-step parity test, then a short loss-curve parity test.
+- `run_get_batch`, `run_cross_entropy`, `run_gradient_clipping`, `get_adamw_cls`, `run_get_lr_cosine_schedule`, `run_save_checkpoint`, and `run_load_checkpoint` currently raise `NotImplementedError`.
+- Do not implement these surfaces in Julia until their Python adapters become working reference boundaries on `dev`.
+- When `dev` advances, rebase this branch and update `JULIA_PARITY_MATRIX.md` before expanding scope; do not import intermediate Python feature branches.
 
 ### Phase 5: compiled and accelerator paths
 
 - Establish native Julia CPU and CUDA-array baselines first.
 - CUDA toolchain readiness is verified in `CS336.jl/environments/cuda`, and Lux forward/backward/update composition is verified in `CS336.jl/environments/lux_cuda`; operation/model baselines remain pending correctness implementations.
-- Lux's built-in multi-head attention has passed a separate CPU/CUDA forward, Zygote backward, Adam update, and identical-input numerical comparison; this is ecosystem readiness only and does not substitute for the course-authored attention path.
+- Lux's built-in multi-head attention has passed a separate CPU/CUDA forward, Zygote backward, Adam update, and identical-input numerical comparison; this is ecosystem readiness only and does not substitute for the directly ported attention path.
 - Evaluate Enzyme for mutation-friendly differentiation.
 - Evaluate Reactant+Enzyme for compiled inference and a compiled training step.
 - Treat unsupported tracing/control-flow cases as measured limitations, not reasons to distort the baseline implementation prematurely.
@@ -207,7 +213,7 @@ Investigation thresholds:
 - More than 10x steady-state lag is a failure for the comparability goal unless the report demonstrates a missing ecosystem feature rather than an implementation or benchmark error.
 - Cold compilation may exceed 10x, but it must be reported independently and amortized over realistic run lengths rather than hidden.
 
-Do not compare a handwritten Julia reference kernel only against PyTorch's fused production kernel and call that a language result. Report both educational/reference and best practical paths.
+Do not compare a handwritten Julia reference kernel only against PyTorch's fused production kernel and call that a language result. Report both direct-port/reference and best practical paths.
 
 ## Design record: embedding-gradient sparsity
 
