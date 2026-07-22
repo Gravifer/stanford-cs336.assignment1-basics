@@ -80,6 +80,8 @@ On 2026-07-22, the isolated `CS336.jl/environments/lux` project resolved Lux 1.3
 
 This establishes that the chosen interfaces compose today; it is not a speed result. The separate `environments/lux_cuda` project subsequently validated LuxCUDA 0.3.6 with CUDA.jl 6.2.1: documented device selection, Dense forward, Zygote backward, Optimisers Adam update, NNlib softmax, synchronization, and host round-trip all succeeded on the RTX 3070 Ti. The tiny CPU/GPU forward comparison differed by at most one `Float32` ulp at the observed scale. Operation/model performance and the “not more than 10×” comparability question remain gated on matched implementations and the benchmark protocol.
 
+A Pkg outdated audit found no held-back direct dependency in either the Lux CPU or LuxCUDA project. In the shared manifest, GPUCompiler 1.23.0 is constrained below the available 2.1.1 by CUDACore/CUDATools from the current CUDA.jl 6.2.1 stack. This is a concrete compatibility edge worth rechecking at phase boundaries, but not evidence that the selected public stack is stale: the direct CUDA/Lux packages themselves were current and their integration tests passed.
+
 ## Side note: “tabular ML”
 
 Tabular ML means prediction from row-and-column datasets such as database tables or spreadsheets—classification/regression with methods such as linear models, trees, random forests, and boosted trees. It was relevant to a broad Julia ecosystem survey (for example, MLJ), but it is not central to this transformer-language-model package.
