@@ -245,6 +245,34 @@ end
         extra_metadata["unexpected"] = true
         extra_path = write_bundle(directory, "extra_top_level", extra_metadata, arrays)
         @test_throws ArgumentError load_bundle(extra_path)
+
+        boolean_version_metadata = metadata("boolean_version", deepcopy(descriptors))
+        boolean_version_metadata["contract_version"] = true
+        boolean_version_path =
+            write_bundle(directory, "boolean_version", boolean_version_metadata, arrays)
+        @test_throws ArgumentError load_bundle(boolean_version_path)
+
+        boolean_tolerance_metadata = metadata("boolean_tolerance", deepcopy(descriptors))
+        boolean_tolerance_metadata["tolerances"]["rtol"] = true
+        boolean_tolerance_path =
+            write_bundle(directory, "boolean_tolerance", boolean_tolerance_metadata, arrays)
+        @test_throws ArgumentError load_bundle(boolean_tolerance_path)
+
+        boolean_shape_metadata = metadata("boolean_shape", deepcopy(descriptors))
+        boolean_shape_metadata["arrays"]["input.x"]["shape"] = Any[true, 2]
+        boolean_shape_path = write_bundle(directory, "boolean_shape", boolean_shape_metadata, arrays)
+        @test_throws ArgumentError load_bundle(boolean_shape_path)
+
+        representation_metadata = metadata("representation", deepcopy(descriptors))
+        representation_metadata["arrays"]["input.x"]["physical_representation"] = "opaque"
+        representation_path =
+            write_bundle(directory, "representation", representation_metadata, arrays)
+        @test_throws ArgumentError load_bundle(representation_path)
+
+        source_metadata = metadata("source", deepcopy(descriptors))
+        source_metadata["source"]["git_commit"] = "not-a-commit"
+        source_path = write_bundle(directory, "source", source_metadata, arrays)
+        @test_throws ArgumentError load_bundle(source_path)
     end
 end
 

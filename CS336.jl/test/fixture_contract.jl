@@ -36,6 +36,14 @@ const GRADIENT_ROLES = Set([
     "expected_input_gradient",
     "expected_parameter_gradient",
 ])
+const ARRAY_REPRESENTATIONS =
+    Set(["dense", "coo", "csr", "csc", "indexed_rows", "indexed_columns"])
+const GRADIENT_REPRESENTATIONS = Set(["none", "dense", "indexed", "sparse_matrix", "mixed"])
+const OPERATION_PATTERN = r"^[A-Za-z0-9_.-]+$"
+const ARRAY_NAME_PATTERN = r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$"
+const COMMIT_PATTERN = r"^[0-9a-f]{40}$"
+const TIMESTAMP_PATTERN =
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
 const DTYPE_TYPES = Dict(
     "bool" => Bool,
     "uint8" => UInt8,
@@ -47,6 +55,9 @@ const DTYPE_TYPES = Dict(
 )
 
 fail(message) = throw(ArgumentError(message))
+is_json_integer(value) = value isa Integer && !(value isa Bool)
+is_json_number(value) = value isa Real && !(value isa Bool)
+is_nonempty_string(value) = value isa String && !isempty(value)
 
 function require_object(value, location)
     value isa AbstractDict{String, Any} || fail("$location must be a JSON object")
@@ -83,7 +94,7 @@ function require_array_descriptor(descriptor, name, array)
 
     declared_shape = object["shape"]
     declared_shape isa AbstractVector || fail("$location.shape must be an array")
-    all(dimension -> dimension isa Integer && dimension >= 0, declared_shape) ||
+    all(dimension -> is_json_integer(dimension) && dimension >= 0, declared_shape) ||
         fail("$location.shape must contain non-negative integers")
     Tuple(declared_shape) == size(array) || fail(
         "$location shape mismatch: declared=$(Tuple(declared_shape)) actual=$(size(array))",
@@ -98,6 +109,10 @@ function require_array_descriptor(descriptor, name, array)
     )
     allunique(axes) || fail("$location.axes must be unique")
 
+    representation = object["physical_representation"]
+    representation isa String && representation in ARRAY_REPRESENTATIONS ||
+        fail("$location.physical_representation is unsupported")
+
     finiteness = object["finiteness"]
     finiteness in ("required", "allow_nonfinite", "not_applicable") ||
         fail("$location.finiteness is unsupported")
@@ -105,9 +120,16 @@ function require_array_descriptor(descriptor, name, array)
         all(isfinite, array) || fail("$location requires finite values")
     end
 
+    if haskey(object, "zero_based_values")
+        object["zero_based_values"] isa Bool ||
+            fail("$location.zero_based_values must be boolean")
+    end
     if get(object, "zero_based_values", false)
         eltype(array) <: Integer || fail("$location.zero_based_values requires an integer dtype")
         all(value -> value >= 0, array) || fail("$location contains a negative external index")
+    end
+    if haskey(object, "description")
+        object["description"] isa String || fail("$location.description must be a string")
     end
 
     return role
@@ -118,28 +140,47 @@ function load_bundle(metadata_path::AbstractString)
     splitext(metadata_path)[2] == ".json" || fail("metadata path must end in .json")
 
     metadata = require_exact_keys(JSON.parsefile(metadata_path), TOP_LEVEL_KEYS, "metadata")
-    metadata["contract_version"] == 1 || fail("unsupported contract version")
-    metadata["operation"] isa String && !isempty(metadata["operation"]) ||
-        fail("operation must be a non-empty string")
-    require_exact_keys(
+    is_json_integer(metadata["contract_version"]) && metadata["contract_version"] == 1 ||
+        fail("unsupported contract version")
+    operation = metadata["operation"]
+    is_nonempty_string(operation) && occursin(OPERATION_PATTERN, operation) ||
+        fail("operation must match $OPERATION_PATTERN")
+    source = require_exact_keys(
         metadata["source"],
         Set(["git_commit", "generated_at", "working_tree_clean"]),
         "source",
     )
-    require_exact_keys(
+    source["git_commit"] isa String && occursin(COMMIT_PATTERN, source["git_commit"]) ||
+        fail("source.git_commit must be 40 lowercase hexadecimal characters")
+    source["generated_at"] isa String &&
+        occursin(TIMESTAMP_PATTERN, source["generated_at"]) ||
+        fail("source.generated_at must be an ISO 8601 date-time")
+    source["working_tree_clean"] isa Bool ||
+        fail("source.working_tree_clean must be boolean")
+
+    producer = require_exact_keys(
         metadata["producer"],
         Set(["language", "runtime_version", "packages"]),
         "producer",
     )
-    metadata["scalars"] isa AbstractDict || fail("scalars must be a JSON object")
-    metadata["notes"] isa AbstractVector || fail("notes must be an array")
+    is_nonempty_string(producer["language"]) || fail("producer.language must be non-empty")
+    is_nonempty_string(producer["runtime_version"]) ||
+        fail("producer.runtime_version must be non-empty")
+    packages = require_object(producer["packages"], "producer.packages")
+    all(is_nonempty_string, values(packages)) ||
+        fail("producer.packages values must be non-empty strings")
+
+    require_object(metadata["scalars"], "scalars")
+    notes = metadata["notes"]
+    notes isa AbstractVector && all(note -> note isa String, notes) ||
+        fail("notes must be an array of strings")
 
     tolerances = require_exact_keys(
         metadata["tolerances"], Set(["rtol", "atol", "equal_nan"]), "tolerances"
     )
-    tolerances["rtol"] isa Real && tolerances["rtol"] >= 0 ||
+    is_json_number(tolerances["rtol"]) && tolerances["rtol"] >= 0 ||
         fail("tolerances.rtol must be non-negative")
-    tolerances["atol"] isa Real && tolerances["atol"] >= 0 ||
+    is_json_number(tolerances["atol"]) && tolerances["atol"] >= 0 ||
         fail("tolerances.atol must be non-negative")
     tolerances["equal_nan"] isa Bool || fail("tolerances.equal_nan must be boolean")
 
@@ -162,6 +203,7 @@ function load_bundle(metadata_path::AbstractString)
 
     roles = Dict{String, String}()
     for (name, descriptor) in descriptors
+        occursin(ARRAY_NAME_PATTERN, name) || fail("array name is unsupported: $name")
         roles[name] = require_array_descriptor(descriptor, name, arrays[name])
     end
     any(==("expected_output"), values(roles)) || fail("bundle has no expected output")
@@ -172,16 +214,22 @@ function load_bundle(metadata_path::AbstractString)
         "gradients",
     )
     gradients["present"] isa Bool || fail("gradients.present must be boolean")
+    representation = gradients["physical_representation"]
+    representation isa String && representation in GRADIENT_REPRESENTATIONS ||
+        fail("gradients.physical_representation is unsupported")
+    objective = gradients["objective"]
+    objective === nothing || objective isa String ||
+        fail("gradients.objective must be a string or null")
     gradient_arrays_present = any(role -> role in GRADIENT_ROLES, values(roles))
     if gradients["present"]
-        gradients["objective"] isa String && !isempty(gradients["objective"]) ||
+        is_nonempty_string(objective) ||
             fail("gradient bundles require a non-empty objective")
-        gradients["physical_representation"] != "none" ||
+        representation != "none" ||
             fail("gradient bundles require a physical representation")
         gradient_arrays_present || fail("gradient metadata is present but gradient arrays are absent")
     else
-        gradients["objective"] === nothing || fail("forward-only bundles require a null objective")
-        gradients["physical_representation"] == "none" ||
+        objective === nothing || fail("forward-only bundles require a null objective")
+        representation == "none" ||
             fail("forward-only bundles require physical_representation=none")
         gradient_arrays_present && fail("gradient arrays exist while gradients.present is false")
     end
