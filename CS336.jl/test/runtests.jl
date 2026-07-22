@@ -276,6 +276,34 @@ end
     end
 end
 
+@testset "linear parity bundle transport" begin
+    metadata_path = normpath(
+        joinpath(
+            @__DIR__,
+            "..",
+            "..",
+            "tests",
+            "fixtures",
+            "julia_parity",
+            "v1",
+            "linear.json",
+        ),
+    )
+    bundle = load_bundle(metadata_path)
+
+    @test bundle.metadata["operation"] == "run_linear"
+    @test bundle.metadata["source"]["working_tree_clean"] === true
+    @test bundle.metadata["gradients"]["present"] === true
+    @test bundle.metadata["scalars"] == Dict{String, Any}("d_in" => 4, "d_out" => 3)
+    @test Set(keys(bundle.arrays)) == Set([
+        "input.x",
+        "parameter.weight",
+        "expected.output",
+        "expected.gradient.input.x",
+        "expected.gradient.parameter.weight",
+    ])
+end
+
 @testset "repository fixture smoke test" begin
     fixture = normpath(joinpath(@__DIR__, "..", "..", "tests", "fixtures", "address.txt"))
     @test isfile(fixture)
