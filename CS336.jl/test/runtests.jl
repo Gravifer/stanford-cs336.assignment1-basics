@@ -557,6 +557,138 @@ end
     @test isapprox(input_gradient, expected_input_gradient; rtol, atol, nans)
 end
 
+@testset "RMSNorm primitive and Python parity" begin
+    half_input = fill(Float16(2), 4, 2)
+    half_output = rmsnorm(half_input, ones(Float16, 4); eps=1e-5)
+    @test eltype(half_output) === Float16
+    @test half_output ≈ fill(Float16(1), 4, 2) rtol = 1.0f-3
+    @test_throws DimensionMismatch rmsnorm(ones(Float32, 3, 2), ones(Float32, 4))
+    @test_throws DimensionMismatch rmsnorm(Array{Float32}(undef, 0, 2), Float32[])
+
+    metadata_path = normpath(
+        joinpath(
+            @__DIR__,
+            "..",
+            "..",
+            "tests",
+            "fixtures",
+            "julia_parity",
+            "v1",
+            "rmsnorm.json",
+        ),
+    )
+    bundle = load_bundle(metadata_path)
+    arrays = bundle.arrays
+    tolerances = bundle.metadata["tolerances"]
+    input = permutedims(arrays["input.x"], (3, 2, 1))
+    weight = arrays["parameter.weight"]
+    expected_output = permutedims(arrays["expected.output"], (3, 2, 1))
+    expected_input_gradient =
+        permutedims(arrays["expected.gradient.input.x"], (3, 2, 1))
+    expected_weight_gradient = arrays["expected.gradient.parameter.weight"]
+    eps = bundle.metadata["scalars"]["eps"]
+
+    output = rmsnorm(input, weight; eps)
+    input_gradient, weight_gradient = Zygote.gradient(
+        (x, w) -> sum(abs2, rmsnorm(x, w; eps)),
+        input,
+        weight,
+    )
+    rtol = tolerances["rtol"]
+    atol = tolerances["atol"]
+    nans = tolerances["equal_nan"]
+    @test isapprox(output, expected_output; rtol, atol, nans)
+    @test isapprox(input_gradient, expected_input_gradient; rtol, atol, nans)
+    @test isapprox(weight_gradient, expected_weight_gradient; rtol, atol, nans)
+end
+
+@testset "SwiGLU primitive and Python parity" begin
+    native_input = reshape(Float64.(1:8), 4, 2) ./ 10
+    native_w1 = reshape(Float64.(1:12), 3, 4) ./ 10
+    native_w2 = reshape(Float64.(1:12), 4, 3) ./ 10
+    native_w3 = reverse(native_w1; dims=1)
+    native_output = swiglu(native_input, native_w1, native_w2, native_w3)
+    native_packed_weight = vcat(native_w3, native_w1)
+    @test size(native_output) == size(native_input)
+    @test eltype(native_output) === Float64
+    @test swiglu_packed(native_input, native_packed_weight, native_w2) ≈ native_output
+    @test swiglu(native_input, native_packed_weight, native_w2) ≈ native_output
+    @test_throws DimensionMismatch swiglu(
+        native_input,
+        native_w1,
+        native_w2,
+        ones(Float64, 2, 4),
+    )
+    @test_throws DimensionMismatch swiglu_packed(
+        native_input,
+        ones(Float64, 5, 4),
+        native_w2,
+    )
+
+    metadata_path = normpath(
+        joinpath(
+            @__DIR__,
+            "..",
+            "..",
+            "tests",
+            "fixtures",
+            "julia_parity",
+            "v1",
+            "swiglu.json",
+        ),
+    )
+    bundle = load_bundle(metadata_path)
+    arrays = bundle.arrays
+    tolerances = bundle.metadata["tolerances"]
+    input = permutedims(arrays["input.x"], (3, 2, 1))
+    w1 = arrays["parameter.w1"]
+    w2 = arrays["parameter.w2"]
+    w3 = arrays["parameter.w3"]
+    expected_output = permutedims(arrays["expected.output"], (3, 2, 1))
+    expected_gradients = (
+        permutedims(arrays["expected.gradient.input.x"], (3, 2, 1)),
+        arrays["expected.gradient.parameter.w1"],
+        arrays["expected.gradient.parameter.w2"],
+        arrays["expected.gradient.parameter.w3"],
+    )
+
+    output = swiglu(input, w1, w2, w3)
+    gradients = Zygote.gradient(
+        (x, gate, out, value) -> sum(abs2, swiglu(x, gate, out, value)),
+        input,
+        w1,
+        w2,
+        w3,
+    )
+    packed_weight = vcat(w3, w1)
+    packed_output = swiglu_packed(input, packed_weight, w2)
+    packed_gradients = Zygote.gradient(
+        (x, packed, out) -> sum(abs2, swiglu_packed(x, packed, out)),
+        input,
+        packed_weight,
+        w2,
+    )
+    expected_packed_gradients = (
+        expected_gradients[1],
+        vcat(expected_gradients[4], expected_gradients[2]),
+        expected_gradients[3],
+    )
+    rtol = tolerances["rtol"]
+    atol = tolerances["atol"]
+    nans = tolerances["equal_nan"]
+    @test isapprox(output, expected_output; rtol, atol, nans)
+    @test length(gradients) == length(expected_gradients)
+    for (gradient, expected) in zip(gradients, expected_gradients)
+        @test isapprox(gradient, expected; rtol, atol, nans)
+    end
+    @test isapprox(packed_output, expected_output; rtol, atol, nans)
+    @test swiglu(input, packed_weight, w2) == packed_output
+    @test length(packed_gradients) == length(expected_packed_gradients)
+    for (gradient, expected) in zip(packed_gradients, expected_packed_gradients)
+        @test isapprox(gradient, expected; rtol, atol, nans)
+    end
+end
+
 @testset "repository fixture smoke test" begin
     fixture = normpath(joinpath(@__DIR__, "..", "..", "tests", "fixtures", "address.txt"))
     @test isfile(fixture)

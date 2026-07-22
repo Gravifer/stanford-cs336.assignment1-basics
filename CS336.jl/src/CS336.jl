@@ -6,7 +6,7 @@ functions and explicit model components after its parity evidence is established
 """
 module CS336
 
-export embedding, linear, silu, softmax
+export embedding, linear, rmsnorm, silu, softmax, swiglu, swiglu_packed
 
 include("functional.jl")
 
