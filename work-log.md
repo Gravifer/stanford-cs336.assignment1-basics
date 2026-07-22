@@ -97,3 +97,4 @@ Timezone: Asia/Shanghai (UTC+08:00). Timestamps use ISO 8601.
 - 2026-07-22T21:29:05+08:00 — Ran the committed CPU Lux smoke successfully with Lux 1.31.4, NNlib 0.9.38, Optimisers 0.4.7, and Zygote 0.7.11.
 - 2026-07-22T21:29:50+08:00 — Added a separate committed LuxCUDA smoke for device selection, parameter/state/input transfer, CPU/GPU Dense agreement, Zygote backward, Adam update, NNlib softmax, synchronization, and host round-trip. It remains outside the CPU and runtime projects.
 - 2026-07-22T21:31:00+08:00 — Ran the committed LuxCUDA smoke successfully with LuxCUDA 0.3.6 and CUDA.jl 6.2.1 on the RTX 3070 Ti.
+- 2026-07-22T21:32:20+08:00 — Added Julia's TOML 1.0.3 standard library as an explicit test-project dependency for executable root-workspace/lockfile topology checks. No package was downloaded or added to the manifest graph; only test project metadata and the root manifest project hash changed.
