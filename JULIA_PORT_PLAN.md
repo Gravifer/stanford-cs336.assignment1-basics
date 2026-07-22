@@ -6,16 +6,19 @@
 - Base at creation: local `dev` at `8c032c9` (`chore: prepare for training`), matching `origin/dev` on 2026-07-22.
 - Branch policy: grow only from `dev`. Do not merge or rebase Python feature branches into this branch.
 - Verified toolchain: Juliaup 1.20.8 with the stable `release` channel at Julia 1.12.6. `juliaup update release` reported no update on 2026-07-22.
-- Current stage: Phases 0, 1, 2, and 3 are complete under the user's tiny-corpus
+- Current stage: Phases 0–4 have reached their present adapter-defined gate.
+  Phases 0–3 are implemented and verified under the user's tiny-corpus
   training constraint. Feature-first linear, embedding, SiLU, softmax,
   RMSNorm, and explicit/packed SwiGLU pass Python forward/gradient parity.
   Tokenizer encoding matches GPT-2 fixture IDs and BPE training matches four
   tiny Python probes in serial and threaded modes. Full-corpus BPE training is
   explicitly deferred to the user. Phase 3 includes Python output/gradient
   parity for RoPE, attention, a transformer block, and a two-layer language
-  model, plus CPU and optional CUDA execution. Phase 4 is a final adapter and
-  implementation audit; adapters still raising `NotImplementedError` remain
-  gated out of scope.
+  model, plus CPU and optional CUDA execution. Phase 4 was re-audited on
+  2026-07-23; all seven training/optimization adapters still raise
+  `NotImplementedError`, so the phase is complete as a scope audit and remains
+  gated rather than implemented. Phases 5–6 remain future compiled-path and
+  final comparative-benchmark work.
 
 When resuming, first run:
 
@@ -155,7 +158,7 @@ Lux is not intended to replace the direct port. Implement the currently exposed 
 - Establish deterministic seeds, dtype conventions, tensor-axis conventions, and tolerances.
 - Add one self-contained Python-to-Julia numerical parity test before implementing the model stack. The fixture producer is maintainer comparison infrastructure, not starter code.
 
-### Phase 1: tokenizer
+### Phase 1: tokenizer — complete under tiny-corpus constraint
 
 - BPE training, encoding, replacement decoding, special-token behavior, and
   lazy chunk encoding are implemented without runtime dependencies.
@@ -198,11 +201,14 @@ Lux is not intended to replace the direct port. Implement the currently exposed 
   paths as named benchmark lanes.
 - Match existing Python snapshots and gradient checks before optimizing.
 
-### Phase 4: optimization and training — gated by Python adapters
+### Phase 4: optimization and training — audited and gated by Python adapters
 
 - `run_get_batch`, `run_cross_entropy`, `run_gradient_clipping`, `get_adamw_cls`, `run_get_lr_cosine_schedule`, `run_save_checkpoint`, and `run_load_checkpoint` currently raise `NotImplementedError`.
 - Do not implement these surfaces in Julia until their Python adapters become working reference boundaries on `dev`.
 - When `dev` advances, rebase this branch and update `JULIA_PARITY_MATRIX.md` before expanding scope; do not import intermediate Python feature branches.
+- Re-audited on 2026-07-23 after completing Phases 1–3: all seven adapters
+  remain gated, `dev` remains an ancestor of the Julia branch, and no Phase 4
+  runtime implementation has been fabricated.
 
 ### Phase 5: compiled and accelerator paths
 
@@ -210,8 +216,9 @@ Lux is not intended to replace the direct port. Implement the currently exposed 
 - CUDA toolchain readiness is verified in `CS336.jl/environments/cuda`, Lux
   forward/backward/update composition is verified in
   `CS336.jl/environments/lux_cuda`, and the Phase 2 direct primitives pass a
-  CPU/CUDA forward-and-gradient smoke there. Attention/model baselines remain
-  pending their correctness implementations.
+  CPU/CUDA forward-and-gradient smoke there. The directly ported attention
+  and two-layer LuxCore model also pass optional CUDA forward/gradient smokes;
+  compiled Reactant/Enzyme measurement remains pending.
 - Lux's built-in multi-head attention has passed a separate CPU/CUDA forward, Zygote backward, Adam update, and identical-input numerical comparison; this is ecosystem readiness only and does not substitute for the directly ported attention path.
 - Evaluate Enzyme for mutation-friendly differentiation.
 - Evaluate Reactant+Enzyme for compiled inference and a compiled training step.
