@@ -8,6 +8,7 @@ using Zygote
 include("fixture_contract.jl")
 using .FixtureContract
 
+include("attention_tests.jl")
 include("tokenizer_tests.jl")
 
 @testset "CS336 package smoke test" begin

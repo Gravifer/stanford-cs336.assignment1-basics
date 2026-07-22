@@ -6,12 +6,14 @@
 - Base at creation: local `dev` at `8c032c9` (`chore: prepare for training`), matching `origin/dev` on 2026-07-22.
 - Branch policy: grow only from `dev`. Do not merge or rebase Python feature branches into this branch.
 - Verified toolchain: Juliaup 1.20.8 with the stable `release` channel at Julia 1.12.6. `juliaup update release` reported no update on 2026-07-22.
-- Current stage: Phases 0 and 1 are complete under the user's tiny-corpus
+- Current stage: Phases 0, 1, and 2 are complete under the user's tiny-corpus
   training constraint. Feature-first linear, embedding, SiLU, softmax,
   RMSNorm, and explicit/packed SwiGLU pass Python forward/gradient parity.
   Tokenizer encoding matches GPT-2 fixture IDs and BPE training matches four
   tiny Python probes in serial and threaded modes. Full-corpus BPE training is
-  explicitly deferred to the user. Phase 3 attention/model work is next.
+  explicitly deferred to the user. Phase 3 RoPE/attention kernels and their
+  structural tests are implemented; Python fixture parity and transformer
+  composition are next.
 
 When resuming, first run:
 
