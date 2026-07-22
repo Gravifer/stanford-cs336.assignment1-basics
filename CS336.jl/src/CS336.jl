@@ -7,12 +7,17 @@ functions and explicit model components after its parity evidence is established
 module CS336
 
 import LinearAlgebra
+import LuxCore
 import NNlib
+import Random
+import WeightInitializers
 
 export BPETokenizer,
     ElementwiseRotaryEmbedding,
     MatrixRotaryEmbedding,
     RotaryEmbedding,
+    TransformerBlock,
+    TransformerLM,
     apply_rope,
     apply_rope_qk,
     decode,
@@ -32,6 +37,7 @@ export BPETokenizer,
 
 include("functional.jl")
 include("attention.jl")
+include("model.jl")
 include("tokenizer.jl")
 
 end

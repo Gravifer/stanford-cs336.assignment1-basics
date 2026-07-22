@@ -107,6 +107,6 @@ Use current upstream manuals before implementation. Starting references, verifie
 The isolated compatibility project locks Lux 1.31.4, NNlib 0.9.38,
 Optimisers 0.4.7, and Zygote 0.7.11 on Julia 1.12.6. Its explicit
 setup/apply/gradient/update/softmax smoke test passes. Phase 3 now uses NNlib
-0.9.38 as a direct runtime dependency for batched contractions; Lux,
-Optimisers, and Zygote have not been promoted merely because the integration
-stack loads.
+0.9.38 for batched contractions and LuxCore 1.5.3 for explicit model-layer
+interfaces as direct runtime dependencies; full Lux, Optimisers, and Zygote
+have not been promoted merely because the integration stack loads.
