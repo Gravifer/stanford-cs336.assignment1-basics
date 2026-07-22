@@ -88,6 +88,18 @@ it also checks a Float16 RMSNorm forward pass. This passed with CUDA.jl 6.2.1
 on the recorded RTX 3070 Ti. It is correctness evidence, not a performance
 benchmark, and does not make CUDA a runtime or CPU-test dependency.
 
+Phase 3 adds a separate attention smoke in the same optional environment:
+
+```powershell
+julia --project=CS336.jl/environments/lux_cuda CS336.jl/environments/lux_cuda/attention_smoke.jl
+```
+
+It compares CPU/CUDA forward values and Zygote gradients for both RoPE cache
+representations, masked SDPA (including a fully masked row), and causal packed
+self-attention with RoPE. Lazy GPU-backed gradient wrappers are preserved and
+checked by their root storage rather than being materialized solely for a type
+assertion.
+
 ## Benchmarks
 
 Benchmark dependencies live in their own workspace member and do not belong in the runtime or test projects:

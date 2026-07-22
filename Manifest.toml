@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "b55dae5de4fb9cddc9715ebe246d6ba79c9a26ea"
+project_hash = "65027453126ff0b446af2f0956cbe44e2e67c1b4"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "ec6be48a85c93d995563b84bff8a86bc98df45ce"
@@ -129,7 +129,7 @@ uuid = "2a0fbf3d-bb9c-48f3-b0a9-814d99fd7ab9"
 version = "0.2.7"
 
 [[deps.CS336]]
-deps = ["NNlib"]
+deps = ["LinearAlgebra", "NNlib"]
 path = "CS336.jl"
 uuid = "39ccc5dd-36ad-402e-b592-2c67158c70ea"
 version = "0.1.0"

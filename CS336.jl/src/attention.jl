@@ -294,16 +294,16 @@ function _aligned_attention_mask(mask, score_shape)
     )
 end
 
-function _causal_mask(key_count, query_count)
-    key_positions = reshape(0:(key_count - 1), key_count, 1)
-    query_positions = reshape(0:(query_count - 1), 1, query_count)
-    return key_positions .<= query_positions
+function _causal_mask(scores)
+    key_count, query_count = size(scores, 1), size(scores, 2)
+    allowed = fill!(similar(scores, Bool, key_count, query_count), true)
+    return LinearAlgebra.triu(allowed)
 end
 
 function _attention_weights(scores; mask=nothing, is_causal::Bool=false)
     key_count, query_count = size(scores, 1), size(scores, 2)
     aligned_mask = mask === nothing ? nothing : _aligned_attention_mask(mask, size(scores))
-    causal = is_causal ? _causal_mask(key_count, query_count) : nothing
+    causal = is_causal ? _causal_mask(scores) : nothing
     negative_infinity = convert(eltype(scores), -Inf)
 
     fully_masked = nothing

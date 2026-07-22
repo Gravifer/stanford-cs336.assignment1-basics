@@ -6,6 +6,7 @@ functions and explicit model components after its parity evidence is established
 """
 module CS336
 
+import LinearAlgebra
 import NNlib
 
 export BPETokenizer,

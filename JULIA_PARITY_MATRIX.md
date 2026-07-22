@@ -27,10 +27,10 @@ remaining limitations of the legacy output-only snapshots.
 | RMSNorm | `run_rmsnorm`; self-contained v1 bundle | 2 | parity-validated | feature-axis output, stable reduction dtype, input and affine-weight gradients |
 | Cross-entropy | `run_cross_entropy` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
 | Gradient clipping | `run_gradient_clipping` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
-| RoPE | `run_rope`; self-contained v1 bundle | 3 | parity-validated | elementwise/matrix rotation values, irregular batched positions, Float16 dtype, input gradient, and automatic/separate/stacked Q/K execution; CUDA pending |
+| RoPE | `run_rope`; self-contained v1 bundle | 3 | parity-validated | elementwise/matrix rotation values, irregular batched positions, Float16 dtype, input gradient, automatic/separate/stacked Q/K execution, and optional CUDA forward/gradient smoke |
 | Scaled dot-product attention | `run_scaled_dot_product_attention`; self-contained 4-D v1 bundle | 3 | parity-validated | output and Q/K/V gradients, boolean/additive/causal mask semantics, and finite zero fully masked rows |
 | MHA / self-attention | attention adapters; self-contained plain/RoPE v1 bundles | 3 | parity-validated | packed/separate projections, causal outputs and all parameter/input gradients, two feature-first head layouts, and three Q/K RoPE policies |
-| Grouped/multi-query attention | no direct adapter; implemented inside adapter-reachable attention family | 3 experiment | structurally validated execution lane | grouped contraction matches expanded-KV MHA without materializing repeated K/V; MHA/GQA/MQA timing and CUDA pending |
+| Grouped/multi-query attention | no direct adapter; implemented inside adapter-reachable attention family | 3 experiment | structurally validated execution lane | grouped contraction matches expanded-KV MHA without materializing repeated K/V; MHA/GQA/MQA timing and grouped CUDA remain pending |
 | Transformer block | `run_transformer_block`; NPZ snapshot | 3 | planned | parameter import, output, and gradients |
 | Transformer LM | `run_transformer_lm`; full and truncated snapshots | 3 | planned | logits, truncation behavior, state mapping, and gradients |
 | Batch sampling | `run_get_batch` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
