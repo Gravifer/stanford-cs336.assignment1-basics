@@ -13,7 +13,7 @@ Therefore Julia parity must use self-contained, language-neutral fixture bundles
 
 Place generated bundles under `tests/fixtures/julia_parity/v1/`. Each operation owns one `.npz` data file and one JSON metadata file with the same stem. Do not replace the existing Python snapshots until both suites deliberately adopt the new contract.
 
-Metadata must validate against `tests/fixtures/julia_parity/schema-v1.json`, which uses JSON Schema Draft 2020-12. The schema validates document structure; consumers must additionally enforce cross-file invariants such as NPZ key equality, `length(shape) == length(axes)`, actual dtype/shape agreement, and gradient-presence consistency.
+Metadata must validate against `tests/fixtures/julia_parity/schema-v1.json`, which uses JSON Schema Draft 2020-12. The schema validates document structure; consumers must additionally enforce cross-file invariants such as NPZ key equality, `length(shape) == length(axes)`, actual dtype/shape agreement, and gradient-presence consistency. The test-only Julia consumer in `CS336.jl/test/fixture_contract.jl` performs those checks; its synthetic temporary-bundle tests validate transport and rejection behavior, not Python-to-Julia numerical parity.
 
 NPZ contents must be ordinary numeric or boolean arrays. Object arrays and pickled payloads are forbidden. JSON contains scalar and structural metadata that should not be encoded as zero-dimensional arrays.
 

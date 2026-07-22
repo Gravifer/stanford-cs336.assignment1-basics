@@ -4,6 +4,9 @@ using NPZ
 using Test
 using TOML
 
+include("fixture_contract.jl")
+using .FixtureContract
+
 @testset "CS336 package smoke test" begin
     @test nameof(CS336) === :CS336
     @test Base.pkgversion(CS336) == v"0.1.0"
@@ -89,6 +92,160 @@ end
     @test array_descriptor["additionalProperties"] === false
     @test Set(array_descriptor["required"]) ==
           Set(["role", "dtype", "shape", "axes", "physical_representation", "finiteness"])
+end
+
+@testset "neutral fixture bundle validation" begin
+    function descriptor(role, dtype, shape, axes; finiteness="required", zero_based=nothing)
+        result = Dict{String, Any}(
+            "role" => role,
+            "dtype" => dtype,
+            "shape" => shape,
+            "axes" => axes,
+            "physical_representation" => "dense",
+            "finiteness" => finiteness,
+        )
+        zero_based === nothing || (result["zero_based_values"] = zero_based)
+        return result
+    end
+
+    function metadata(name, descriptors; gradients_present=false)
+        return Dict{String, Any}(
+            "contract_version" => 1,
+            "source" => Dict{String, Any}(
+                "git_commit" => repeat("0", 40),
+                "generated_at" => "2026-07-22T15:00:00Z",
+                "working_tree_clean" => true,
+            ),
+            "operation" => "synthetic.transport",
+            "producer" => Dict{String, Any}(
+                "language" => "Julia test",
+                "runtime_version" => string(VERSION),
+                "packages" => Dict{String, Any}(
+                    "JSON" => string(pkgversion(JSON)),
+                    "NPZ" => string(pkgversion(NPZ)),
+                ),
+            ),
+            "array_file" => "$name.npz",
+            "arrays" => descriptors,
+            "scalars" => Dict{String, Any}("purpose" => "transport validation"),
+            "tolerances" =>
+                Dict{String, Any}("rtol" => 1.0e-5, "atol" => 1.0e-6, "equal_nan" => false),
+            "gradients" => Dict{String, Any}(
+                "present" => gradients_present,
+                "objective" => gradients_present ? "sum(expected.output)" : nothing,
+                "physical_representation" => gradients_present ? "dense" : "none",
+            ),
+            "notes" => Any["Synthetic temporary bundle; not parity evidence."],
+        )
+    end
+
+    function write_bundle(directory, name, bundle_metadata, arrays)
+        metadata_path = joinpath(directory, "$name.json")
+        npzwrite(joinpath(directory, "$name.npz"), arrays)
+        JSON.json(metadata_path, bundle_metadata)
+        return metadata_path
+    end
+
+    mktempdir() do directory
+        input = reshape(Float32.(1:4), 2, 2)
+        output = input .+ 1
+        arrays = Dict("input.x" => input, "expected.output" => output)
+        descriptors = Dict{String, Any}(
+            "input.x" => descriptor("input", "float32", Any[2, 2], Any["feature", "batch"]),
+            "expected.output" =>
+                descriptor("expected_output", "float32", Any[2, 2], Any["feature", "batch"]),
+        )
+
+        valid_path = write_bundle(directory, "valid", metadata("valid", descriptors), arrays)
+        bundle = load_bundle(valid_path)
+        @test bundle.arrays["input.x"] == input
+        @test bundle.arrays["expected.output"] == output
+        @test bundle.metadata["operation"] == "synthetic.transport"
+        @test basename(bundle.array_path) == "valid.npz"
+
+        shape_metadata = metadata("shape_mismatch", deepcopy(descriptors))
+        shape_metadata["arrays"]["input.x"]["shape"] = Any[4]
+        shape_path = write_bundle(directory, "shape_mismatch", shape_metadata, arrays)
+        @test_throws ArgumentError load_bundle(shape_path)
+
+        axis_metadata = metadata("axis_mismatch", deepcopy(descriptors))
+        axis_metadata["arrays"]["input.x"]["axes"] = Any["flat"]
+        axis_path = write_bundle(directory, "axis_mismatch", axis_metadata, arrays)
+        @test_throws ArgumentError load_bundle(axis_path)
+
+        dtype_metadata = metadata("dtype_mismatch", deepcopy(descriptors))
+        dtype_metadata["arrays"]["input.x"]["dtype"] = "float64"
+        dtype_path = write_bundle(directory, "dtype_mismatch", dtype_metadata, arrays)
+        @test_throws ArgumentError load_bundle(dtype_path)
+
+        key_metadata = metadata("key_mismatch", deepcopy(descriptors))
+        delete!(key_metadata["arrays"], "input.x")
+        key_path = write_bundle(directory, "key_mismatch", key_metadata, arrays)
+        @test_throws ArgumentError load_bundle(key_path)
+
+        nonfinite_arrays = deepcopy(arrays)
+        nonfinite_arrays["expected.output"][1] = NaN32
+        nonfinite_path = write_bundle(
+            directory, "nonfinite", metadata("nonfinite", deepcopy(descriptors)), nonfinite_arrays
+        )
+        @test_throws ArgumentError load_bundle(nonfinite_path)
+
+        indexed_arrays = Dict(
+            "input.ids" => Int64[0, -1],
+            "expected.output" => reshape(Float32.(1:4), 2, 2),
+        )
+        indexed_descriptors = Dict{String, Any}(
+            "input.ids" => descriptor(
+                "input", "int64", Any[2], Any["token"]; finiteness="not_applicable", zero_based=true
+            ),
+            "expected.output" =>
+                descriptor("expected_output", "float32", Any[2, 2], Any["feature", "batch"]),
+        )
+        indexed_path = write_bundle(
+            directory,
+            "negative_index",
+            metadata("negative_index", indexed_descriptors),
+            indexed_arrays,
+        )
+        @test_throws ArgumentError load_bundle(indexed_path)
+
+        gradient_arrays = merge(
+            arrays,
+            Dict("expected.gradient.parameter.weight" => fill(1.0f0, 2, 2)),
+        )
+        gradient_descriptors = merge(
+            descriptors,
+            Dict{String, Any}(
+                "expected.gradient.parameter.weight" => descriptor(
+                    "expected_parameter_gradient",
+                    "float32",
+                    Any[2, 2],
+                    Any["output_feature", "input_feature"],
+                ),
+            ),
+        )
+        inconsistent_gradient_path = write_bundle(
+            directory,
+            "gradient_inconsistent",
+            metadata("gradient_inconsistent", gradient_descriptors),
+            gradient_arrays,
+        )
+        @test_throws ArgumentError load_bundle(inconsistent_gradient_path)
+
+        valid_gradient_path = write_bundle(
+            directory,
+            "gradient_valid",
+            metadata("gradient_valid", gradient_descriptors; gradients_present=true),
+            gradient_arrays,
+        )
+        gradient_bundle = load_bundle(valid_gradient_path)
+        @test gradient_bundle.metadata["gradients"]["present"] === true
+
+        extra_metadata = metadata("extra_top_level", deepcopy(descriptors))
+        extra_metadata["unexpected"] = true
+        extra_path = write_bundle(directory, "extra_top_level", extra_metadata, arrays)
+        @test_throws ArgumentError load_bundle(extra_path)
+    end
 end
 
 @testset "repository fixture smoke test" begin

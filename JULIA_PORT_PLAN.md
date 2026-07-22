@@ -6,7 +6,7 @@
 - Base at creation: local `dev` at `8c032c9` (`chore: prepare for training`), matching `origin/dev` on 2026-07-22.
 - Branch policy: grow only from `dev`. Do not merge or rebase Python feature branches into this branch.
 - Verified toolchain: Juliaup 1.20.8 with the stable `release` channel at Julia 1.12.6. `juliaup update release` reported no update on 2026-07-22.
-- Current stage: Phase 0 infrastructure complete; the first self-contained Python-to-Julia numerical parity bundle remains pending a student-authored producer. The root workspace, `CS336.jl` package boundary, test project, fixture readers, machine-readable neutral-fixture schema, benchmark project, sole root manifest, CUDA readiness environment, and Lux compatibility environment are committed. The runtime package remains dependency-free and no assignment operation has been added.
+- Current stage: Phase 0 infrastructure complete; the first self-contained Python-to-Julia numerical parity bundle remains pending a student-authored producer. The root workspace, `CS336.jl` package boundary, test project, fixture readers, machine-readable neutral-fixture schema and test-only consumer, benchmark project, sole root manifest, CUDA readiness environment, and Lux compatibility environment are committed. The runtime package remains dependency-free and no assignment operation has been added.
 
 When resuming, first run:
 
