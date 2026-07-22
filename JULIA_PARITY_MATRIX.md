@@ -88,4 +88,4 @@ Use current upstream manuals before implementation. Starting references, verifie
 - [Enzyme.jl documentation](https://enzymead.github.io/Enzyme.jl/stable/)
 - [Reactant automatic differentiation](https://enzymead.github.io/Reactant.jl/stable/tutorials/automatic-differentiation)
 
-Package versions and exact APIs will be resolved only when Phase 0 creates the root manifest. At that point, log the resolved versions and prefer version-matched documentation over an unqualified development manual.
+The isolated compatibility project now locks Lux 1.31.4, NNlib 0.9.38, Optimisers 0.4.7, and Zygote 0.7.11 on Julia 1.12.6. Its explicit setup/apply/gradient/update/softmax smoke test passes. These packages have not been promoted to runtime dependencies, and no operation in this matrix becomes “implemented” merely because the integration stack loads.

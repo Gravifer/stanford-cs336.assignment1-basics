@@ -44,6 +44,14 @@ julia --project=CS336.jl/environments/cuda -e 'using CUDA; CUDA.versioninfo(); @
 
 CUDA v6.2 is constrained there and v6.2.1 is locked. Importing it may download substantial toolkit artifacts into Julia's shared package/artifact cache, but it does not add CUDA to the runtime package or CPU tests.
 
+The baseline ML integration is likewise isolated from the runtime package:
+
+```powershell
+julia --project=CS336.jl/environments/lux -e 'using Lux, NNlib, Optimisers, Zygote, CS336; println((Lux=pkgversion(Lux), NNlib=pkgversion(NNlib), Optimisers=pkgversion(Optimisers), Zygote=pkgversion(Zygote)))'
+```
+
+The lock currently resolves Lux 1.31.4, NNlib 0.9.38, Optimisers 0.4.7, and Zygote 0.7.11. This environment is for integration experiments until a course implementation actually needs a justified runtime dependency.
+
 ## Benchmarks
 
 Benchmark dependencies live in their own workspace member and do not belong in the runtime or test projects:
@@ -86,7 +94,7 @@ Before adding a package or relying on an API:
 5. resolve from repository root and inspect the root-manifest change;
 6. add a minimal integration test and record the decision in `work-log.md`.
 
-Do not add Lux, an AD backend, or Reactant until the phase that exercises and tests that dependency. CUDA exists only in its isolated readiness environment; do not move it into runtime or CPU-test dependencies before an accelerator path requires it.
+Lux, NNlib, Optimisers, and Zygote now exist only in their isolated compatibility environment and have passed a documented interface smoke test. Do not move them into runtime or CPU-test dependencies before a course implementation requires them. Reactant and Enzyme remain uninstalled until the compiled-path phase exercises them. CUDA likewise remains isolated until an accelerator implementation requires it.
 
 ## Planning records
 

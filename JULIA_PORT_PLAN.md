@@ -6,7 +6,7 @@
 - Base at creation: local `dev` at `8c032c9` (`chore: prepare for training`), matching `origin/dev` on 2026-07-22.
 - Branch policy: grow only from `dev`. Do not merge or rebase Python feature branches into this branch.
 - Verified toolchain: Juliaup 1.20.8 with the stable `release` channel at Julia 1.12.6. `juliaup update release` reported no update on 2026-07-22.
-- Current stage: Phase 0 scaffold complete. The root workspace, `CS336.jl` package boundary, test project, neutral text-fixture smoke test, and sole root manifest are committed; no ML dependency or assignment operation has been added.
+- Current stage: Phase 0 scaffold complete, with optional readiness environments in progress. The root workspace, `CS336.jl` package boundary, test project, fixture readers, benchmark project, sole root manifest, CUDA readiness environment, and Lux compatibility environment are committed. The runtime package remains dependency-free and no assignment operation has been added.
 
 When resuming, first run:
 
@@ -66,6 +66,10 @@ CS336.jl/                    # actual Julia package root
     model.jl
     training.jl
   environments/
+    cuda/
+      Project.toml           # optional workspace member, isolated CUDA stack
+    lux/
+      Project.toml           # optional workspace member, baseline ML integration
     reactant/
       Project.toml           # optional workspace member, isolated compiler stack
 ```
@@ -107,7 +111,7 @@ Do not adopt Flux and Lux simultaneously. Do not switch AD systems opportunistic
 Lux treats a model primarily as an architecture description. Initialization produces a parameter tree and a state tree, and application is conceptually:
 
 ```julia
-y, new_state = model(x, parameters, state)
+y, new_state = Lux.apply(model, x, parameters, state)
 ```
 
 This is useful here because:
@@ -279,6 +283,6 @@ The documentation-first rule is also a mitigation: when ecosystem familiarity is
 4. Run `juliaup status` and update the stable release channel through Juliaup only if it is behind.
 5. Run `julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test("CS336")'` and confirm the root manifest remains unchanged.
 6. Do not install packages globally; invoke Julia with `--project=.` from the repository root.
-7. Before Phase 1, consult and log official documentation for any proposed tokenizer/data dependency; do not preemptively add the ML stack.
+7. Before Phase 1, consult and log official documentation for any proposed tokenizer/data dependency. Keep the already validated ML stack isolated; do not add it to the runtime package preemptively.
 8. Update `JULIA_PARITY_MATRIX.md` after rebasing if the Python adapter surface changed.
 9. Update `work-log.md` during the session and commit small coherent checkpoints.

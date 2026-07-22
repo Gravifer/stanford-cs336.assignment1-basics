@@ -50,6 +50,8 @@ The PyTorch-internals embedding example concerns a dense embedding table whose b
 
 The course's current PyTorch embedding path produces a dense gradient, so dense is the parity behavior. A Julia row-sparse experiment is meaningful only if repeated token IDs coalesce correctly and the sparse representation survives the parameter tree, optimizer state/update, weight decay decision, device movement, checkpointing, and any distributed reduction. Supporting the full path requires deliberate work even if Julia lets it live outside a central tensor implementation.
 
+Consequently, the Julia port does **not** need to manually implement sparse storage merely to match this repository. It can use a dense embedding parameter and dense tangent, just as the current PyTorch course path does. Manual sparse-gradient work begins only if we deliberately add the optional row-sparse experiment; at that point, specializing lookup backward alone is insufficient because the optimizer and state semantics are part of the feature.
+
 ### Ecosystem completeness
 
 PyTorch's internal complexity partly records years of funded backward compatibility and broad product requirements. Julia's modularity may avoid putting all of that code in one repository, but missing integrations remain missing capabilities. For this reason the project records both architectural cleanliness and operational coverage; one must not be used as a proxy for the other.
@@ -67,6 +69,12 @@ Lux is selected because its current documented interface fits the experiment:
 - its device management is built around the Julia accelerator ecosystem.
 
 Lux is not selected because it is assumed faster than Flux or PyTorch, nor because every course primitive should be replaced by a built-in Lux layer. The reference math remains visible; a practical/library path is added separately when needed for a fair performance comparison.
+
+### Compatibility result on this repository
+
+On 2026-07-22, the isolated `CS336.jl/environments/lux` project resolved Lux 1.31.4, NNlib 0.9.38, Optimisers 0.4.7, and Zygote 0.7.11 on Julia 1.12.6. A fresh process successfully exercised the documented explicit path: `Lux.setup`, `Lux.apply`, a Zygote gradient with respect to the parameter tree, an Optimisers Adam update, and NNlib softmax. The package itself remains dependency-free.
+
+This establishes that the chosen interfaces compose today; it is not a speed result. CPU/GPU operation parity and the “not more than 10×” comparability question remain gated on matched implementations and the benchmark protocol. The already isolated CUDA.jl 6.2.1 environment proves that the NVIDIA toolchain is functional on the target host, but Lux-on-CUDA and model-level performance have not yet been measured.
 
 ## Side note: “tabular ML”
 
