@@ -27,6 +27,8 @@ end
     ]
 
     @test root_project["workspace"]["projects"] == expected_projects
+    @test root_project["deps"]["CS336"] == "39ccc5dd-36ad-402e-b592-2c67158c70ea"
+    @test root_project["sources"]["CS336"]["path"] == "CS336.jl"
 
     manifest_paths = String[]
     excluded_directories = Set([".git", ".venv"])

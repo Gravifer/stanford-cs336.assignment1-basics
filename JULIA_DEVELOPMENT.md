@@ -16,9 +16,10 @@ All package work uses the repository project. Do not add course packages to Juli
 ```powershell
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 julia --project=. -e 'using Pkg; Pkg.status(; workspace=true)'
+julia --project=. -e 'using CS336; println(pathof(CS336))'
 ```
 
-`Project.toml` declares the workspace and `Manifest.toml` is its generated lockfile. The package and test subprojects share that one root manifest; child manifests are not expected.
+`Project.toml` declares the workspace and directly depends on the local `CS336.jl` package through `[sources]`. Consequently conventional tooling activated at repository root can load `CS336`, while the package's own `CS336.jl/Project.toml` remains authoritative for runtime dependencies. `Manifest.toml` is the generated shared lockfile; child manifests are not expected.
 
 ## Tests
 
