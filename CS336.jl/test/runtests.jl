@@ -456,6 +456,82 @@ end
     @test size(weight_gradient) == size(weight)
 end
 
+@testset "SiLU primitive and Python parity" begin
+    native_input = Float64[-1_000, -2, 0, 2, 1_000]
+    native_output = silu(native_input)
+    @test eltype(native_output) === Float64
+    @test all(isfinite, native_output)
+    @test native_output[3] == 0
+    @test native_output[end] == 1_000
+
+    metadata_path = normpath(
+        joinpath(
+            @__DIR__,
+            "..",
+            "..",
+            "tests",
+            "fixtures",
+            "julia_parity",
+            "v1",
+            "silu.json",
+        ),
+    )
+    bundle = load_bundle(metadata_path)
+    arrays = bundle.arrays
+    tolerances = bundle.metadata["tolerances"]
+    input = permutedims(arrays["input.x"], (2, 1))
+    expected_output = permutedims(arrays["expected.output"], (2, 1))
+    expected_input_gradient =
+        permutedims(arrays["expected.gradient.input.x"], (2, 1))
+
+    output = silu(input)
+    input_gradient = only(Zygote.gradient(x -> sum(abs2, silu(x)), input))
+    rtol = tolerances["rtol"]
+    atol = tolerances["atol"]
+    nans = tolerances["equal_nan"]
+    @test isapprox(output, expected_output; rtol, atol, nans)
+    @test isapprox(input_gradient, expected_input_gradient; rtol, atol, nans)
+end
+
+@testset "softmax primitive and Python parity" begin
+    native_input = Float32[1_000 0; 1_001 -1; 999 2]
+    native_output = softmax(native_input; dims=1)
+    @test all(isfinite, native_output)
+    @test sum(native_output; dims=1) ≈ ones(Float32, 1, 2)
+    @test eltype(native_output) === Float32
+    @test_throws ArgumentError softmax(native_input; dims=0)
+    @test_throws ArgumentError softmax(native_input; dims=3)
+
+    metadata_path = normpath(
+        joinpath(
+            @__DIR__,
+            "..",
+            "..",
+            "tests",
+            "fixtures",
+            "julia_parity",
+            "v1",
+            "softmax.json",
+        ),
+    )
+    bundle = load_bundle(metadata_path)
+    arrays = bundle.arrays
+    tolerances = bundle.metadata["tolerances"]
+    input = permutedims(arrays["input.x"], (3, 2, 1))
+    expected_output = permutedims(arrays["expected.output"], (3, 2, 1))
+    expected_input_gradient =
+        permutedims(arrays["expected.gradient.input.x"], (3, 2, 1))
+
+    output = softmax(input; dims=2)
+    input_gradient =
+        only(Zygote.gradient(x -> sum(abs2, softmax(x; dims=2)), input))
+    rtol = tolerances["rtol"]
+    atol = tolerances["atol"]
+    nans = tolerances["equal_nan"]
+    @test isapprox(output, expected_output; rtol, atol, nans)
+    @test isapprox(input_gradient, expected_input_gradient; rtol, atol, nans)
+end
+
 @testset "repository fixture smoke test" begin
     fixture = normpath(joinpath(@__DIR__, "..", "..", "tests", "fixtures", "address.txt"))
     @test isfile(fixture)

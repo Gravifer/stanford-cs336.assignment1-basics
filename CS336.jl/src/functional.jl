@@ -46,3 +46,30 @@ function embedding(token_ids::AbstractArray{<:Integer}, weight::AbstractMatrix)
     selected = weight[:, indices]
     return reshape(selected, size(weight, 1), size(token_ids)...)
 end
+
+"""
+    silu(x)
+
+Apply the sigmoid linear unit elementwise. Arrays retain their shape and use a
+fully broadcasted implementation so the same function specializes for CPU and
+accelerator array types.
+"""
+silu(x::Number) = x / (one(x) + exp(-x))
+silu(x::AbstractArray) = silu.(x)
+
+"""
+    softmax(x; dims)
+
+Compute a numerically stable softmax over the one-based Julia dimension
+`dims`. The maximum is retained along the reduced dimension, making the
+broadcasting contract explicit for arrays of any rank.
+"""
+function softmax(x::AbstractArray; dims::Integer)
+    1 <= dims <= ndims(x) || throw(
+        ArgumentError("softmax dims must be in 1:$(ndims(x)), received $dims"),
+    )
+
+    shifted = x .- maximum(x; dims)
+    exponentials = exp.(shifted)
+    return exponentials ./ sum(exponentials; dims)
+end

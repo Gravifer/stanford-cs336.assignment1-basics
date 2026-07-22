@@ -12,8 +12,8 @@ Harness status as of 2026-07-22: the root Julia workspace can read every existin
 | --- | --- | ---: | --- | --- |
 | Linear | `run_linear`; self-contained v1 bundle | 2 | parity-validated | feature-first output plus dense input/weight gradients through explicit Zygote arguments |
 | Embedding | `run_embedding`; self-contained v1 bundle | 2 | parity-validated | zero-based lookup, repeated-ID accumulation, output, and full dense weight gradient through explicit Zygote arguments |
-| SiLU / SwiGLU | `run_silu`, `run_swiglu`; NPZ snapshot | 2 | planned | output and gradient fixtures |
-| Stable softmax | `run_softmax`; student edge-case tests | 2 | planned | axis behavior, stability, dtype, and fully masked interactions |
+| SiLU / SwiGLU | `run_silu`, `run_swiglu`; SiLU v1 bundle | 2 | SiLU parity-validated; SwiGLU planned | SiLU output/input gradient and extreme-value stability; SwiGLU remains |
+| Stable softmax | `run_softmax`; self-contained v1 bundle | 2 | parity-validated | explicit Julia dimension mapping, large-offset stability, dtype, output, and input gradient |
 | RMSNorm | `run_rmsnorm`; NPZ snapshot | 2 | planned | output and gradient fixtures |
 | Cross-entropy | `run_cross_entropy` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
 | Gradient clipping | `run_gradient_clipping` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
