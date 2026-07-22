@@ -25,6 +25,14 @@ Build a Julia package parallel to the repository's `cs336_basics` Python package
 
 This project is about language/framework architecture as well as completing the course. Keep low-level educational implementations visible even when Julia or a vendor library has a faster built-in implementation.
 
+## Companion records
+
+- `JULIA_ML_ARCHITECTURE_NOTES.md` preserves the ecosystem conclusions and the boundary between structural streamlining and funded capability.
+- `JULIA_PARITY_MATRIX.md` tracks the evolving Python adapter/test surface and assigns it to baseline or experimental Julia tracks.
+- `JULIA_PHASE0_CHECKLIST.md` is the acceptance checklist for the root workspace and minimal package scaffold.
+- `JULIA_BENCHMARK_PROTOCOL.md` defines correctness gates, timing controls, reproducibility metadata, and the greater-than-10× investigation threshold.
+- `work-log.md` is the timestamped operational record and commit ledger.
+
 ## Repository and environment layout
 
 ```text
