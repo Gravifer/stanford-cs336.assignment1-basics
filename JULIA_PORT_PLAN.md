@@ -6,7 +6,12 @@
 - Base at creation: local `dev` at `8c032c9` (`chore: prepare for training`), matching `origin/dev` on 2026-07-22.
 - Branch policy: grow only from `dev`. Do not merge or rebase Python feature branches into this branch.
 - Verified toolchain: Juliaup 1.20.8 with the stable `release` channel at Julia 1.12.6. `juliaup update release` reported no update on 2026-07-22.
-- Current stage: Phase 0 is complete. Feature-first linear, `(feature, vocabulary)` embedding, elementwise SiLU, and explicit-axis stable softmax pass Python forward/dense-gradient parity. Runtime primitives remain generic Julia functions; Zygote is test-only for explicit-argument gradient verification. CUDA and compiled-AD verification follow correctness rather than shaping the API prematurely.
+- Current stage: Phases 0 and 1 are complete under the user's tiny-corpus
+  training constraint. Feature-first linear, embedding, SiLU, softmax,
+  RMSNorm, and explicit/packed SwiGLU pass Python forward/gradient parity.
+  Tokenizer encoding matches GPT-2 fixture IDs and BPE training matches four
+  tiny Python probes in serial and threaded modes. Full-corpus BPE training is
+  explicitly deferred to the user. Phase 3 attention/model work is next.
 
 When resuming, first run:
 
@@ -138,7 +143,7 @@ Lux is not intended to replace the direct port. Implement the currently exposed 
 
 ## Adapter-aligned phases
 
-### Phase 0: scaffold and cross-language fixtures — infrastructure complete; numerical parity bundle pending
+### Phase 0: scaffold and cross-language fixtures — complete
 
 - Create the root workspace `Project.toml`, `CS336.jl/Project.toml`, `CS336.jl/src/CS336.jl`, tests, and documented commands. Resolve and commit the one root `Manifest.toml`.
 - Use the verified Julia 1.12.6 runtime and record any later runtime upgrade in this plan and the benchmark metadata.
@@ -148,9 +153,14 @@ Lux is not intended to replace the direct port. Implement the currently exposed 
 
 ### Phase 1: tokenizer
 
-- Port BPE training, encoding, decoding, special-token behavior, and document chunking.
-- Match existing fixture semantics byte-for-byte where practical.
-- Benchmark BPE training throughput and tokenizer throughput separately from neural-network work.
+- BPE training, encoding, replacement decoding, special-token behavior, and
+  lazy chunk encoding are implemented without runtime dependencies.
+- Exact GPT-2 encoding and four tiny Python trainer cases establish semantic
+  parity, including bytewise tie-breaking and special-token boundaries.
+- Per the user's instruction, do not run the repository's real/full BPE
+  training workloads. Full-corpus correctness and throughput benchmarking are
+  a documented user-deferred action; tiny contrived probes are the acceptance
+  evidence for this phase.
 
 ### Phase 2: numerical primitives
 

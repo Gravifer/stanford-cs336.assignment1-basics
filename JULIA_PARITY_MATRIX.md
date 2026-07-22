@@ -4,7 +4,14 @@ This is the evolving scope ledger for the Julia package under `CS336.jl/`. It re
 
 Status vocabulary: **planned** means exposed by a working adapter and assigned to a phase, **gated** means the named adapter still raises `NotImplementedError`, and **excluded** means Python functionality is not part of the adapter progress boundary.
 
-Harness status as of 2026-07-22: the root Julia workspace can read every existing `.npz` snapshot through test-only NPZ v0.4.3 and structured fixture metadata through test-only JSON.jl v1.6.1. The 65-assertion suite locks all 14 NPZ filenames/key/dtype/shapes, the complete model configuration, and tokenizer vocabulary/merge transport. This proves fixture interoperability only; none of the operations below gains parity status until its Julia outputs and gradients are compared independently. `JULIA_SNAPSHOT_PROVENANCE.md` records that one legacy NPZ is orphaned and that existing output snapshots omit neutral inputs, parameters, gradients, and tolerance metadata.
+Harness status as of 2026-07-23: the root Julia workspace reads every legacy
+NPZ snapshot plus versioned self-contained numerical bundles through test-only
+NPZ and JSON dependencies. Linear, embedding, SiLU, softmax, RMSNorm, and both
+SwiGLU representations now have independent forward/gradient evidence. The
+tokenizer additionally matches exact GPT-2 IDs on ASCII, Unicode, and special
+token cases, while the trainer matches Python on four deliberately tiny
+corpora. `JULIA_SNAPSHOT_PROVENANCE.md` records the remaining limitations of
+the legacy output-only snapshots.
 
 ## Public parity surface on `dev`
 
@@ -14,7 +21,7 @@ Harness status as of 2026-07-22: the root Julia workspace can read every existin
 | Embedding | `run_embedding`; self-contained v1 bundle | 2 | parity-validated | zero-based lookup, repeated-ID accumulation, output, and full dense weight gradient through explicit Zygote arguments |
 | SiLU / SwiGLU | `run_silu`, `run_swiglu`; self-contained v1 bundles | 2 | SiLU parity-validated; SwiGLU parity-validated | two Julia lanes only: explicit separate and packed input projection; output/input/all-parameter gradients |
 | Stable softmax | `run_softmax`; self-contained v1 bundle | 2 | parity-validated | explicit Julia dimension mapping, large-offset stability, dtype, output, and input gradient |
-| RMSNorm | `run_rmsnorm`; self-contained v1 bundle | 2 | fixture-ready | feature-axis output, stable reduction dtype, input and affine-weight gradients |
+| RMSNorm | `run_rmsnorm`; self-contained v1 bundle | 2 | parity-validated | feature-axis output, stable reduction dtype, input and affine-weight gradients |
 | Cross-entropy | `run_cross_entropy` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
 | Gradient clipping | `run_gradient_clipping` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
 | RoPE | `run_rope`; NPZ snapshot | 3 | planned | rotation values, positions, dtype, and device behavior |
@@ -27,8 +34,8 @@ Harness status as of 2026-07-22: the root Julia workspace can read every existin
 | AdamW | `get_adamw_cls` raises `NotImplementedError` | gated | gated | legacy NPZ output alone is not an adapter boundary |
 | Cosine schedule | `run_get_lr_cosine_schedule` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
 | Checkpoints | save/load adapters raise `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
-| BPE training | `run_train_bpe`; text/JSON/pickle fixtures | 1 | planned | vocabulary bytes, merge order, special tokens, and determinism |
-| BPE tokenizer | `get_tokenizer`; tokenizer and CLI tests | 1 | planned | encode/decode, special tokens, streaming input, and GPT-2 fixtures |
+| BPE training | `run_train_bpe`; tiny Python probes plus repository fixtures | 1 | tiny-corpus parity-validated | vocabulary bytes, merge order/tie-break, special boundaries, merge exhaustion, serial/threaded determinism; full-corpus run user-deferred |
+| BPE tokenizer | `get_tokenizer`; GPT-2 vocabulary/merges and tokenizer tests | 1 | parity-validated | exact encode IDs, replacement decode, overlapping/disallowed special tokens, streaming input, and GPT-2 fixture round trips |
 | Symbolic cost analytics | no adapter function | excluded | excluded | outside current port boundary |
 
 The matrix follows the adapter boundary for parity status, not as permission to

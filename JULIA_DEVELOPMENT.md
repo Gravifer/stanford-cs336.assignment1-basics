@@ -91,6 +91,15 @@ The command above is a development workload, not a frozen comparative result.
 Follow `JULIA_BENCHMARK_PROTOCOL.md` for setup exclusion, interpolation,
 warm-up, synchronization, raw samples, and cold-versus-warm reporting.
 
+## Tokenizer training boundary
+
+The Julia `BPETokenizer`, `encode`, `decode`, `encode_iterable`, and
+`train_bpe` APIs are runtime exports. Automated trainer verification uses only
+four tiny contrived corpora and compares their exact byte merges with the
+Python implementation. Do not run `corpus.en`, TinyStories, or another real
+training corpus as part of routine agent verification. Full-corpus training
+and throughput measurement are explicitly deferred to the user.
+
 ## Cross-language conventions
 
 These conventions apply before numerical parity fixtures are introduced:
