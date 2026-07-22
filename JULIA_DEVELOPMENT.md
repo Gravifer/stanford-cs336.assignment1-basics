@@ -82,6 +82,8 @@ These conventions apply before numerical parity fixtures are introduced:
 - Attention scores use `(query_sequence, key_sequence, head, batch)` when exposed. Mask adapters must document their logical axes and verify broadcasting rather than relying on positional coincidence.
 - Linear weights retain the logical `(output_feature, input_feature)` matrix shape used by both Julia matrix multiplication and PyTorch storage. Every other imported parameter receives an explicit mapping test before use.
 
+Text and JSON files under `tests/fixtures` are declared LF in `.gitattributes` because tokenizer inputs are byte-sensitive. A worktree populated before that rule was added may retain CRLF files until a normal clean refresh; check with `git ls-files --eol tests/fixtures`. Do not silently normalize bytes inside only one language's tokenizer path.
+
 These are logical contracts, not permission to assume that a particular physical layout is fast. The benchmark protocol requires profiling copies, strides, and vendor-library selection.
 
 ## Randomness and reproducibility
