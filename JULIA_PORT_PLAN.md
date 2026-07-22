@@ -6,7 +6,7 @@
 - Base at creation: local `dev` at `8c032c9` (`chore: prepare for training`), matching `origin/dev` on 2026-07-22.
 - Branch policy: grow only from `dev`. Do not merge or rebase Python feature branches into this branch.
 - Verified toolchain: Juliaup 1.20.8 with the stable `release` channel at Julia 1.12.6. `juliaup update release` reported no update on 2026-07-22.
-- Current stage: Phase 0 infrastructure is complete and the first self-contained Python linear parity bundle has been generated for validation. The root workspace, `CS336.jl` package boundary, maintainer test project, fixture readers, machine-readable neutral-fixture schema and test-only consumer, benchmark project, sole root manifest, CUDA readiness environment, and Lux compatibility environment are committed. The runtime package remains dependency-free and its first adapter-matched operation is next.
+- Current stage: Phase 0 is complete and the first adapter-semantic runtime operation, feature-first bias-free linear, passes Python forward and dense input/weight-gradient parity. The root workspace, maintainer test project, fixture readers, benchmark project, sole root manifest, CUDA readiness environment, and Lux compatibility environment are committed. Runtime primitives remain generic Julia functions; Zygote is test-only for explicit-argument gradient verification.
 
 When resuming, first run:
 
@@ -21,9 +21,11 @@ Before rebasing, require a clean worktree or make a normal checkpoint commit. Do
 
 ## Objective
 
-Build a Julia package containing an idiomatic port of the student implementation already reachable through the working functions in `tests/adapters.py`. Preserve mathematical behavior without mechanically cloning PyTorch's object model. Benchmark correctness, eager performance, compiled performance, memory, and startup/compilation costs against the Python/PyTorch implementation.
+Build a Julia package containing an idiomatic semantic port of the student implementation already reachable through the working functions in `tests/adapters.py`. Preserve mathematical behavior without mechanically cloning PyTorch's object model. Benchmark correctness, eager performance, compiled performance, memory, and startup/compilation costs against the Python/PyTorch implementation.
 
-This project is about language/framework architecture and a direct implementation comparison. Keep the port's explicit mathematical implementation visible even when Julia or a vendor library has a faster built-in implementation.
+This project is about language/framework architecture and an implementation comparison. Keep the port's explicit mathematical implementation visible even when Julia or a vendor library has a faster built-in implementation.
+
+Adapters define semantics and progress only. They do not prescribe Julia structure. Runtime kernels should be pure generic array functions where practical; composed models should use explicit Lux parameter/state trees; AD should differentiate explicit arguments through Zygote first and Enzyme/Reactant in the compiled track. Do not reproduce `nn.Module`, parameter registration, `state_dict`, or PyTorch's dispatcher.
 
 ## Scope and non-goals
 

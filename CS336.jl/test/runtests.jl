@@ -3,6 +3,7 @@ using JSON
 using NPZ
 using Test
 using TOML
+using Zygote
 
 include("fixture_contract.jl")
 using .FixtureContract
@@ -302,6 +303,55 @@ end
         "expected.gradient.input.x",
         "expected.gradient.parameter.weight",
     ])
+end
+
+@testset "linear primitive" begin
+    weight = reshape(Float32.(1:12), 3, 4) ./ 8
+    input = reshape(Float32.(1:24), 4, 3, 2) ./ 10
+    output = linear(input, weight)
+
+    @test size(output) == (3, 3, 2)
+    @test output[:, 1, 1] ≈ weight * input[:, 1, 1]
+    @test linear(input[:, 1, 1], weight) ≈ weight * input[:, 1, 1]
+    @test eltype(output) === Float32
+    @test_throws DimensionMismatch linear(reshape(input, 6, 4), weight)
+    @test_throws DimensionMismatch linear(fill(1.0f0), weight)
+end
+
+@testset "linear Python parity" begin
+    metadata_path = normpath(
+        joinpath(
+            @__DIR__,
+            "..",
+            "..",
+            "tests",
+            "fixtures",
+            "julia_parity",
+            "v1",
+            "linear.json",
+        ),
+    )
+    bundle = load_bundle(metadata_path)
+    arrays = bundle.arrays
+    tolerances = bundle.metadata["tolerances"]
+
+    input = permutedims(arrays["input.x"], (3, 2, 1))
+    weight = arrays["parameter.weight"]
+    expected_output = permutedims(arrays["expected.output"], (3, 2, 1))
+    expected_input_gradient =
+        permutedims(arrays["expected.gradient.input.x"], (3, 2, 1))
+    expected_weight_gradient = arrays["expected.gradient.parameter.weight"]
+
+    output = linear(input, weight)
+    weight_gradient, input_gradient =
+        Zygote.gradient((w, x) -> sum(abs2, linear(x, w)), weight, input)
+
+    rtol = tolerances["rtol"]
+    atol = tolerances["atol"]
+    nans = tolerances["equal_nan"]
+    @test isapprox(output, expected_output; rtol, atol, nans)
+    @test isapprox(input_gradient, expected_input_gradient; rtol, atol, nans)
+    @test isapprox(weight_gradient, expected_weight_gradient; rtol, atol, nans)
 end
 
 @testset "repository fixture smoke test" begin
