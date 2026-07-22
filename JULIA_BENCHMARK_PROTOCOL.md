@@ -2,7 +2,13 @@
 
 This protocol exists to answer a narrow question credibly: can the Julia implementation reach the same performance order of magnitude as the Python/PyTorch implementation, or is there a material ecosystem gap? A result is not evidence about either language until correctness, workload, timing, and backend equivalence have been checked.
 
-Infrastructure status as of 2026-07-22: `CS336.jl/benchmark` is a dedicated root-workspace member with BenchmarkTools v1.8 constrained and v1.8.0 locked. It loads the local `CS336` package without adding benchmark dependencies to runtime or test projects. No operation suite exists yet because correctness gates precede timing.
+Infrastructure status as of 2026-07-23: `CS336.jl/benchmark` is a dedicated
+root-workspace member with BenchmarkTools v1.8 and Zygote v0.7 constrained. It
+loads the local `CS336` package without adding benchmark dependencies to the
+runtime or test projects. The first operation entry point, `swiglu.jl`, checks
+forward and explicit-gradient parity before timing separate-weight and
+packed-input Julia variants. Its tiny validation run is harness evidence only;
+no Python/Julia comparative SwiGLU result has been recorded.
 
 `JULIA_BENCHMARK_HOST.md` records the provisional host, GPU, Julia/BLAS threading, and Python lock baseline. It is readiness evidence only; final results require a new frozen-host record at the benchmark commit.
 

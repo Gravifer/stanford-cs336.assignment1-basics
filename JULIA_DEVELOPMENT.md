@@ -79,9 +79,17 @@ Benchmark dependencies live in their own workspace member and do not belong in t
 
 ```powershell
 julia --project=CS336.jl/benchmark -e 'using BenchmarkTools, CS336; println(Base.pkgversion(BenchmarkTools))'
+julia --project=CS336.jl/benchmark CS336.jl/benchmark/swiglu.jl 512 1344 512 20 5.0
 ```
 
-BenchmarkTools v1.8 is currently constrained in `CS336.jl/benchmark/Project.toml`. The environment is ready, but no operation benchmark should be added until its correctness/parity gate exists. Follow `JULIA_BENCHMARK_PROTOCOL.md` for setup exclusion, interpolation, warm-up, synchronization, raw samples, and cold-versus-warm reporting.
+BenchmarkTools v1.8 and benchmark-only Zygote v0.7 are constrained in
+`CS336.jl/benchmark/Project.toml`. `swiglu.jl` compares exactly two Julia
+representations—separate semantic weights and packed input weights—after
+forward and explicit-gradient parity checks. Its five positional arguments are
+`d_model`, `d_ff`, flattened feature-first token count, samples, and seconds.
+The command above is a development workload, not a frozen comparative result.
+Follow `JULIA_BENCHMARK_PROTOCOL.md` for setup exclusion, interpolation,
+warm-up, synchronization, raw samples, and cold-versus-warm reporting.
 
 ## Cross-language conventions
 
