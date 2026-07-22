@@ -1,9 +1,11 @@
 [deps]
 CS336 = "39ccc5dd-36ad-402e-b592-2c67158c70ea"
+NPZ = "15e1cf62-19b3-5cfa-8e77-841668bca605"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 CS336 = {path = ".."}
 
 [compat]
+NPZ = "0.4.3"
 julia = "1.12"
