@@ -107,6 +107,7 @@ Lux is not intended to replace the educational code. Implement softmax, RMSNorm,
 
 - Stable softmax, linear, embedding, SiLU/SwiGLU, RMSNorm, cross-entropy, gradient clipping, and initialization.
 - Test output values, edge cases, gradients, dtype promotion, allocations, and CPU/GPU behavior.
+- For embedding, test both gradient values and the physical gradient representation; a mathematically row-sparse result is not necessarily stored sparsely by either framework.
 - Keep array shapes explicit in docstrings and tests; Julia does not need a direct imitation of `jaxtyping`.
 
 ### Phase 3: attention and transformer layers
@@ -165,6 +166,56 @@ Investigation thresholds:
 - Cold compilation may exceed 10x, but it must be reported independently and amortized over realistic run lengths rather than hidden.
 
 Do not compare a handwritten Julia reference kernel only against PyTorch's fused production kernel and call that a language result. Report both educational/reference and best practical paths.
+
+## Design record: embedding-gradient sparsity
+
+### Corrected reading of the PyTorch-internals example
+
+The sparsity example in Edward Yang's [PyTorch internals](https://blog.ezyang.com/2019/05/pytorch-internals/) is specifically about embedding backward, not sparse forward weights. The embedding table can remain dense while the gradient with respect to it is row-sparse: only vocabulary rows selected by the batch receive lookup-gradient contributions. PyTorch uses this as a capability test for making sparse tensors participate directly in autograd rather than representing them as an opaque wrapper.
+
+PyTorch does not enable that representation automatically. [`torch.nn.Embedding`](https://docs.pytorch.org/docs/2.13/generated/torch.nn.modules.sparse.Embedding.html) defaults to `sparse=False`; opting into `sparse=True` produces a sparse weight gradient, but the documented compatible optimizers are limited to SGD, SparseAdam, and CPU Adagrad.
+
+The current Python course implementation calls `torch.nn.functional.embedding` without requesting a sparse gradient. Its embedding gradient is therefore dense. Unless `dev` changes this behavior, dense gradients are the required cross-language parity target.
+
+### Current Julia finding
+
+The investigated Julia stack also produces a dense embedding-weight gradient by default:
+
+- Current [`Lux.Embedding`](https://github.com/LuxDL/Lux.jl/blob/82b8efede2a7f8523fd43da7c492e44d6ee7cd1a/src/layers/embedding.jl) performs ordinary indexed selection from a dense parameter array.
+- The general [`ChainRules` indexing pullback](https://github.com/JuliaDiff/ChainRules.jl/blob/main/src/rulesets/Base/indexing.jl) allocates a gradient shaped like the source and scatter-adds into it. Its lightweight `OneElement` representation covers scalar indexing, not a batch of embedding rows.
+- [`NNlib.gather`](https://github.com/FluxML/NNlib.jl/blob/master/src/gather.jl) likewise creates a full-size zero gradient and scatters contributions into it.
+- Enzyme shadows follow the primal memory layout. A dense parameter array therefore naturally has a dense derivative shadow unless a more specialized rule or representation is introduced.
+
+Julia's multiple dispatch makes it possible to introduce a specialized tangent and optimizer path without placing every layout inside a PyTorch-style central `TensorImpl`. It does not cause sparse embedding gradients to emerge automatically.
+
+### Project decision
+
+1. Implement and validate the dense-gradient embedding path first because it matches the Python course implementation and dense AdamW training semantics.
+2. Do not label the baseline as supporting sparse embedding gradients merely because the mathematical gradient has many zero rows.
+3. Preserve sparse embedding gradients as a separate framework-architecture experiment after baseline training works.
+4. Revisit this decision if the Python implementation enables sparse gradients, ties the token embedding to another parameter, or changes optimizer semantics.
+
+A genuine Julia sparse-gradient experiment must cover the complete backward-to-update contract:
+
+- represent selected vocabulary rows and their accumulated row gradients;
+- coalesce repeated token IDs correctly;
+- pass that tangent through the Lux parameter tree and selected AD backend without densification;
+- update compatible optimizer state without scanning or allocating the entire table;
+- define behavior for momentum, checkpointing, device transfer, and distributed reduction;
+- define whether untouched rows receive decoupled weight decay.
+
+The last item prevents silently treating a row-sparse update as equivalent to dense AdamW. PyTorch's own sparse-gradient embedding path does not claim AdamW compatibility.
+
+### Benchmark addition
+
+Add an embedding-specific benchmark whose vocabulary size grows while the number of token occurrences stays fixed. Report separately:
+
+1. Python/PyTorch dense backward using the course implementation.
+2. Julia/Lux dense backward using the parity implementation.
+3. PyTorch sparse backward with a documented compatible optimizer.
+4. Julia row-sparse backward plus update, only if the full tangent/optimizer path is implemented correctly.
+
+Measure forward time, backward time, update time, gradient storage, optimizer-state storage, repeated-ID behavior, and CPU/GPU support. Do not compare sparse backward alone while excluding a densifying or semantically different optimizer step.
 
 ## Ecosystem/resourcing risk
 
