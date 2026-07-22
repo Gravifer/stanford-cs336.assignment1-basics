@@ -52,6 +52,12 @@ julia --project=CS336.jl/environments/lux -e 'using Lux, NNlib, Optimisers, Zygo
 
 The lock currently resolves Lux 1.31.4, NNlib 0.9.38, Optimisers 0.4.7, and Zygote 0.7.11. This environment is for integration experiments until a course implementation actually needs a justified runtime dependency.
 
+Run its committed integration smoke with:
+
+```powershell
+julia --startup-file=no --history-file=no --project=CS336.jl/environments/lux CS336.jl/environments/lux/smoke.jl
+```
+
 The combined native NVIDIA integration is kept separate so it cannot silently become a CPU requirement:
 
 ```powershell
