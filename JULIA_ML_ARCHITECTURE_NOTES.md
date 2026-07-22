@@ -52,6 +52,10 @@ The course's current PyTorch embedding path produces a dense gradient, so dense 
 
 Consequently, the Julia port does **not** need to manually implement sparse storage merely to match this repository. It can use a dense embedding parameter and dense tangent, just as the current PyTorch course path does. Manual sparse-gradient work begins only if we deliberately add the optional row-sparse experiment; at that point, specializing lookup backward alone is insufficient because the optimizer and state semantics are part of the feature.
 
+This was verified empirically with the locked stack on 2026-07-22. For `Lux.Embedding(8 => 3)` and indices `[2, 2, 5]`, Zygote returned a full `Matrix{Float32}` of size `(3, 8)`: all 24 elements were stored, only six were nonzero, and the repeated index accumulated correctly to value 2 in the selected embedding column. Optimisers Adam allocated two dense `(3, 8)` moment matrices. The native CUDA path produced the same representation as a full `CuArray{Float32,2}` with dense GPU moment arrays.
+
+Lux stores embedding weights as `(embedding_feature, vocabulary)`, so the selected vocabulary items are physical columns. PyTorch conventionally stores `(vocabulary, embedding_feature)`, where the same mathematical support is described as row-sparse. The axis orientation changes the name, not the sparsity issue: neither tested Lux path preserved an indexed sparse tangent automatically.
+
 ### Ecosystem completeness
 
 PyTorch's internal complexity partly records years of funded backward compatibility and broad product requirements. Julia's modularity may avoid putting all of that code in one repository, but missing integrations remain missing capabilities. For this reason the project records both architectural cleanliness and operational coverage; one must not be used as a proxy for the other.

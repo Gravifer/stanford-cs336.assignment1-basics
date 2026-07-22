@@ -224,6 +224,7 @@ The investigated Julia stack also produces a dense embedding-weight gradient by 
 
 - Current [`Lux.Embedding`](https://github.com/LuxDL/Lux.jl/blob/82b8efede2a7f8523fd43da7c492e44d6ee7cd1a/src/layers/embedding.jl) performs ordinary indexed selection from a dense parameter array.
 - The general [`ChainRules` indexing pullback](https://github.com/JuliaDiff/ChainRules.jl/blob/main/src/rulesets/Base/indexing.jl) allocates a gradient shaped like the source and scatter-adds into it. Its lightweight `OneElement` representation covers scalar indexing, not a batch of embedding rows.
+- A locked-stack experiment on 2026-07-22 confirmed the behavior on both CPU and CUDA: `Lux.Embedding(8 => 3)` with repeated indices `[2, 2, 5]` produced a full dense `(3, 8)` Zygote tangent, correctly accumulated repeats, and led Optimisers Adam to allocate dense moment arrays. Lux's `(feature, vocabulary)` storage makes this physically column-sparse rather than PyTorch-style row-sparse, but it is still stored densely.
 - [`NNlib.gather`](https://github.com/FluxML/NNlib.jl/blob/master/src/gather.jl) likewise creates a full-size zero gradient and scatters contributions into it.
 - Enzyme shadows follow the primal memory layout. A dense parameter array therefore naturally has a dense derivative shadow unless a more specialized rule or representation is introduced.
 
