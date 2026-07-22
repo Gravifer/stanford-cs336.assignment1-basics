@@ -4,6 +4,8 @@ This protocol exists to answer a narrow question credibly: can the Julia impleme
 
 Infrastructure status as of 2026-07-22: `CS336.jl/benchmark` is a dedicated root-workspace member with BenchmarkTools v1.8 constrained and v1.8.0 locked. It loads the local `CS336` package without adding benchmark dependencies to runtime or test projects. No operation suite exists yet because correctness gates precede timing.
 
+`JULIA_BENCHMARK_HOST.md` records the provisional host, GPU, Julia/BLAS threading, and Python lock baseline. It is readiness evidence only; final results require a new frozen-host record at the benchmark commit.
+
 ## Comparison lanes
 
 Report each available lane separately:

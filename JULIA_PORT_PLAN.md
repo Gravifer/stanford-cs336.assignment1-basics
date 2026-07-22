@@ -33,6 +33,7 @@ This project is about language/framework architecture as well as completing the 
 - `JULIA_PHASE0_CHECKLIST.md` is the acceptance checklist for the root workspace and minimal package scaffold.
 - `JULIA_DEVELOPMENT.md` contains the executable project/test commands and cross-language boundary conventions.
 - `JULIA_BENCHMARK_PROTOCOL.md` defines correctness gates, timing controls, reproducibility metadata, and the greater-than-10× investigation threshold.
+- `JULIA_BENCHMARK_HOST.md` records provisional hardware/runtime readiness and the fields that still must be frozen for final trials.
 - `work-log.md` is the timestamped operational record and commit ledger.
 
 ## Repository and environment layout
