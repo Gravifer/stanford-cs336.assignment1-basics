@@ -66,6 +66,12 @@ julia --project=CS336.jl/environments/lux_cuda -e 'using CUDA, Lux, LuxCUDA; CUD
 
 It locks LuxCUDA 0.3.6 and CUDA.jl 6.2.1, including cuDNN.jl 6.2.1. A forward/backward/update smoke has passed on the recorded RTX 3070 Ti host. This is readiness evidence, not a benchmark.
 
+Rerun that committed integration check with:
+
+```powershell
+julia --startup-file=no --history-file=no --project=CS336.jl/environments/lux_cuda CS336.jl/environments/lux_cuda/smoke.jl
+```
+
 ## Benchmarks
 
 Benchmark dependencies live in their own workspace member and do not belong in the runtime or test projects:
