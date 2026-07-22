@@ -1,0 +1,66 @@
+# Julia parity matrix
+
+This is the evolving scope ledger for the Julia package under `CS336.jl/`. It records what exists on the `dev` branch, what constitutes parity, and which work belongs to the educational baseline versus an optional ecosystem experiment. It is not an implementation specification.
+
+Status vocabulary: **inventory** means present in Python but not yet scaffolded in Julia; **planned** means assigned to a phase in `JULIA_PORT_PLAN.md`; **deferred** means deliberately outside the first baseline.
+
+## Public parity surface on `dev`
+
+| Area | Current Python adapter or evidence | Julia phase | Initial status | Parity evidence |
+| --- | --- | ---: | --- | --- |
+| Linear | `run_linear`; NPZ snapshot | 2 | planned | output and parameter-gradient fixtures |
+| Embedding | `run_embedding`; NPZ snapshot | 2 | planned | output, dense weight-gradient values, and gradient representation |
+| SiLU / SwiGLU | `run_silu`, `run_swiglu`; NPZ snapshot | 2 | planned | output and gradient fixtures |
+| Stable softmax | `run_softmax`; student edge-case tests | 2 | planned | axis behavior, stability, dtype, and fully masked interactions |
+| RMSNorm | `run_rmsnorm`; NPZ snapshot | 2 | planned | output and gradient fixtures |
+| Cross-entropy | `run_cross_entropy` | 2 | planned | scalar loss and logit gradients over varied shapes |
+| Gradient clipping | `run_gradient_clipping` | 4 | planned | total-norm and in-place update semantics |
+| RoPE | `run_rope`; NPZ snapshot | 3 | planned | rotation values, positions, dtype, and device behavior |
+| Scaled dot-product attention | `run_scaled_dot_product_attention`; 3-D and 4-D snapshots | 3 | planned | outputs, gradients, mask semantics, and fully masked rows |
+| MHA / self-attention | attention adapters and snapshots | 3 | planned | parameter mapping, outputs, gradients, and shape contracts |
+| Grouped-query attention | student GQA tests; `_head_layout.py` | 3 | inventory | MHA equivalence when group count collapses; layout-specific cases |
+| Transformer block | `run_transformer_block`; NPZ snapshot | 3 | planned | parameter import, output, and gradients |
+| Transformer LM | `run_transformer_lm`; full and truncated snapshots | 3 | planned | logits, truncation behavior, state mapping, and gradients |
+| Batch sampling | `run_get_batch` | 4 | planned | deterministic seeded indices and returned token/target slices |
+| AdamW | `get_adamw_cls`; NPZ snapshot | 4 | planned | one and multiple update steps, state, decay, and bias correction |
+| Cosine schedule | `run_get_lr_cosine_schedule` | 4 | planned | boundary and intermediate scalar values |
+| Checkpoints | save/load adapters and serialization tests | 4 | inventory | round trip of parameters, optimizer state, and iteration metadata |
+| BPE training | `run_train_bpe`; text/JSON/pickle fixtures | 1 | planned | vocabulary bytes, merge order, special tokens, and determinism |
+| BPE tokenizer | `get_tokenizer`; tokenizer and CLI tests | 1 | planned | encode/decode, special tokens, streaming input, and GPT-2 fixtures |
+| Symbolic cost analytics | `nn/analytics.py`; student analytics tests | later | deferred | separately specified semantic model; not required to validate neural parity |
+
+The matrix follows the adapter boundary because that is the stable course-facing contract in the current repository. Internal Python class structure is not automatically a Julia requirement. When `dev` advances, update this matrix after rebasing and before expanding implementation scope.
+
+## Cross-language fixture policy
+
+- Prefer language-neutral NPZ, JSON, UTF-8 text, and raw binary fixtures.
+- Existing pickle and PyTorch checkpoint files may be treated as source evidence, but do not make the Julia test suite depend on a Python interpreter merely to decode every test case. Produce any new neutral fixture deliberately and record its provenance.
+- Verify mathematical results before performance. Matching an output snapshot is insufficient when the backward representation or optimizer semantics are part of the question.
+- Establish explicit dtype, indexing, seed, and tensor-axis conventions at the boundary. Julia's one-based indexing and column-major storage must not leak into externally visible token IDs or silently change the benchmark workload.
+- Preserve a distinction between course-authored reference paths and best practical library/compiler paths.
+
+## Ecosystem tracks
+
+The baseline track uses ordinary Julia functions, Lux's explicit parameter/state interface, Zygote for the first reverse-mode path, and Optimisers where a library optimizer is being used for comparison. The official Lux documentation states that models do not own parameters/state and documents `Lux.setup` plus `Lux.apply(model, x, ps, st)`; this is the architectural reason for selecting Lux, not an assumption copied from Python.
+
+The compiled track is separate. Current official Lux documentation directly documents Reactant compilation and `AutoEnzyme`, while Reactant documents Enzyme-based differentiation. That makes Reactant+Enzyme a credible benchmark target, but not a prerequisite for correctness. Zygote's official limitations still identify array mutation as a major constraint, so mutation-heavy educational code must not be advertised as AD-portable until tested.
+
+The sparse-embedding track is also separate. The baseline matches the course's dense embedding gradient. A row-sparse Julia gradient counts as implemented only when the tangent, repeated-index coalescing, parameter-tree traversal, optimizer update/state, weight decay, serialization, device transfer, and benchmark all avoid accidental densification or semantic substitution.
+
+## Documentation register
+
+Use current upstream manuals before implementation. Starting references, verified 2026-07-22:
+
+- [Julia Pkg environments](https://pkgdocs.julialang.org/v1/environments/)
+- [Julia Pkg Project and Manifest files, including workspaces](https://pkgdocs.julialang.org/dev/toml-files/)
+- [Creating Julia packages](https://pkgdocs.julialang.org/v1/creating-packages/)
+- [Lux introduction and explicit parameter/state quickstart](https://lux.csail.mit.edu/stable/introduction/)
+- [Lux layer interface](https://lux.csail.mit.edu/stable/manual/interface)
+- [Lux automatic differentiation](https://lux.csail.mit.edu/stable/manual/autodiff)
+- [Compiling Lux models with Reactant](https://lux.csail.mit.edu/stable/manual/compiling_lux_models)
+- [Zygote documentation](https://fluxml.ai/Zygote.jl/stable/)
+- [Zygote limitations](https://fluxml.ai/Zygote.jl/stable/limitations/)
+- [Enzyme.jl documentation](https://enzymead.github.io/Enzyme.jl/stable/)
+- [Reactant automatic differentiation](https://enzymead.github.io/Reactant.jl/stable/tutorials/automatic-differentiation)
+
+Package versions and exact APIs will be resolved only when Phase 0 creates the root manifest. At that point, log the resolved versions and prefer version-matched documentation over an unqualified development manual.
