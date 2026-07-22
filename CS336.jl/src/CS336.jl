@@ -6,8 +6,20 @@ functions and explicit model components after its parity evidence is established
 """
 module CS336
 
-export embedding, linear, rmsnorm, silu, softmax, swiglu, swiglu_packed
+export BPETokenizer,
+    decode,
+    embedding,
+    encode,
+    encode_iterable,
+    linear,
+    rmsnorm,
+    silu,
+    softmax,
+    swiglu,
+    swiglu_packed,
+    train_bpe
 
 include("functional.jl")
+include("tokenizer.jl")
 
 end
