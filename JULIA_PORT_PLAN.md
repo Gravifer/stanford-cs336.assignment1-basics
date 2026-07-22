@@ -5,7 +5,7 @@
 - Branch: `codex/julia-basics` (local only; never push unless the user changes that instruction).
 - Base at creation: local `dev` at `8c032c9` (`chore: prepare for training`), matching `origin/dev` on 2026-07-22.
 - Branch policy: grow only from `dev`. Do not merge or rebase Python feature branches into this branch.
-- Verified runtime: Julia 1.12.6.
+- Verified toolchain: Juliaup 1.20.8 with the stable `release` channel at Julia 1.12.6. `juliaup update release` reported no update on 2026-07-22.
 - Current stage: planning only. No Julia package or dependencies have been added yet.
 
 When resuming, first run:
@@ -25,14 +25,17 @@ Build a Julia package parallel to the repository's `cs336_basics` Python package
 
 This project is about language/framework architecture as well as completing the course. Keep low-level educational implementations visible even when Julia or a vendor library has a faster built-in implementation.
 
-## Proposed repository layout
+## Repository and environment layout
 
 ```text
-julia/
-  Project.toml
-  Manifest.toml
+pyproject.toml
+Project.toml                 # root Julia workspace/environment
+Manifest.toml                # the one Julia lockfile, committed
+work-log.md
+CS336.jl/                    # actual Julia package root
+  Project.toml               # package identity and direct dependencies
   src/
-    CS336Basics.jl
+    CS336.jl
     functional.jl
     layers.jl
     attention.jl
@@ -42,24 +45,43 @@ julia/
     optimizers.jl
     training.jl
   test/
+    Project.toml             # workspace member, if extra test deps are needed
     runtests.jl
     ...
   benchmark/
+    Project.toml             # workspace member with benchmark-only deps
     correctness.jl
     kernels.jl
     model.jl
     training.jl
   environments/
-    reactant/       # optional compiler stack, isolated from the baseline environment
+    reactant/
+      Project.toml           # optional workspace member, isolated compiler stack
 ```
 
-Use the conventional Julia package name `CS336Basics`. Keep the Python package untouched except for deliberately shared fixtures or benchmark launchers.
+The directory is exactly `CS336.jl/`, and the Julia module/package name is `CS336`. The `.jl` suffix is conventional for a Julia package repository or package directory, while Julia identifiers themselves cannot contain the dot.
+
+The root `Project.toml` is a Julia 1.12 workspace project whose `[workspace]` members include `CS336.jl` and the test/benchmark environments as they are introduced. The package's own `CS336.jl/Project.toml` declares its direct dependencies. The root `Manifest.toml` is the single resolved dependency graph shared by the workspace and must be committed beside `pyproject.toml`. In Julia terminology, `Manifest.toml` **is** the lockfile; do not invent or maintain a second lock format.
+
+Activate and instantiate from the repository root with `julia --project=.`. Do not add course dependencies to Julia's user-global environment. Keep the Python package untouched except for deliberately shared fixtures or benchmark launchers.
+
+This layout follows the official Julia 1.12 [workspace](https://pkgdocs.julialang.org/dev/toml-files/#The-%5Bworkspace%5D-section), [environment](https://pkgdocs.julialang.org/v1/environments/), and [package-creation](https://pkgdocs.julialang.org/v1/creating-packages/) documentation.
+
+## Working protocol
+
+- Work only on `codex/julia-basics`, which grows from `dev`. Rebase onto the local `dev` tip when useful and the worktree is clean. Never merge Python feature branches into it.
+- Keep all work local. Do not push.
+- Make fine-grained commits whose subjects describe one coherent change. Do not bundle planning, scaffolding, dependency resolution, and implementation into one commit.
+- Maintain `work-log.md` as the chronological operational record. Add ISO 8601 timestamps with the `+08:00` offset while working, and record material commands, documentation consulted, decisions, verification results, dependency/toolchain changes, commits, and blockers. Do not record secrets or dump noisy command output.
+- Treat official Julia, Pkg, Juliaup, and package documentation as the default authority. Before adopting a Julia API, AD behavior, accelerator path, or dependency, verify it against current upstream documentation or source and record the reference when it affects design.
+- Manage the user-global Julia runtime only with Juliaup. At the start of a work period, check `juliaup status`, then run `juliaup update release` if the stable channel is behind. Updating the runtime does not authorize installing course packages globally.
+- For the 2026-07-22 work period, continue useful documentation/planning work until 23:30 Asia/Shanghai. An earlier stop is allowed only after all useful in-scope work is exhausted and ten consecutive minutes have been spent idle; record the stop time and reason in `work-log.md`.
 
 ## Blessed stack
 
 Avoid an open-ended matrix of interchangeable frameworks. Start with one path:
 
-- Julia 1.12 or newer stable release available on the machine.
+- Julia's stable `release` channel managed by Juliaup (currently Julia 1.12.6).
 - `Lux.jl` for model/layer structure and explicit parameters/state.
 - `NNlib.jl` for established neural-network primitives where using a library is consistent with the assignment.
 - `Zygote.jl` for the initial reverse-mode AD baseline.
@@ -91,7 +113,7 @@ Lux is not intended to replace the educational code. Implement softmax, RMSNorm,
 
 ### Phase 0: scaffold and cross-language fixtures
 
-- Create `julia/Project.toml`, module skeleton, tests, and documented commands.
+- Create the root workspace `Project.toml`, `CS336.jl/Project.toml`, `CS336.jl/src/CS336.jl`, tests, and documented commands. Resolve and commit the one root `Manifest.toml`.
 - Use the verified Julia 1.12.6 runtime and record any later runtime upgrade in this plan and the benchmark metadata.
 - Read existing `.npz`, JSON, text, vocabulary, and merge fixtures without rewriting them.
 - Establish deterministic seeds, dtype conventions, tensor-axis conventions, and tolerances.
@@ -231,6 +253,8 @@ Mitigations for this repository:
 - Preserve simple reference implementations so a framework integration failure does not block the course.
 - Re-evaluate dependency health at phase boundaries, not continuously during implementation.
 
+The documentation-first rule is also a mitigation: when ecosystem familiarity is weak, do not fill gaps from Python analogies. Check the relevant Julia package manual and, for behavior not promised by the manual, the tagged source and a minimal experiment. Log the evidence used for choices that could affect correctness, compatibility, or benchmarks.
+
 ## Terminology note: tabular ML
 
 "Tabular ML" means learning from rows and named columns, such as a spreadsheet or SQL table: credit-risk prediction, customer churn, house-price regression, and similar classification/regression problems. Typical methods include linear/logistic regression, decision trees, random forests, and gradient-boosted trees. It is not central to this transformer-language-model assignment; MLJ was relevant only to the earlier broad survey of Julia's ML ecosystem.
@@ -240,6 +264,8 @@ Mitigations for this repository:
 1. Read this file and confirm `git status --short --branch` shows `codex/julia-basics`.
 2. Inspect whether `dev` moved; rebase this branch onto local `dev` if appropriate.
 3. Reconfirm `julia --version`; Julia 1.12.6 was verified when this plan was created.
-4. Create Phase 0 only: package scaffold, manifest, smoke test, fixture-loading test, and commands in the root README.
-5. Do not install packages globally; use the `julia/` project environment.
-6. Commit a small checkpoint before beginning tokenizer or neural-network implementation.
+4. Run `juliaup status` and update the stable release channel through Juliaup only if it is behind.
+5. Create Phase 0 only: root workspace project, `CS336.jl/` package scaffold, root manifest, smoke test, fixture-loading test, and commands in the root README.
+6. Do not install packages globally; invoke Julia with `--project=.` from the repository root.
+7. Consult and log official documentation before selecting or using Julia ecosystem APIs.
+8. Update `work-log.md` during the session and commit small coherent checkpoints before beginning tokenizer or neural-network implementation.
