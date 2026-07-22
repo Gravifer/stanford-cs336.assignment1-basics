@@ -332,6 +332,28 @@ end
     @test bundle.metadata["arrays"]["input.token_ids"]["zero_based_values"] === true
 end
 
+@testset "activation parity bundle transport" begin
+    for (stem, operation) in (("silu", "run_silu"), ("softmax", "run_softmax"))
+        metadata_path = normpath(
+            joinpath(
+                @__DIR__,
+                "..",
+                "..",
+                "tests",
+                "fixtures",
+                "julia_parity",
+                "v1",
+                "$stem.json",
+            ),
+        )
+        bundle = load_bundle(metadata_path)
+
+        @test bundle.metadata["operation"] == operation
+        @test bundle.metadata["source"]["working_tree_clean"] === true
+        @test bundle.metadata["gradients"]["present"] === true
+    end
+end
+
 @testset "linear primitive" begin
     weight = reshape(Float32.(1:12), 3, 4) ./ 8
     input = reshape(Float32.(1:24), 4, 3, 2) ./ 10

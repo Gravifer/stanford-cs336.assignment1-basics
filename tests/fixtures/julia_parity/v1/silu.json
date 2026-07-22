@@ -1,0 +1,76 @@
+{
+  "array_file": "silu.npz",
+  "arrays": {
+    "expected.gradient.input.x": {
+      "axes": [
+        "row",
+        "feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_input_gradient",
+      "shape": [
+        2,
+        4
+      ]
+    },
+    "expected.output": {
+      "axes": [
+        "row",
+        "feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_output",
+      "shape": [
+        2,
+        4
+      ]
+    },
+    "input.x": {
+      "axes": [
+        "row",
+        "feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "input",
+      "shape": [
+        2,
+        4
+      ]
+    }
+  },
+  "contract_version": 1,
+  "gradients": {
+    "objective": "sum(expected.output ** 2)",
+    "physical_representation": "dense",
+    "present": true
+  },
+  "notes": [
+    "Output and input gradient are produced through tests.adapters.run_silu."
+  ],
+  "operation": "run_silu",
+  "producer": {
+    "language": "Python",
+    "packages": {
+      "numpy": "2.4.4",
+      "torch": "2.11.0+cpu"
+    },
+    "runtime_version": "26.0.0"
+  },
+  "scalars": {},
+  "source": {
+    "generated_at": "2026-07-23T00:44:09+08:00",
+    "git_commit": "e88aa2f610ff1a54a357180ec5ba8584d53cfaee",
+    "working_tree_clean": true
+  },
+  "tolerances": {
+    "atol": 1e-06,
+    "equal_nan": false,
+    "rtol": 1e-06
+  }
+}
