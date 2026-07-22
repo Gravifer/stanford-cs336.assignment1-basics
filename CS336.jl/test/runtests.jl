@@ -1,4 +1,5 @@
 using CS336
+using JSON
 using NPZ
 using Test
 
@@ -6,6 +7,28 @@ using Test
     @test nameof(CS336) === :CS336
     @test Base.pkgversion(CS336) == v"0.1.0"
     @test samefile(pathof(CS336), joinpath(@__DIR__, "..", "src", "CS336.jl"))
+end
+
+@testset "model metadata compatibility" begin
+    config_path = normpath(joinpath(@__DIR__, "..", "..", "tests", "fixtures", "ts_tests", "model_config.json"))
+    config = JSON.parsefile(config_path)
+    expected = Dict{String, Any}(
+        "vocab_size" => 10_000,
+        "context_length" => 16,
+        "d_model" => 64,
+        "num_layers" => 3,
+        "num_heads" => 4,
+        "d_ff" => 128,
+        "remove_rmsnorm" => false,
+        "use_post_norm" => false,
+        "remove_rope" => false,
+        "rope_theta" => 10_000.0,
+        "ffn_type" => nothing,
+    )
+
+    @test config isa AbstractDict{String, Any}
+    @test Set(keys(config)) == Set(keys(expected))
+    @test config == expected
 end
 
 @testset "repository fixture smoke test" begin
