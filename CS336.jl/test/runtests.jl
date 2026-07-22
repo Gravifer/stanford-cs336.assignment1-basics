@@ -37,6 +37,34 @@ end
     @test !isempty(read(fixture, String))
 end
 
+@testset "tokenizer fixture compatibility" begin
+    fixture_root = normpath(joinpath(@__DIR__, "..", "..", "tests", "fixtures"))
+    vocab_cases = (
+        ("gpt2_vocab.json", 50_257, 50_256),
+        ("train-bpe-reference-vocab.json", 500, 0),
+    )
+
+    for (filename, count, endoftext_id) in vocab_cases
+        vocab = JSON.parsefile(joinpath(fixture_root, filename))
+        @test vocab isa AbstractDict{String, Any}
+        @test length(vocab) == count
+        @test Set(values(vocab)) == Set(0:(count - 1))
+        @test vocab["<|endoftext|>"] == endoftext_id
+    end
+
+    merge_cases = (
+        ("gpt2_merges.txt", 50_000, "Ġ t", "Ġg azed"),
+        ("train-bpe-reference-merges.txt", 243, "Ġ t", "Ġ ver"),
+    )
+
+    for (filename, count, first_merge, last_merge) in merge_cases
+        merges = readlines(joinpath(fixture_root, filename))
+        @test length(merges) == count
+        @test first(merges) == first_merge
+        @test last(merges) == last_merge
+    end
+end
+
 @testset "NumPy snapshot compatibility" begin
     snapshot_root = normpath(joinpath(@__DIR__, "..", "..", "tests", "_snapshots"))
     expected_shapes = Dict(
