@@ -36,6 +36,14 @@ julia --startup-file=no --history-file=no --project=CS336.jl/test CS336.jl/test/
 
 CPU smoke tests must remain runnable without installing or loading an accelerator package. Optional compiler and accelerator test environments will be added only when their corresponding phases begin.
 
+The optional CUDA readiness environment is activated separately:
+
+```powershell
+julia --project=CS336.jl/environments/cuda -e 'using CUDA; CUDA.versioninfo(); @assert CUDA.functional(true)'
+```
+
+CUDA v6.2 is constrained there and v6.2.1 is locked. Importing it may download substantial toolkit artifacts into Julia's shared package/artifact cache, but it does not add CUDA to the runtime package or CPU tests.
+
 ## Benchmarks
 
 Benchmark dependencies live in their own workspace member and do not belong in the runtime or test projects:
@@ -78,7 +86,7 @@ Before adding a package or relying on an API:
 5. resolve from repository root and inspect the root-manifest change;
 6. add a minimal integration test and record the decision in `work-log.md`.
 
-Do not add Lux, an AD backend, accelerator libraries, or Reactant until the phase that exercises and tests that dependency.
+Do not add Lux, an AD backend, or Reactant until the phase that exercises and tests that dependency. CUDA exists only in its isolated readiness environment; do not move it into runtime or CPU-test dependencies before an accelerator path requires it.
 
 ## Planning records
 

@@ -6,6 +6,8 @@ Infrastructure status as of 2026-07-22: `CS336.jl/benchmark` is a dedicated root
 
 `JULIA_BENCHMARK_HOST.md` records the provisional host, GPU, Julia/BLAS threading, and Python lock baseline. It is readiness evidence only; final results require a new frozen-host record at the benchmark commit.
 
+The optional `CS336.jl/environments/cuda` workspace member pins CUDA v6.2 (currently 6.2.1) and has passed a synchronized CuArray smoke operation. This proves device/toolchain readiness only; CUDA is not a runtime dependency and no model performance claim follows from the smoke test.
+
 ## Comparison lanes
 
 Report each available lane separately:

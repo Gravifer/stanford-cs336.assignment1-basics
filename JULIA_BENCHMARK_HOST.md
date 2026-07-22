@@ -58,3 +58,23 @@ These are lock-resolution observations, not proof that a particular wheel/device
 - Record runtime accelerator and vendor-library versions from inside each framework.
 - Separate CPU and GPU trials and separate cold process/compilation costs from warm steady state.
 - Preserve raw samples and synchronization metadata as required by `JULIA_BENCHMARK_PROTOCOL.md`.
+
+## CUDA readiness check
+
+Verified 2026-07-22T20:45:36+08:00 through the isolated `CS336.jl/environments/cuda` workspace member:
+
+| Item | Runtime-reported value |
+| --- | --- |
+| CUDA.jl | 6.2.1 |
+| CUDA runtime | 13.3.0, artifact installation |
+| CUDA compiler | 13.3.33, artifact installation |
+| NVIDIA driver | 591.74.0, reported for CUDA 13.1 |
+| Device target | sm_86; PTX 9.3 (LLVM target PTX 9.0) |
+| cuBLAS | 13.6.0 |
+| cuSPARSE | 12.8.2 |
+| cuSOLVER | 12.2.6 |
+| cuFFT | 12.3.0 |
+| cuRAND | 10.4.3 |
+| GPU memory at query | 6.217 GiB available of 8.000 GiB |
+
+`CUDA.functional(true)` succeeded. A 256-element `Float32` CuArray broadcast was executed, explicitly synchronized, copied to host, and verified exactly. The artifact runtime is newer than the native driver's reported CUDA level, so final benchmarks must record whether CUDA's compatibility mechanism is active and must not assume this combination has identical performance characteristics to a natively matching driver/runtime.

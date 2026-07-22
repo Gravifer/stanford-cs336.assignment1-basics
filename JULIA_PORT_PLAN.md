@@ -158,6 +158,7 @@ Lux is not intended to replace the educational code. Implement softmax, RMSNorm,
 ### Phase 5: compiled and accelerator paths
 
 - Establish native Julia CPU and CUDA-array baselines first.
+- CUDA toolchain readiness is already verified in the optional `CS336.jl/environments/cuda` workspace member; operation/model baselines remain pending correctness implementations.
 - Evaluate Enzyme for mutation-friendly differentiation.
 - Evaluate Reactant+Enzyme for compiled inference and a compiled training step.
 - Treat unsupported tracing/control-flow cases as measured limitations, not reasons to distort the baseline implementation prematurely.
