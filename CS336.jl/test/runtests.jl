@@ -356,6 +356,31 @@ end
     end
 end
 
+@testset "feed-forward parity bundle transport" begin
+    for (stem, operation, array_count) in (
+        ("rmsnorm", "run_rmsnorm", 5),
+        ("swiglu", "run_swiglu", 9),
+    )
+        metadata_path = normpath(
+            joinpath(
+                @__DIR__,
+                "..",
+                "..",
+                "tests",
+                "fixtures",
+                "julia_parity",
+                "v1",
+                "$stem.json",
+            ),
+        )
+        bundle = load_bundle(metadata_path)
+
+        @test bundle.metadata["operation"] == operation
+        @test bundle.metadata["source"]["working_tree_clean"] === true
+        @test length(bundle.arrays) == array_count
+    end
+end
+
 @testset "linear primitive" begin
     weight = reshape(Float32.(1:12), 3, 4) ./ 8
     input = reshape(Float32.(1:24), 4, 3, 2) ./ 10

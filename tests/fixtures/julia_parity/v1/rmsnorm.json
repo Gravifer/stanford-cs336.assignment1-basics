@@ -1,0 +1,109 @@
+{
+  "array_file": "rmsnorm.npz",
+  "arrays": {
+    "expected.gradient.input.x": {
+      "axes": [
+        "batch",
+        "sequence",
+        "feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_input_gradient",
+      "shape": [
+        2,
+        3,
+        4
+      ]
+    },
+    "expected.gradient.parameter.weight": {
+      "axes": [
+        "feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        4
+      ]
+    },
+    "expected.output": {
+      "axes": [
+        "batch",
+        "sequence",
+        "feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_output",
+      "shape": [
+        2,
+        3,
+        4
+      ]
+    },
+    "input.x": {
+      "axes": [
+        "batch",
+        "sequence",
+        "feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "input",
+      "shape": [
+        2,
+        3,
+        4
+      ]
+    },
+    "parameter.weight": {
+      "axes": [
+        "feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        4
+      ]
+    }
+  },
+  "contract_version": 1,
+  "gradients": {
+    "objective": "sum(expected.output ** 2)",
+    "physical_representation": "dense",
+    "present": true
+  },
+  "notes": [
+    "Output is verified through tests.adapters.run_rmsnorm; gradients use explicit CS336 arguments."
+  ],
+  "operation": "run_rmsnorm",
+  "producer": {
+    "language": "Python",
+    "packages": {
+      "numpy": "2.4.4",
+      "torch": "2.11.0+cpu"
+    },
+    "runtime_version": "26.0.0"
+  },
+  "scalars": {
+    "d_model": 4,
+    "eps": 1e-05
+  },
+  "source": {
+    "generated_at": "2026-07-23T00:55:12+08:00",
+    "git_commit": "64bb862266d73565d66e3dc756e89f15f875b04e",
+    "working_tree_clean": true
+  },
+  "tolerances": {
+    "atol": 1e-06,
+    "equal_nan": false,
+    "rtol": 1e-05
+  }
+}
