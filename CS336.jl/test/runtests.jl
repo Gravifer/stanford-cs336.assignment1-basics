@@ -609,6 +609,9 @@ end
 end
 
 @testset "SwiGLU primitive and Python parity" begin
+    @test default_feed_forward_width.((4, 256, 512, 1600)) == (64, 704, 1344, 4288)
+    @test_throws ArgumentError default_feed_forward_width(0)
+
     native_input = reshape(Float64.(1:8), 4, 2) ./ 10
     native_w1 = reshape(Float64.(1:12), 3, 4) ./ 10
     native_w2 = reshape(Float64.(1:12), 4, 3) ./ 10

@@ -107,6 +107,18 @@ function rmsnorm(x::AbstractArray, weight::AbstractVector; eps::Real=1e-5)
 end
 
 """
+    default_feed_forward_width(d_model)
+
+Return the authored SwiGLU default width: approximately `8d_model/3`, rounded
+to the course implementation's nearest positive multiple-of-64 convention.
+Explicit widths remain valid and bypass this sizing policy.
+"""
+function default_feed_forward_width(d_model::Integer)
+    d_model > 0 || throw(ArgumentError("d_model must be positive"))
+    return 64 * max(1, (d_model + 12) ÷ 24)
+end
+
+"""
     swiglu(x, w1, w2, w3)
 
 Apply the adapter-semantic SwiGLU transformation with explicit weights:
