@@ -1,0 +1,643 @@
+{
+  "array_file": "transformer_lm.npz",
+  "arrays": {
+    "expected.gradient.parameter.block_0.attention_norm": {
+      "axes": [
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_0.attention_output_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_0.feed_forward_norm": {
+      "axes": [
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_0.key_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_0.query_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_0.value_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_0.w1": {
+      "axes": [
+        "feed_forward_feature",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        16,
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_0.w2": {
+      "axes": [
+        "model_feature",
+        "feed_forward_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        16
+      ]
+    },
+    "expected.gradient.parameter.block_0.w3": {
+      "axes": [
+        "feed_forward_feature",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        16,
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_1.attention_norm": {
+      "axes": [
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_1.attention_output_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_1.feed_forward_norm": {
+      "axes": [
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_1.key_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_1.query_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_1.value_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_1.w1": {
+      "axes": [
+        "feed_forward_feature",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        16,
+        8
+      ]
+    },
+    "expected.gradient.parameter.block_1.w2": {
+      "axes": [
+        "model_feature",
+        "feed_forward_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        16
+      ]
+    },
+    "expected.gradient.parameter.block_1.w3": {
+      "axes": [
+        "feed_forward_feature",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        16,
+        8
+      ]
+    },
+    "expected.gradient.parameter.final_norm": {
+      "axes": [
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8
+      ]
+    },
+    "expected.gradient.parameter.lm_head": {
+      "axes": [
+        "vocabulary",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        19,
+        8
+      ]
+    },
+    "expected.gradient.parameter.token_embedding": {
+      "axes": [
+        "vocabulary",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        19,
+        8
+      ]
+    },
+    "expected.output": {
+      "axes": [
+        "batch",
+        "sequence",
+        "vocabulary"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_output",
+      "shape": [
+        2,
+        4,
+        19
+      ]
+    },
+    "input.token_ids": {
+      "axes": [
+        "batch",
+        "sequence"
+      ],
+      "dtype": "int64",
+      "finiteness": "not_applicable",
+      "physical_representation": "dense",
+      "role": "input",
+      "shape": [
+        2,
+        4
+      ],
+      "zero_based_values": true
+    },
+    "parameter.block_0.attention_norm": {
+      "axes": [
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8
+      ]
+    },
+    "parameter.block_0.attention_output_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "parameter.block_0.feed_forward_norm": {
+      "axes": [
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8
+      ]
+    },
+    "parameter.block_0.key_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "parameter.block_0.query_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "parameter.block_0.value_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "parameter.block_0.w1": {
+      "axes": [
+        "feed_forward_feature",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        16,
+        8
+      ]
+    },
+    "parameter.block_0.w2": {
+      "axes": [
+        "model_feature",
+        "feed_forward_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        16
+      ]
+    },
+    "parameter.block_0.w3": {
+      "axes": [
+        "feed_forward_feature",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        16,
+        8
+      ]
+    },
+    "parameter.block_1.attention_norm": {
+      "axes": [
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8
+      ]
+    },
+    "parameter.block_1.attention_output_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "parameter.block_1.feed_forward_norm": {
+      "axes": [
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8
+      ]
+    },
+    "parameter.block_1.key_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "parameter.block_1.query_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "parameter.block_1.value_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "parameter.block_1.w1": {
+      "axes": [
+        "feed_forward_feature",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        16,
+        8
+      ]
+    },
+    "parameter.block_1.w2": {
+      "axes": [
+        "model_feature",
+        "feed_forward_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        16
+      ]
+    },
+    "parameter.block_1.w3": {
+      "axes": [
+        "feed_forward_feature",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        16,
+        8
+      ]
+    },
+    "parameter.final_norm": {
+      "axes": [
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8
+      ]
+    },
+    "parameter.lm_head": {
+      "axes": [
+        "vocabulary",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        19,
+        8
+      ]
+    },
+    "parameter.token_embedding": {
+      "axes": [
+        "vocabulary",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        19,
+        8
+      ]
+    }
+  },
+  "contract_version": 1,
+  "gradients": {
+    "objective": "sum(expected.output ** 2)",
+    "physical_representation": "dense",
+    "present": true
+  },
+  "notes": [
+    "Forward values are checked exactly against tests.adapters.run_transformer_lm.",
+    "The tiny fixture covers two independent blocks and a truncated-length input.",
+    "Packed Python attention/SwiGLU gradients are stored as semantic arrays."
+  ],
+  "operation": "run_transformer_lm",
+  "producer": {
+    "language": "Python",
+    "packages": {
+      "numpy": "2.4.4",
+      "torch": "2.11.0+cpu"
+    },
+    "runtime_version": "26.0.0"
+  },
+  "scalars": {
+    "context_length": 6,
+    "d_ff": 16,
+    "d_model": 8,
+    "num_heads": 2,
+    "num_layers": 2,
+    "theta": 10000.0,
+    "vocab_size": 19
+  },
+  "source": {
+    "generated_at": "2026-07-23T03:21:09+08:00",
+    "git_commit": "e6101e1ebf9620abc7ad022e59c81d09e7091999",
+    "working_tree_clean": true
+  },
+  "tolerances": {
+    "atol": 0.0002,
+    "equal_nan": false,
+    "rtol": 0.0002
+  }
+}

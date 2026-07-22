@@ -13,8 +13,10 @@ token cases, while the trainer matches Python on four deliberately tiny
 corpora. The Phase 2 primitives also pass an optional CPU/CUDA forward and
 Zygote-gradient comparison on CUDA.jl 6.2.1. RoPE, four-dimensional SDPA,
 causal MHA, and causal MHA with RoPE now have self-contained Python
-forward/gradient bundles as well. `JULIA_SNAPSHOT_PROVENANCE.md` records the
-remaining limitations of the legacy output-only snapshots.
+forward/gradient bundles as well. The LuxCore transformer block and tiny
+two-layer LM have semantic parameter-tree gradient bundles.
+`JULIA_SNAPSHOT_PROVENANCE.md` records the remaining limitations of the legacy
+output-only snapshots.
 
 ## Public parity surface on `dev`
 
@@ -31,8 +33,8 @@ remaining limitations of the legacy output-only snapshots.
 | Scaled dot-product attention | `run_scaled_dot_product_attention`; self-contained 4-D v1 bundle | 3 | parity-validated | output and Q/K/V gradients, boolean/additive/causal mask semantics, and finite zero fully masked rows |
 | MHA / self-attention | attention adapters; self-contained plain/RoPE v1 bundles | 3 | parity-validated | packed/separate projections, causal outputs and all parameter/input gradients, two feature-first head layouts, and three Q/K RoPE policies |
 | Grouped/multi-query attention | no direct adapter; implemented inside adapter-reachable attention family | 3 experiment | structurally validated execution lane | grouped contraction matches expanded-KV MHA without materializing repeated K/V; MHA/GQA/MQA timing and grouped CUDA remain pending |
-| Transformer block | `run_transformer_block`; NPZ snapshot | 3 | planned | parameter import, output, and gradients |
-| Transformer LM | `run_transformer_lm`; full and truncated snapshots | 3 | planned | logits, truncation behavior, state mapping, and gradients |
+| Transformer block | `run_transformer_block`; self-contained v1 bundle | 3 | parity-validated | LuxCore explicit parameter/state interface; packed attention/SwiGLU; output, input gradient, and every semantic parameter gradient |
+| Transformer LM | `run_transformer_lm`; tiny two-layer self-contained v1 bundle | 3 | parity-validated | feature-first logits, truncated/context behavior, one shared device-movable RoPE state, and every semantic parameter-tree gradient |
 | Batch sampling | `run_get_batch` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
 | AdamW | `get_adamw_cls` raises `NotImplementedError` | gated | gated | legacy NPZ output alone is not an adapter boundary |
 | Cosine schedule | `run_get_lr_cosine_schedule` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |

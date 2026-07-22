@@ -100,3 +100,199 @@ end
     @test_throws ArgumentError model(Int32[-1], parameters, state)
     @test_throws DimensionMismatch model(reshape(Int32.(0:6), 7, 1), parameters, state)
 end
+
+model_fixture_path(stem) = normpath(
+    joinpath(
+        @__DIR__,
+        "..",
+        "..",
+        "tests",
+        "fixtures",
+        "julia_parity",
+        "v1",
+        "$stem.json",
+    ),
+)
+
+function fixture_block_tree(arrays; namespace="", gradient=false)
+    role_prefix = gradient ? "expected.gradient.parameter." : "parameter."
+    prefix = isempty(namespace) ? role_prefix : "$role_prefix$namespace."
+    getarray(name) = arrays["$prefix$name"]
+    return (
+        attention_norm=getarray("attention_norm"),
+        attention=(
+            input_weight=vcat(
+                getarray("query_weight"),
+                getarray("key_weight"),
+                getarray("value_weight"),
+            ),
+            output_weight=getarray("attention_output_weight"),
+        ),
+        feed_forward_norm=getarray("feed_forward_norm"),
+        feed_forward=(
+            input_weight=vcat(getarray("w3"), getarray("w1")),
+            output_weight=getarray("w2"),
+        ),
+    )
+end
+
+function test_block_tree_approx(actual, expected; rtol, atol, nans)
+    @test isapprox(actual.attention_norm, expected.attention_norm; rtol, atol, nans)
+    @test isapprox(
+        actual.attention.input_weight,
+        expected.attention.input_weight;
+        rtol,
+        atol,
+        nans,
+    )
+    @test isapprox(
+        actual.attention.output_weight,
+        expected.attention.output_weight;
+        rtol,
+        atol,
+        nans,
+    )
+    @test isapprox(
+        actual.feed_forward_norm,
+        expected.feed_forward_norm;
+        rtol,
+        atol,
+        nans,
+    )
+    @test isapprox(
+        actual.feed_forward.input_weight,
+        expected.feed_forward.input_weight;
+        rtol,
+        atol,
+        nans,
+    )
+    @test isapprox(
+        actual.feed_forward.output_weight,
+        expected.feed_forward.output_weight;
+        rtol,
+        atol,
+        nans,
+    )
+end
+
+@testset "TransformerBlock Python parity" begin
+    bundle = load_bundle(model_fixture_path("transformer_block"))
+    arrays = bundle.arrays
+    scalars = bundle.metadata["scalars"]
+    tolerances = bundle.metadata["tolerances"]
+    block = TransformerBlock(
+        scalars["d_model"],
+        scalars["num_heads"],
+        scalars["d_ff"],
+        scalars["context_length"],
+        scalars["theta"],
+    )
+    _, state = LuxCore.setup(Xoshiro(340), block)
+    parameters = fixture_block_tree(arrays)
+    expected_parameter_gradient = fixture_block_tree(arrays; gradient=true)
+    input = permutedims(arrays["input.x"], (3, 2, 1))
+    expected_output = permutedims(arrays["expected.output"], (3, 2, 1))
+    expected_input_gradient =
+        permutedims(arrays["expected.gradient.input.x"], (3, 2, 1))
+
+    output = first(block(input, parameters, state))
+    input_gradient, parameter_gradient = Zygote.gradient(
+        (x, ps) -> sum(abs2, first(block(x, ps, state))),
+        input,
+        parameters,
+    )
+    rtol = tolerances["rtol"]
+    atol = tolerances["atol"]
+    nans = tolerances["equal_nan"]
+    @test bundle.metadata["operation"] == "run_transformer_block"
+    @test isapprox(output, expected_output; rtol, atol, nans)
+    @test isapprox(input_gradient, expected_input_gradient; rtol, atol, nans)
+    test_block_tree_approx(parameter_gradient, expected_parameter_gradient; rtol, atol, nans)
+end
+
+@testset "TransformerLM Python parity" begin
+    bundle = load_bundle(model_fixture_path("transformer_lm"))
+    arrays = bundle.arrays
+    scalars = bundle.metadata["scalars"]
+    tolerances = bundle.metadata["tolerances"]
+    model = TransformerLM(
+        scalars["vocab_size"],
+        scalars["context_length"],
+        scalars["d_model"],
+        scalars["num_layers"],
+        scalars["num_heads"],
+        scalars["d_ff"],
+        scalars["theta"],
+    )
+    _, state = LuxCore.setup(Xoshiro(341), model)
+    parameters = (
+        token_embedding=permutedims(arrays["parameter.token_embedding"], (2, 1)),
+        blocks=ntuple(
+            index -> fixture_block_tree(arrays; namespace="block_$(index - 1)"),
+            scalars["num_layers"],
+        ),
+        final_norm=arrays["parameter.final_norm"],
+        lm_head=arrays["parameter.lm_head"],
+    )
+    expected_parameter_gradient = (
+        token_embedding=permutedims(
+            arrays["expected.gradient.parameter.token_embedding"],
+            (2, 1),
+        ),
+        blocks=ntuple(
+            index -> fixture_block_tree(
+                arrays;
+                namespace="block_$(index - 1)",
+                gradient=true,
+            ),
+            scalars["num_layers"],
+        ),
+        final_norm=arrays["expected.gradient.parameter.final_norm"],
+        lm_head=arrays["expected.gradient.parameter.lm_head"],
+    )
+    token_ids = permutedims(arrays["input.token_ids"], (2, 1))
+    expected_output = permutedims(arrays["expected.output"], (3, 2, 1))
+
+    output = first(model(token_ids, parameters, state))
+    parameter_gradient = only(
+        Zygote.gradient(
+            ps -> sum(abs2, first(model(token_ids, ps, state))),
+            parameters,
+        ),
+    )
+    rtol = tolerances["rtol"]
+    atol = tolerances["atol"]
+    nans = tolerances["equal_nan"]
+    @test bundle.metadata["operation"] == "run_transformer_lm"
+    @test isapprox(output, expected_output; rtol, atol, nans)
+    @test isapprox(
+        parameter_gradient.token_embedding,
+        expected_parameter_gradient.token_embedding;
+        rtol,
+        atol,
+        nans,
+    )
+    @test isapprox(
+        parameter_gradient.final_norm,
+        expected_parameter_gradient.final_norm;
+        rtol,
+        atol,
+        nans,
+    )
+    @test isapprox(
+        parameter_gradient.lm_head,
+        expected_parameter_gradient.lm_head;
+        rtol,
+        atol,
+        nans,
+    )
+    for index in eachindex(parameter_gradient.blocks)
+        test_block_tree_approx(
+            parameter_gradient.blocks[index],
+            expected_parameter_gradient.blocks[index];
+            rtol,
+            atol,
+            nans,
+        )
+    end
+end

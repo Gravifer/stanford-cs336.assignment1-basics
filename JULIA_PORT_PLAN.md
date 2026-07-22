@@ -185,8 +185,9 @@ Lux is not intended to replace the direct port. Implement the currently exposed 
 - RoPE, SDPA, and self-attention are complete through Python forward/gradient
   parity and an optional CUDA forward/gradient smoke. Transformer block and
   language-model composition now implement the LuxCore parameter/state
-  interface with one RoPE cache shared across layers; Python model parity is
-  the remaining Phase 3 gate.
+  interface with one RoPE cache shared across layers. Both match small
+  self-contained Python forward/gradient bundles; optional model-level CUDA
+  integration is the remaining Phase 3 device gate.
 - Use canonical feature-first `(head_feature, head, sequence, batch...)` attention activations and preserve `(head_feature, sequence, head, batch...)` as the authored experimental layout. Boundary adapters may transpose imported PyTorch weights or fixtures; do not scatter layout conversions through kernels.
 - Preserve packed/separate projection storage, input-sharing projection paths,
   elementwise/matrix RoPE caches, and automatic/separate/stacked Q/K rotation
