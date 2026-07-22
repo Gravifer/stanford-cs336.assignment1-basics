@@ -67,6 +67,10 @@ This was verified empirically with the locked stack on 2026-07-22. For `Lux.Embe
 
 Lux stores embedding weights as `(embedding_feature, vocabulary)`, so the selected vocabulary items are physical columns. PyTorch conventionally stores `(vocabulary, embedding_feature)`, where the same mathematical support is described as row-sparse. The axis orientation changes the name, not the sparsity issue: neither tested Lux path preserved an indexed sparse tangent automatically.
 
+Nor is wrapping the same values in Julia's standard `SparseMatrixCSC` sufficient. Optimisers.jl 0.4.7 accepted such a gradient through its generic interface, and Descent produced the correct dense-parameter update without state. Adam, however, still allocated two full dense moment matrices. In a two-step probe, column 2 received a gradient only on step one and column 5 only on step two; column 2 nevertheless changed by `6.699562e-4` on step two because its dense Adam momentum continued evolving through an implicit zero gradient. A never-touched column stayed unchanged.
+
+That behavior is coherent dense Adam semantics, not PyTorch SparseAdam-style “update only explicitly present entries” semantics. A real Julia sparse experiment therefore needs a specialized indexed-gradient/update contract; substituting a generic sparse matrix can reduce gradient storage on CPU while still retaining dense compute/state and different skip semantics.
+
 ### Ecosystem completeness
 
 PyTorch's internal complexity partly records years of funded backward compatibility and broad product requirements. Julia's modularity may avoid putting all of that code in one repository, but missing integrations remain missing capabilities. For this reason the project records both architectural cleanliness and operational coverage; one must not be used as a proxy for the other.

@@ -226,6 +226,7 @@ The investigated Julia stack also produces a dense embedding-weight gradient by 
 - Current [`Lux.Embedding`](https://github.com/LuxDL/Lux.jl/blob/82b8efede2a7f8523fd43da7c492e44d6ee7cd1a/src/layers/embedding.jl) performs ordinary indexed selection from a dense parameter array.
 - The general [`ChainRules` indexing pullback](https://github.com/JuliaDiff/ChainRules.jl/blob/main/src/rulesets/Base/indexing.jl) allocates a gradient shaped like the source and scatter-adds into it. Its lightweight `OneElement` representation covers scalar indexing, not a batch of embedding rows.
 - A locked-stack experiment on 2026-07-22 confirmed the behavior on both CPU and CUDA: `Lux.Embedding(8 => 3)` with repeated indices `[2, 2, 5]` produced a full dense `(3, 8)` Zygote tangent, correctly accumulated repeats, and led Optimisers Adam to allocate dense moment arrays. Lux's `(feature, vocabulary)` storage makes this physically column-sparse rather than PyTorch-style row-sparse, but it is still stored densely.
+- Passing equivalent values as `SparseMatrixCSC` to Optimisers is not a shortcut to sparse-optimizer semantics. Generic Descent accepts it, but Adam retains dense moments and treats absent stored entries as numerical zeros: momentum from a previously touched embedding column continues updating that column on a later step where it is absent. A sparse experiment must specify whether absent entries mean zero-gradient evolution or a skipped update.
 - [`NNlib.gather`](https://github.com/FluxML/NNlib.jl/blob/master/src/gather.jl) likewise creates a full-size zero gradient and scatters contributions into it.
 - Enzyme shadows follow the primal memory layout. A dense parameter array therefore naturally has a dense derivative shadow unless a more specialized rule or representation is introduced.
 
@@ -244,6 +245,7 @@ A genuine Julia sparse-gradient experiment must cover the complete backward-to-u
 - coalesce repeated token IDs correctly;
 - pass that tangent through the Lux parameter tree and selected AD backend without densification;
 - update compatible optimizer state without scanning or allocating the entire table;
+- avoid treating generic `SparseMatrixCSC` acceptance as proof of skipped-entry or sparse-state behavior;
 - define behavior for momentum, checkpointing, device transfer, and distributed reduction;
 - define whether untouched rows receive decoupled weight decay.
 
