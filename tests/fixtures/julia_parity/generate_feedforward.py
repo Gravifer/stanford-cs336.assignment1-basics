@@ -8,6 +8,7 @@ import numpy as np
 import torch
 
 from cs336_basics.nn import functional as functional
+from cs336_basics.nn.feed_forward import SwiGLU
 from tests.adapters import run_rmsnorm, run_swiglu
 
 from fixture_tools import descriptor, source_metadata, write_bundle
@@ -79,9 +80,6 @@ def _swiglu(source: dict[str, object]) -> None:
     w2 = (torch.arange(24, dtype=torch.float32).reshape(4, 6) / 18 - 0.4).requires_grad_()
     w3 = (torch.arange(24, dtype=torch.float32).flip(0).reshape(6, 4) / 21 - 0.6).requires_grad_()
 
-    gate = functional.linear(input_tensor, w1)
-    value = functional.linear(input_tensor, w3)
-    output = functional.linear(functional.silu(gate) * value, w2)
     adapter_output = run_swiglu(
         d_model,
         d_ff,
@@ -90,8 +88,17 @@ def _swiglu(source: dict[str, object]) -> None:
         w3.detach(),
         input_tensor.detach(),
     )
+    module = SwiGLU(d_model, d_ff, dtype=torch.float32)
+    module.load_state_dict(
+        {"w1.weight": w1.detach(), "w2.weight": w2.detach(), "w3.weight": w3.detach()}
+    )
+    output = module(input_tensor)
     torch.testing.assert_close(output, adapter_output, rtol=0, atol=0)
-    gradients = torch.autograd.grad(output.square().sum(), (input_tensor, w1, w2, w3))
+    input_gradient, packed_input_gradient, output_weight_gradient = torch.autograd.grad(
+        output.square().sum(),
+        (input_tensor, module.in_weight, module.out_weight),
+    )
+    value_weight_gradient, gate_weight_gradient = packed_input_gradient.split(d_ff)
 
     arrays = {
         "input.x": input_tensor.detach().numpy(),
@@ -99,10 +106,10 @@ def _swiglu(source: dict[str, object]) -> None:
         "parameter.w2": w2.detach().numpy(),
         "parameter.w3": w3.detach().numpy(),
         "expected.output": output.detach().numpy(),
-        "expected.gradient.input.x": gradients[0].detach().numpy(),
-        "expected.gradient.parameter.w1": gradients[1].detach().numpy(),
-        "expected.gradient.parameter.w2": gradients[2].detach().numpy(),
-        "expected.gradient.parameter.w3": gradients[3].detach().numpy(),
+        "expected.gradient.input.x": input_gradient.detach().numpy(),
+        "expected.gradient.parameter.w1": gate_weight_gradient.detach().numpy(),
+        "expected.gradient.parameter.w2": output_weight_gradient.detach().numpy(),
+        "expected.gradient.parameter.w3": value_weight_gradient.detach().numpy(),
     }
     arrays_metadata: dict[str, dict[str, object]] = {
         "input.x": descriptor("input", arrays["input.x"], ["batch", "sequence", "model_feature"]),
@@ -148,7 +155,8 @@ def _swiglu(source: dict[str, object]) -> None:
         },
         "notes": [
             "Output is verified through tests.adapters.run_swiglu.",
-            "Weights remain explicit; no packed Python storage layout is exported to Julia.",
+            "The selected Python module uses one packed value/gate GEMM; its gradient is unpacked into semantic w3/w1 arrays.",
+            "Julia keeps semantic weights explicit, so contraction-order roundoff is covered by the declared tolerance.",
         ],
     }
     write_bundle("swiglu", arrays, metadata)
