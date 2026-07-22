@@ -307,29 +307,80 @@ function _pair_lexless(left::Tuple{Int,Int}, right::Tuple{Int,Int}, vocab)
     return _lexless(vocab[left[2]], vocab[right[2]])
 end
 
-function _pair_counts(sequences)
+struct _BPECandidate
+    pair::Tuple{Int,Int}
+    count::Int
+end
+
+function _candidate_precedes(left::_BPECandidate, right::_BPECandidate, vocab)
+    left.count == right.count || return left.count > right.count
+    return _pair_lexless(right.pair, left.pair, vocab)
+end
+
+function _heap_push!(heap::Vector{_BPECandidate}, candidate::_BPECandidate, vocab)
+    push!(heap, candidate)
+    child = length(heap)
+    while child > 1
+        parent = child ÷ 2
+        _candidate_precedes(heap[child], heap[parent], vocab) || break
+        heap[parent], heap[child] = heap[child], heap[parent]
+        child = parent
+    end
+    return heap
+end
+
+function _heap_pop!(heap::Vector{_BPECandidate}, vocab)
+    isempty(heap) && throw(ArgumentError("cannot pop an empty BPE candidate heap"))
+    candidate = heap[1]
+    tail = pop!(heap)
+    isempty(heap) && return candidate
+    heap[1] = tail
+    parent = 1
+    while true
+        left = 2 * parent
+        left > length(heap) && break
+        right = left + 1
+        child = right <= length(heap) &&
+                _candidate_precedes(heap[right], heap[left], vocab) ? right : left
+        _candidate_precedes(heap[child], heap[parent], vocab) || break
+        heap[parent], heap[child] = heap[child], heap[parent]
+        parent = child
+    end
+    return candidate
+end
+
+function _sequence_pair_counts(sequence)
     counts = Dict{Tuple{Int,Int},Int}()
-    for (sequence, frequency) in sequences
-        length(sequence) < 2 && continue
-        for index in 1:(length(sequence) - 1)
-            pair = (sequence[index], sequence[index + 1])
-            counts[pair] = get(counts, pair, 0) + frequency
-        end
+    length(sequence) < 2 && return counts
+    for index in 1:(length(sequence) - 1)
+        pair = (sequence[index], sequence[index + 1])
+        counts[pair] = get(counts, pair, 0) + 1
     end
     return counts
 end
 
-function _best_pair(counts, vocab)
-    best_pair = nothing
-    best_count = -1
-    for (pair, count) in counts
-        if count > best_count ||
-           (count == best_count && best_pair !== nothing && _pair_lexless(best_pair, pair, vocab))
-            best_pair = pair
-            best_count = count
+function _initial_pair_index(sequences)
+    counts = Dict{Tuple{Int,Int},Int}()
+    sequence_indices = Dict{Tuple{Int,Int},Set{Int}}()
+    for (sequence_index, (sequence, frequency)) in enumerate(sequences)
+        for (pair, occurrences) in _sequence_pair_counts(sequence)
+            counts[pair] = get(counts, pair, 0) + frequency * occurrences
+            push!(get!(Set{Int}, sequence_indices, pair), sequence_index)
         end
     end
-    return best_pair
+    return counts, sequence_indices
+end
+
+function _next_pair!(heap, authoritative_counts, vocab)
+    while !isempty(heap)
+        candidate = _heap_pop!(heap, vocab)
+        authoritative = get(authoritative_counts, candidate.pair, 0)
+        authoritative <= 0 && continue
+        candidate.count == authoritative && return candidate.pair
+        candidate.count < authoritative &&
+            _heap_push!(heap, _BPECandidate(candidate.pair, authoritative), vocab)
+    end
+    return nothing
 end
 
 function _merge_pair(sequence::Vector{Int}, pair::Tuple{Int,Int}, identifier::Int)
@@ -359,7 +410,9 @@ boundaries, and do not contribute merge statistics. Equal-frequency pairs use
 the lexicographically greatest byte pair, matching the Python implementation.
 
 `parallel=true` parallelizes only independent pretoken counting with task-local
-dictionaries. Merge selection remains deterministic and serial.
+dictionaries. Merge selection remains deterministic and serial. Candidate
+selection uses a lazy max-heap validated against authoritative incremental pair
+counts; each merge revisits only pretokens containing the selected pair.
 """
 function train_bpe(
     input_path::AbstractString,
@@ -411,20 +464,63 @@ function train_bpe(
         push!(sequences, (sequence, pretoken_counts[pretoken]))
     end
 
+    pair_counts, pair_sequences = _initial_pair_index(sequences)
+    candidate_heap = _BPECandidate[]
+    for (pair, count) in pair_counts
+        _heap_push!(candidate_heap, _BPECandidate(pair, count), vocab_internal)
+    end
+
     merges_internal = _BytePair[]
     target_merges = max(0, Int(vocab_size) - length(vocab_internal))
     for _ in 1:target_merges
-        counts = _pair_counts(sequences)
-        isempty(counts) && break
-        pair = _best_pair(counts, vocab_internal)
+        pair = _next_pair!(candidate_heap, pair_counts, vocab_internal)
         pair === nothing && break
         identifier = length(vocab_internal)
         merged_token = (vocab_internal[pair[1]]..., vocab_internal[pair[2]]...)
         push!(merges_internal, (vocab_internal[pair[1]], vocab_internal[pair[2]]))
         vocab_internal[identifier] = merged_token
-        for index in eachindex(sequences)
-            sequence, frequency = sequences[index]
-            sequences[index] = (_merge_pair(sequence, pair, identifier), frequency)
+
+        affected_pairs = Set{Tuple{Int,Int}}()
+        affected_sequences = collect(get(pair_sequences, pair, Set{Int}()))
+        for sequence_index in affected_sequences
+            sequence, frequency = sequences[sequence_index]
+            before = _sequence_pair_counts(sequence)
+            get(before, pair, 0) == 0 && continue
+            merged_sequence = _merge_pair(sequence, pair, identifier)
+            after = _sequence_pair_counts(merged_sequence)
+            local_pairs = Set{Tuple{Int,Int}}(keys(before))
+            union!(local_pairs, keys(after))
+            for local_pair in local_pairs
+                before_count = get(before, local_pair, 0)
+                after_count = get(after, local_pair, 0)
+                if before_count != after_count
+                    pair_counts[local_pair] =
+                        get(pair_counts, local_pair, 0) +
+                        frequency * (after_count - before_count)
+                    push!(affected_pairs, local_pair)
+                end
+                indices = get!(Set{Int}, pair_sequences, local_pair)
+                if after_count > 0
+                    push!(indices, sequence_index)
+                else
+                    delete!(indices, sequence_index)
+                    isempty(indices) && delete!(pair_sequences, local_pair)
+                end
+            end
+            sequences[sequence_index] = (merged_sequence, frequency)
+        end
+
+        get(pair_counts, pair, 0) == 0 || error("selected BPE pair was not depleted")
+        delete!(pair_counts, pair)
+        delete!(pair_sequences, pair)
+        delete!(affected_pairs, pair)
+        for affected_pair in affected_pairs
+            count = get(pair_counts, affected_pair, 0)
+            count > 0 && _heap_push!(
+                candidate_heap,
+                _BPECandidate(affected_pair, count),
+                vocab_internal,
+            )
         end
     end
 
