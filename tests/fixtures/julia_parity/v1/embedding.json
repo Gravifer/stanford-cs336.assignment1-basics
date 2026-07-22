@@ -1,0 +1,97 @@
+{
+  "array_file": "embedding.npz",
+  "arrays": {
+    "expected.gradient.parameter.weight": {
+      "axes": [
+        "vocabulary",
+        "feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        6,
+        4
+      ]
+    },
+    "expected.output": {
+      "axes": [
+        "batch",
+        "sequence",
+        "feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_output",
+      "shape": [
+        2,
+        3,
+        4
+      ]
+    },
+    "input.token_ids": {
+      "axes": [
+        "batch",
+        "sequence"
+      ],
+      "dtype": "int64",
+      "finiteness": "not_applicable",
+      "physical_representation": "dense",
+      "role": "input",
+      "shape": [
+        2,
+        3
+      ],
+      "zero_based_values": true
+    },
+    "parameter.weight": {
+      "axes": [
+        "vocabulary",
+        "feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        6,
+        4
+      ]
+    }
+  },
+  "contract_version": 1,
+  "gradients": {
+    "objective": "sum(expected.output ** 2)",
+    "physical_representation": "dense",
+    "present": true
+  },
+  "notes": [
+    "Output is produced through tests.adapters.run_embedding.",
+    "Repeated token ID 2 verifies gradient accumulation; the stored weight gradient is dense."
+  ],
+  "operation": "run_embedding",
+  "producer": {
+    "language": "Python",
+    "packages": {
+      "numpy": "2.4.4",
+      "torch": "2.11.0+cpu"
+    },
+    "runtime_version": "26.0.0"
+  },
+  "scalars": {
+    "d_model": 4,
+    "vocab_size": 6
+  },
+  "source": {
+    "generated_at": "2026-07-23T00:37:33+08:00",
+    "git_commit": "c3dae6f378b52d14a57cea86e3856baf8d1e4755",
+    "working_tree_clean": true
+  },
+  "tolerances": {
+    "atol": 1e-06,
+    "equal_nan": false,
+    "rtol": 1e-06
+  }
+}

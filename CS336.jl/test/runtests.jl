@@ -305,6 +305,33 @@ end
     ])
 end
 
+@testset "embedding parity bundle transport" begin
+    metadata_path = normpath(
+        joinpath(
+            @__DIR__,
+            "..",
+            "..",
+            "tests",
+            "fixtures",
+            "julia_parity",
+            "v1",
+            "embedding.json",
+        ),
+    )
+    bundle = load_bundle(metadata_path)
+
+    @test bundle.metadata["operation"] == "run_embedding"
+    @test bundle.metadata["source"]["working_tree_clean"] === true
+    @test bundle.metadata["gradients"] == Dict{String, Any}(
+        "present" => true,
+        "objective" => "sum(expected.output ** 2)",
+        "physical_representation" => "dense",
+    )
+    @test bundle.metadata["scalars"] ==
+          Dict{String, Any}("vocab_size" => 6, "d_model" => 4)
+    @test bundle.metadata["arrays"]["input.token_ids"]["zero_based_values"] === true
+end
+
 @testset "linear primitive" begin
     weight = reshape(Float32.(1:12), 3, 4) ./ 8
     input = reshape(Float32.(1:24), 4, 3, 2) ./ 10
