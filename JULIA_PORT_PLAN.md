@@ -6,7 +6,7 @@
 - Base at creation: local `dev` at `8c032c9` (`chore: prepare for training`), matching `origin/dev` on 2026-07-22.
 - Branch policy: grow only from `dev`. Do not merge or rebase Python feature branches into this branch.
 - Verified toolchain: Juliaup 1.20.8 with the stable `release` channel at Julia 1.12.6. `juliaup update release` reported no update on 2026-07-22.
-- Current stage: Phase 0 scaffold complete, with optional readiness environments in progress. The root workspace, `CS336.jl` package boundary, test project, fixture readers, benchmark project, sole root manifest, CUDA readiness environment, and Lux compatibility environment are committed. The runtime package remains dependency-free and no assignment operation has been added.
+- Current stage: Phase 0 infrastructure complete; the first self-contained Python-to-Julia numerical parity bundle remains pending a student-authored producer. The root workspace, `CS336.jl` package boundary, test project, fixture readers, machine-readable neutral-fixture schema, benchmark project, sole root manifest, CUDA readiness environment, and Lux compatibility environment are committed. The runtime package remains dependency-free and no assignment operation has been added.
 
 When resuming, first run:
 
@@ -129,13 +129,13 @@ Lux is not intended to replace the educational code. Implement softmax, RMSNorm,
 
 ## Syllabus-aligned phases
 
-### Phase 0: scaffold and cross-language fixtures — complete 2026-07-22
+### Phase 0: scaffold and cross-language fixtures — infrastructure complete; numerical parity bundle pending
 
 - Create the root workspace `Project.toml`, `CS336.jl/Project.toml`, `CS336.jl/src/CS336.jl`, tests, and documented commands. Resolve and commit the one root `Manifest.toml`.
 - Use the verified Julia 1.12.6 runtime and record any later runtime upgrade in this plan and the benchmark metadata.
 - Read existing `.npz`, JSON, text, vocabulary, and merge fixtures without rewriting them.
 - Establish deterministic seeds, dtype conventions, tensor-axis conventions, and tolerances.
-- Add one Python-to-Julia parity test before implementing the model stack.
+- Add one self-contained Python-to-Julia numerical parity test before implementing the model stack. The schema/consumer infrastructure may be prepared here, but the Python producer and course operation remain student-owned under the repository policy.
 
 ### Phase 1: tokenizer and data
 

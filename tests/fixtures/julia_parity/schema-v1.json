@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CS336 Julia parity fixture metadata v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "source",
+    "operation",
+    "producer",
+    "array_file",
+    "arrays",
+    "scalars",
+    "tolerances",
+    "gradients",
+    "notes"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git_commit", "generated_at", "working_tree_clean"],
+      "properties": {
+        "git_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "working_tree_clean": {
+          "type": "boolean"
+        }
+      }
+    },
+    "operation": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["language", "runtime_version", "packages"],
+      "properties": {
+        "language": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtime_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "packages": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "array_file": {
+      "type": "string",
+      "pattern": "^[^/\\\\]+\\.npz$"
+    },
+    "arrays": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/array_descriptor"
+      }
+    },
+    "scalars": {
+      "type": "object"
+    },
+    "tolerances": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rtol", "atol", "equal_nan"],
+      "properties": {
+        "rtol": {
+          "type": "number",
+          "minimum": 0
+        },
+        "atol": {
+          "type": "number",
+          "minimum": 0
+        },
+        "equal_nan": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gradients": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present", "objective", "physical_representation"],
+      "properties": {
+        "present": {
+          "type": "boolean"
+        },
+        "objective": {
+          "type": ["string", "null"]
+        },
+        "physical_representation": {
+          "enum": ["none", "dense", "indexed", "sparse_matrix", "mixed"]
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "array_descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "dtype",
+        "shape",
+        "axes",
+        "physical_representation",
+        "finiteness"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "input",
+            "parameter",
+            "state",
+            "expected_output",
+            "expected_input_gradient",
+            "expected_parameter_gradient",
+            "expected_state",
+            "expected_updated_parameter",
+            "expected_optimizer_state"
+          ]
+        },
+        "dtype": {
+          "enum": [
+            "bool",
+            "uint8",
+            "int32",
+            "int64",
+            "float16",
+            "float32",
+            "float64"
+          ]
+        },
+        "shape": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "axes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "physical_representation": {
+          "enum": ["dense", "coo", "csr", "csc", "indexed_rows", "indexed_columns"]
+        },
+        "finiteness": {
+          "enum": ["required", "allow_nonfinite", "not_applicable"]
+        },
+        "zero_based_values": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
