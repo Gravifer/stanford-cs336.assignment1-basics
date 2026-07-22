@@ -29,6 +29,7 @@ This project is about language/framework architecture as well as completing the 
 
 - `JULIA_ML_ARCHITECTURE_NOTES.md` preserves the ecosystem conclusions and the boundary between structural streamlining and funded capability.
 - `JULIA_PARITY_MATRIX.md` tracks the evolving Python adapter/test surface and assigns it to baseline or experimental Julia tracks.
+- `JULIA_FIXTURE_CONTRACT.md` defines self-contained neutral inputs, weights, outputs, gradients, and metadata for cross-language parity.
 - `JULIA_PHASE0_CHECKLIST.md` is the acceptance checklist for the root workspace and minimal package scaffold.
 - `JULIA_DEVELOPMENT.md` contains the executable project/test commands and cross-language boundary conventions.
 - `JULIA_BENCHMARK_PROTOCOL.md` defines correctness gates, timing controls, reproducibility metadata, and the greater-than-10× investigation threshold.

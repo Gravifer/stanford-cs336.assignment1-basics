@@ -62,6 +62,8 @@ Current numeric snapshot inventory:
 
 NPZ.jl returns these arrays with the same logical dimension order stored by NumPy. Import adapters must convert Python `(batch, sequence, feature)` tensors to the canonical Julia `(feature, sequence, batch)` layout exactly once. The fixture tests intentionally do not perform that conversion.
 
+These output-only snapshots are not self-contained parity fixtures. Their inputs come from seeded PyTorch RNG fixtures and their weights come from a PyTorch checkpoint, neither of which Julia should reproduce implicitly. `JULIA_FIXTURE_CONTRACT.md` defines the versioned neutral bundle required before an operation can move from planned to parity-validated.
+
 ## Ecosystem tracks
 
 The baseline track uses ordinary Julia functions, Lux's explicit parameter/state interface, Zygote for the first reverse-mode path, and Optimisers where a library optimizer is being used for comparison. The official Lux documentation states that models do not own parameters/state and documents `Lux.setup` plus `Lux.apply(model, x, ps, st)`; this is the architectural reason for selecting Lux, not an assumption copied from Python.
