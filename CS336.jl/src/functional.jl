@@ -23,3 +23,26 @@ function linear(x::AbstractArray, weight::AbstractMatrix)
     output = weight * reshape(x, input_features, :)
     return reshape(output, size(weight, 1), mapped_shape...)
 end
+
+"""
+    embedding(token_ids, weight)
+
+Look up zero-based external token IDs in a `(feature, vocabulary)` weight
+matrix and return `(feature, size(token_ids)...)`.
+
+Vocabulary entries are columns so each embedding vector is contiguous in
+Julia's column-major storage. The conversion to one-based indices happens only
+at this lookup boundary; `token_ids` itself is never rewritten.
+"""
+function embedding(token_ids::AbstractArray{<:Integer}, weight::AbstractMatrix)
+    vocabulary_size = size(weight, 2)
+    all(token_id -> 0 <= token_id < vocabulary_size, token_ids) || throw(
+        ArgumentError(
+            "embedding token IDs must be in 0:$(vocabulary_size - 1)",
+        ),
+    )
+
+    indices = vec(token_ids .+ one(eltype(token_ids)))
+    selected = weight[:, indices]
+    return reshape(selected, size(weight, 1), size(token_ids)...)
+end

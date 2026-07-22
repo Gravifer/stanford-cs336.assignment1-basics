@@ -381,6 +381,57 @@ end
     @test isapprox(weight_gradient, expected_weight_gradient; rtol, atol, nans)
 end
 
+@testset "embedding primitive" begin
+    weight = reshape(Float32.(1:24), 4, 6) ./ 10
+    token_ids = Int64[0 5; 2 2; 1 4]
+    output = embedding(token_ids, weight)
+
+    @test size(output) == (4, 3, 2)
+    @test output[:, 1, 1] == weight[:, 1]
+    @test output[:, 2, 1] == weight[:, 3]
+    @test output[:, 2, 2] == weight[:, 3]
+    @test eltype(output) === Float32
+    @test_throws ArgumentError embedding(Int64[-1], weight)
+    @test_throws ArgumentError embedding(Int64[6], weight)
+    @test size(embedding(Array{Int64}(undef, 0, 2), weight)) == (4, 0, 2)
+end
+
+@testset "embedding Python parity" begin
+    metadata_path = normpath(
+        joinpath(
+            @__DIR__,
+            "..",
+            "..",
+            "tests",
+            "fixtures",
+            "julia_parity",
+            "v1",
+            "embedding.json",
+        ),
+    )
+    bundle = load_bundle(metadata_path)
+    arrays = bundle.arrays
+    tolerances = bundle.metadata["tolerances"]
+
+    token_ids = permutedims(arrays["input.token_ids"], (2, 1))
+    weight = permutedims(arrays["parameter.weight"], (2, 1))
+    expected_output = permutedims(arrays["expected.output"], (3, 2, 1))
+    expected_weight_gradient =
+        permutedims(arrays["expected.gradient.parameter.weight"], (2, 1))
+
+    output = embedding(token_ids, weight)
+    weight_gradient =
+        only(Zygote.gradient(w -> sum(abs2, embedding(token_ids, w)), weight))
+
+    rtol = tolerances["rtol"]
+    atol = tolerances["atol"]
+    nans = tolerances["equal_nan"]
+    @test isapprox(output, expected_output; rtol, atol, nans)
+    @test isapprox(weight_gradient, expected_weight_gradient; rtol, atol, nans)
+    @test weight_gradient isa Matrix{Float32}
+    @test size(weight_gradient) == size(weight)
+end
+
 @testset "repository fixture smoke test" begin
     fixture = normpath(joinpath(@__DIR__, "..", "..", "tests", "fixtures", "address.txt"))
     @test isfile(fixture)

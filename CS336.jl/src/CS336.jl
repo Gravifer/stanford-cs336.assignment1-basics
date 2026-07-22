@@ -6,7 +6,7 @@ functions and explicit model components after its parity evidence is established
 """
 module CS336
 
-export linear
+export embedding, linear
 
 include("functional.jl")
 

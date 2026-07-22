@@ -11,7 +11,7 @@ Harness status as of 2026-07-22: the root Julia workspace can read every existin
 | Area | Current Python adapter or evidence | Julia phase | Initial status | Parity evidence |
 | --- | --- | ---: | --- | --- |
 | Linear | `run_linear`; self-contained v1 bundle | 2 | parity-validated | feature-first output plus dense input/weight gradients through explicit Zygote arguments |
-| Embedding | `run_embedding`; NPZ snapshot | 2 | planned | output, dense weight-gradient values, and gradient representation |
+| Embedding | `run_embedding`; self-contained v1 bundle | 2 | parity-validated | zero-based lookup, repeated-ID accumulation, output, and full dense weight gradient through explicit Zygote arguments |
 | SiLU / SwiGLU | `run_silu`, `run_swiglu`; NPZ snapshot | 2 | planned | output and gradient fixtures |
 | Stable softmax | `run_softmax`; student edge-case tests | 2 | planned | axis behavior, stability, dtype, and fully masked interactions |
 | RMSNorm | `run_rmsnorm`; NPZ snapshot | 2 | planned | output and gradient fixtures |

@@ -6,7 +6,7 @@
 - Base at creation: local `dev` at `8c032c9` (`chore: prepare for training`), matching `origin/dev` on 2026-07-22.
 - Branch policy: grow only from `dev`. Do not merge or rebase Python feature branches into this branch.
 - Verified toolchain: Juliaup 1.20.8 with the stable `release` channel at Julia 1.12.6. `juliaup update release` reported no update on 2026-07-22.
-- Current stage: Phase 0 is complete and the first adapter-semantic runtime operation, feature-first bias-free linear, passes Python forward and dense input/weight-gradient parity. The root workspace, maintainer test project, fixture readers, benchmark project, sole root manifest, CUDA readiness environment, and Lux compatibility environment are committed. Runtime primitives remain generic Julia functions; Zygote is test-only for explicit-argument gradient verification.
+- Current stage: Phase 0 is complete. Feature-first bias-free linear and `(feature, vocabulary)` embedding now pass Python forward and dense-gradient parity, including repeated token IDs and zero-based external indexing. Runtime primitives remain generic Julia functions; Zygote is test-only for explicit-argument gradient verification. CUDA and compiled-AD verification follow correctness rather than shaping the API prematurely.
 
 When resuming, first run:
 
