@@ -36,6 +36,16 @@ julia --startup-file=no --history-file=no --project=CS336.jl/test CS336.jl/test/
 
 CPU smoke tests must remain runnable without installing or loading an accelerator package. Optional compiler and accelerator test environments will be added only when their corresponding phases begin.
 
+## Benchmarks
+
+Benchmark dependencies live in their own workspace member and do not belong in the runtime or test projects:
+
+```powershell
+julia --project=CS336.jl/benchmark -e 'using BenchmarkTools, CS336; println(Base.pkgversion(BenchmarkTools))'
+```
+
+BenchmarkTools v1.8 is currently constrained in `CS336.jl/benchmark/Project.toml`. The environment is ready, but no operation benchmark should be added until its correctness/parity gate exists. Follow `JULIA_BENCHMARK_PROTOCOL.md` for setup exclusion, interpolation, warm-up, synchronization, raw samples, and cold-versus-warm reporting.
+
 ## Cross-language conventions
 
 These conventions apply before numerical parity fixtures are introduced:

@@ -2,6 +2,8 @@
 
 This protocol exists to answer a narrow question credibly: can the Julia implementation reach the same performance order of magnitude as the Python/PyTorch implementation, or is there a material ecosystem gap? A result is not evidence about either language until correctness, workload, timing, and backend equivalence have been checked.
 
+Infrastructure status as of 2026-07-22: `CS336.jl/benchmark` is a dedicated root-workspace member with BenchmarkTools v1.8 constrained and v1.8.0 locked. It loads the local `CS336` package without adding benchmark dependencies to runtime or test projects. No operation suite exists yet because correctness gates precede timing.
+
 ## Comparison lanes
 
 Report each available lane separately:
