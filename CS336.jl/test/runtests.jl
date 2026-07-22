@@ -60,6 +60,37 @@ end
     @test config == expected
 end
 
+@testset "neutral fixture schema compatibility" begin
+    schema_path = normpath(
+        joinpath(@__DIR__, "..", "..", "tests", "fixtures", "julia_parity", "schema-v1.json"),
+    )
+    schema = JSON.parsefile(schema_path)
+    required_properties = Set([
+        "contract_version",
+        "source",
+        "operation",
+        "producer",
+        "array_file",
+        "arrays",
+        "scalars",
+        "tolerances",
+        "gradients",
+        "notes",
+    ])
+
+    @test schema isa AbstractDict{String, Any}
+    @test schema["\$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    @test schema["additionalProperties"] === false
+    @test Set(schema["required"]) == required_properties
+    @test Set(keys(schema["properties"])) == required_properties
+    @test schema["properties"]["contract_version"]["const"] == 1
+
+    array_descriptor = schema["\$defs"]["array_descriptor"]
+    @test array_descriptor["additionalProperties"] === false
+    @test Set(array_descriptor["required"]) ==
+          Set(["role", "dtype", "shape", "axes", "physical_representation", "finiteness"])
+end
+
 @testset "repository fixture smoke test" begin
     fixture = normpath(joinpath(@__DIR__, "..", "..", "tests", "fixtures", "address.txt"))
     @test isfile(fixture)
