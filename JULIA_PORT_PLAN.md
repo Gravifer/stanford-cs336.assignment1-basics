@@ -164,6 +164,9 @@ Lux is not intended to replace the direct port. Implement the currently exposed 
 
 ### Phase 2: numerical primitives
 
+- Complete as of 2026-07-23: all listed primitives pass CPU fixture/gradient
+  parity, and the optional CUDA smoke passes forward/gradient comparison against
+  CPU on the recorded NVIDIA host.
 - Stable softmax, linear, embedding, SiLU/SwiGLU, and RMSNorm.
 - Preserve exactly two SwiGLU execution lanes: explicit separate weights and
   packed input weights. The Python delegated/owned class distinction collapses
@@ -192,7 +195,11 @@ Lux is not intended to replace the direct port. Implement the currently exposed 
 ### Phase 5: compiled and accelerator paths
 
 - Establish native Julia CPU and CUDA-array baselines first.
-- CUDA toolchain readiness is verified in `CS336.jl/environments/cuda`, and Lux forward/backward/update composition is verified in `CS336.jl/environments/lux_cuda`; operation/model baselines remain pending correctness implementations.
+- CUDA toolchain readiness is verified in `CS336.jl/environments/cuda`, Lux
+  forward/backward/update composition is verified in
+  `CS336.jl/environments/lux_cuda`, and the Phase 2 direct primitives pass a
+  CPU/CUDA forward-and-gradient smoke there. Attention/model baselines remain
+  pending their correctness implementations.
 - Lux's built-in multi-head attention has passed a separate CPU/CUDA forward, Zygote backward, Adam update, and identical-input numerical comparison; this is ecosystem readiness only and does not substitute for the directly ported attention path.
 - Evaluate Enzyme for mutation-friendly differentiation.
 - Evaluate Reactant+Enzyme for compiled inference and a compiled training step.

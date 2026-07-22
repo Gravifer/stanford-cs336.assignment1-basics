@@ -73,6 +73,18 @@ Rerun that committed integration check with:
 julia --startup-file=no --history-file=no --project=CS336.jl/environments/lux_cuda CS336.jl/environments/lux_cuda/smoke.jl
 ```
 
+The same optional environment contains a direct-primitives smoke:
+
+```powershell
+julia --project=CS336.jl/environments/lux_cuda CS336.jl/environments/lux_cuda/primitives_smoke.jl
+```
+
+It compares CPU and CUDA forward results plus Zygote gradients for linear,
+repeated-ID embedding, SiLU, softmax, RMSNorm, and both SwiGLU storage forms;
+it also checks a Float16 RMSNorm forward pass. This passed with CUDA.jl 6.2.1
+on the recorded RTX 3070 Ti. It is correctness evidence, not a performance
+benchmark, and does not make CUDA a runtime or CPU-test dependency.
+
 ## Benchmarks
 
 Benchmark dependencies live in their own workspace member and do not belong in the runtime or test projects:

@@ -10,8 +10,9 @@ NPZ and JSON dependencies. Linear, embedding, SiLU, softmax, RMSNorm, and both
 SwiGLU representations now have independent forward/gradient evidence. The
 tokenizer additionally matches exact GPT-2 IDs on ASCII, Unicode, and special
 token cases, while the trainer matches Python on four deliberately tiny
-corpora. `JULIA_SNAPSHOT_PROVENANCE.md` records the remaining limitations of
-the legacy output-only snapshots.
+corpora. The Phase 2 primitives also pass an optional CPU/CUDA forward and
+Zygote-gradient comparison on CUDA.jl 6.2.1. `JULIA_SNAPSHOT_PROVENANCE.md`
+records the remaining limitations of the legacy output-only snapshots.
 
 ## Public parity surface on `dev`
 
