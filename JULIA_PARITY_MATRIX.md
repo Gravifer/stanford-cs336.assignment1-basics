@@ -4,7 +4,7 @@ This is the evolving scope ledger for the Julia package under `CS336.jl/`. It re
 
 Status vocabulary: **inventory** means present in Python but not yet scaffolded in Julia; **planned** means assigned to a phase in `JULIA_PORT_PLAN.md`; **deferred** means deliberately outside the first baseline.
 
-Harness status as of 2026-07-22: the root Julia workspace can read every existing `.npz` snapshot through test-only NPZ v0.4.3. Tests lock the complete set of 14 filenames, the sole `array` key, `Float32` element type, and Python-order logical shapes. This proves fixture transport only; none of the operations below gains parity status until its Julia outputs and gradients are compared independently.
+Harness status as of 2026-07-22: the root Julia workspace can read every existing `.npz` snapshot through test-only NPZ v0.4.3 and structured fixture metadata through test-only JSON.jl v1.6.1. The 65-assertion suite locks all 14 NPZ filenames/key/dtype/shapes, the complete model configuration, and tokenizer vocabulary/merge transport. This proves fixture interoperability only; none of the operations below gains parity status until its Julia outputs and gradients are compared independently. `JULIA_SNAPSHOT_PROVENANCE.md` records that one legacy NPZ is orphaned and that existing output snapshots omit neutral inputs, parameters, gradients, and tolerance metadata.
 
 ## Public parity surface on `dev`
 
