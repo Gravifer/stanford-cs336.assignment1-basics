@@ -2,11 +2,40 @@ using CS336
 using JSON
 using NPZ
 using Test
+using TOML
 
 @testset "CS336 package smoke test" begin
     @test nameof(CS336) === :CS336
     @test Base.pkgversion(CS336) == v"0.1.0"
     @test samefile(pathof(CS336), joinpath(@__DIR__, "..", "src", "CS336.jl"))
+end
+
+@testset "workspace topology" begin
+    repository_root = normpath(joinpath(@__DIR__, "..", ".."))
+    root_project = TOML.parsefile(joinpath(repository_root, "Project.toml"))
+    expected_projects = [
+        "CS336.jl",
+        "CS336.jl/test",
+        "CS336.jl/benchmark",
+        "CS336.jl/environments/cuda",
+        "CS336.jl/environments/lux",
+        "CS336.jl/environments/lux_cuda",
+    ]
+
+    @test root_project["workspace"]["projects"] == expected_projects
+
+    manifest_paths = String[]
+    excluded_directories = Set([".git", ".venv"])
+    for (directory, subdirectories, files) in walkdir(repository_root)
+        filter!(name -> name ∉ excluded_directories, subdirectories)
+        "Manifest.toml" in files && push!(manifest_paths, joinpath(directory, "Manifest.toml"))
+    end
+
+    @test manifest_paths == [joinpath(repository_root, "Manifest.toml")]
+
+    root_manifest = TOML.parsefile(only(manifest_paths))
+    @test root_manifest["julia_version"] == "1.12.6"
+    @test root_manifest["manifest_format"] == "2.0"
 end
 
 @testset "model metadata compatibility" begin
