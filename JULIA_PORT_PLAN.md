@@ -6,7 +6,7 @@
 - Base at creation: local `dev` at `8c032c9` (`chore: prepare for training`), matching `origin/dev` on 2026-07-22.
 - Branch policy: grow only from `dev`. Do not merge or rebase Python feature branches into this branch.
 - Verified toolchain: Juliaup 1.20.8 with the stable `release` channel at Julia 1.12.6. `juliaup update release` reported no update on 2026-07-22.
-- Current stage: planning only. No Julia package or dependencies have been added yet.
+- Current stage: Phase 0 scaffold complete. The root workspace, `CS336.jl` package boundary, test project, neutral text-fixture smoke test, and sole root manifest are committed; no ML dependency or assignment operation has been added.
 
 When resuming, first run:
 
@@ -30,6 +30,7 @@ This project is about language/framework architecture as well as completing the 
 - `JULIA_ML_ARCHITECTURE_NOTES.md` preserves the ecosystem conclusions and the boundary between structural streamlining and funded capability.
 - `JULIA_PARITY_MATRIX.md` tracks the evolving Python adapter/test surface and assigns it to baseline or experimental Julia tracks.
 - `JULIA_PHASE0_CHECKLIST.md` is the acceptance checklist for the root workspace and minimal package scaffold.
+- `JULIA_DEVELOPMENT.md` contains the executable project/test commands and cross-language boundary conventions.
 - `JULIA_BENCHMARK_PROTOCOL.md` defines correctness gates, timing controls, reproducibility metadata, and the greater-than-10× investigation threshold.
 - `work-log.md` is the timestamped operational record and commit ledger.
 
@@ -119,7 +120,7 @@ Lux is not intended to replace the educational code. Implement softmax, RMSNorm,
 
 ## Syllabus-aligned phases
 
-### Phase 0: scaffold and cross-language fixtures
+### Phase 0: scaffold and cross-language fixtures — complete 2026-07-22
 
 - Create the root workspace `Project.toml`, `CS336.jl/Project.toml`, `CS336.jl/src/CS336.jl`, tests, and documented commands. Resolve and commit the one root `Manifest.toml`.
 - Use the verified Julia 1.12.6 runtime and record any later runtime upgrade in this plan and the benchmark metadata.
@@ -273,7 +274,8 @@ The documentation-first rule is also a mitigation: when ecosystem familiarity is
 2. Inspect whether `dev` moved; rebase this branch onto local `dev` if appropriate.
 3. Reconfirm `julia --version`; Julia 1.12.6 was verified when this plan was created.
 4. Run `juliaup status` and update the stable release channel through Juliaup only if it is behind.
-5. Create Phase 0 only: root workspace project, `CS336.jl/` package scaffold, root manifest, smoke test, fixture-loading test, and commands in the root README.
+5. Run `julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test("CS336")'` and confirm the root manifest remains unchanged.
 6. Do not install packages globally; invoke Julia with `--project=.` from the repository root.
-7. Consult and log official documentation before selecting or using Julia ecosystem APIs.
-8. Update `work-log.md` during the session and commit small coherent checkpoints before beginning tokenizer or neural-network implementation.
+7. Before Phase 1, consult and log official documentation for any proposed tokenizer/data dependency; do not preemptively add the ML stack.
+8. Update `JULIA_PARITY_MATRIX.md` after rebasing if the Python adapter surface changed.
+9. Update `work-log.md` during the session and commit small coherent checkpoints.
