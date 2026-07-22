@@ -231,3 +231,181 @@ end
     @test size(input_gradient) == size(input)
     @test all(isfinite, input_gradient)
 end
+
+attention_fixture_path(stem) = normpath(
+    joinpath(
+        @__DIR__,
+        "..",
+        "..",
+        "tests",
+        "fixtures",
+        "julia_parity",
+        "v1",
+        "$stem.json",
+    ),
+)
+
+@testset "RoPE Python parity" begin
+    bundle = load_bundle(attention_fixture_path("rope"))
+    arrays = bundle.arrays
+    tolerances = bundle.metadata["tolerances"]
+    input = permutedims(arrays["input.x"], (3, 2, 1))
+    positions = permutedims(arrays["input.positions"], (2, 1))
+    expected_output = permutedims(arrays["expected.output"], (3, 2, 1))
+    expected_gradient =
+        permutedims(arrays["expected.gradient.input.x"], (3, 2, 1))
+    scalars = bundle.metadata["scalars"]
+    elementwise = RotaryEmbedding(
+        scalars["theta"],
+        scalars["d_k"],
+        scalars["max_seq_len"],
+    )
+    matrix = RotaryEmbedding(
+        scalars["theta"],
+        scalars["d_k"],
+        scalars["max_seq_len"];
+        variant=:matrix,
+    )
+
+    output = apply_rope(elementwise, input, positions)
+    matrix_output = apply_rope(matrix, input, positions)
+    gradient = only(
+        Zygote.gradient(x -> sum(abs2, apply_rope(elementwise, x, positions)), input),
+    )
+    rtol = tolerances["rtol"]
+    atol = tolerances["atol"]
+    nans = tolerances["equal_nan"]
+    @test bundle.metadata["operation"] == "run_rope"
+    @test isapprox(output, expected_output; rtol, atol, nans)
+    @test isapprox(matrix_output, expected_output; rtol, atol, nans)
+    @test isapprox(gradient, expected_gradient; rtol, atol, nans)
+end
+
+@testset "scaled attention Python parity" begin
+    bundle = load_bundle(attention_fixture_path("scaled_dot_product_attention"))
+    arrays = bundle.arrays
+    tolerances = bundle.metadata["tolerances"]
+    to_feature_first(array) = permutedims(array, (4, 3, 2, 1))
+    query = to_feature_first(arrays["input.query"])
+    key = to_feature_first(arrays["input.key"])
+    value = to_feature_first(arrays["input.value"])
+    mask = to_feature_first(arrays["input.mask"])
+    expected_output = to_feature_first(arrays["expected.output"])
+    expected_gradients = (
+        to_feature_first(arrays["expected.gradient.input.query"]),
+        to_feature_first(arrays["expected.gradient.input.key"]),
+        to_feature_first(arrays["expected.gradient.input.value"]),
+    )
+
+    output = scaled_dot_product_attention(query, key, value; mask)
+    gradients = Zygote.gradient(
+        (q, k, v) -> sum(abs2, scaled_dot_product_attention(q, k, v; mask)),
+        query,
+        key,
+        value,
+    )
+    rtol = tolerances["rtol"]
+    atol = tolerances["atol"]
+    nans = tolerances["equal_nan"]
+    @test bundle.metadata["operation"] == "run_scaled_dot_product_attention"
+    @test isapprox(output, expected_output; rtol, atol, nans)
+    for (gradient, expected) in zip(gradients, expected_gradients)
+        @test isapprox(gradient, expected; rtol, atol, nans)
+    end
+    @test all(iszero, output[:, 2, 1, 1])
+end
+
+@testset "self-attention Python parity" begin
+    for (stem, operation, with_rope) in (
+        ("multihead_self_attention", "run_multihead_self_attention", false),
+        (
+            "multihead_self_attention_with_rope",
+            "run_multihead_self_attention_with_rope",
+            true,
+        ),
+    )
+        bundle = load_bundle(attention_fixture_path(stem))
+        arrays = bundle.arrays
+        tolerances = bundle.metadata["tolerances"]
+        scalars = bundle.metadata["scalars"]
+        input = permutedims(arrays["input.x"], (3, 2, 1))
+        query_weight = arrays["parameter.query_weight"]
+        key_weight = arrays["parameter.key_weight"]
+        value_weight = arrays["parameter.value_weight"]
+        output_weight = arrays["parameter.output_weight"]
+        packed_weight = vcat(query_weight, key_weight, value_weight)
+        expected_output = permutedims(arrays["expected.output"], (3, 2, 1))
+        expected_gradients = (
+            permutedims(arrays["expected.gradient.input.x"], (3, 2, 1)),
+            arrays["expected.gradient.parameter.query_weight"],
+            arrays["expected.gradient.parameter.key_weight"],
+            arrays["expected.gradient.parameter.value_weight"],
+            arrays["expected.gradient.parameter.output_weight"],
+        )
+        rope =
+            with_rope ?
+            RotaryEmbedding(
+                scalars["theta"],
+                scalars["d_model"] ÷ scalars["num_heads"],
+                scalars["max_seq_len"],
+            ) : nothing
+        positions = with_rope ? permutedims(arrays["input.positions"], (2, 1)) : nothing
+        keywords = (;
+            num_heads=scalars["num_heads"],
+            rope,
+            positions,
+        )
+
+        separate_output = multihead_self_attention(
+            input,
+            query_weight,
+            key_weight,
+            value_weight,
+            output_weight;
+            keywords...,
+        )
+        packed_output = multihead_self_attention(
+            input,
+            packed_weight,
+            output_weight;
+            keywords...,
+        )
+        separate_gradients = Zygote.gradient(
+            (x, q, k, v, o) -> sum(
+                abs2,
+                multihead_self_attention(x, q, k, v, o; keywords...),
+            ),
+            input,
+            query_weight,
+            key_weight,
+            value_weight,
+            output_weight,
+        )
+        packed_gradients = Zygote.gradient(
+            (x, packed, o) -> sum(
+                abs2,
+                multihead_self_attention(x, packed, o; keywords...),
+            ),
+            input,
+            packed_weight,
+            output_weight,
+        )
+        expected_packed_gradients = (
+            expected_gradients[1],
+            vcat(expected_gradients[2], expected_gradients[3], expected_gradients[4]),
+            expected_gradients[5],
+        )
+        rtol = tolerances["rtol"]
+        atol = tolerances["atol"]
+        nans = tolerances["equal_nan"]
+        @test bundle.metadata["operation"] == operation
+        @test isapprox(separate_output, expected_output; rtol, atol, nans)
+        @test isapprox(packed_output, expected_output; rtol, atol, nans)
+        for (gradient, expected) in zip(separate_gradients, expected_gradients)
+            @test isapprox(gradient, expected; rtol, atol, nans)
+        end
+        for (gradient, expected) in zip(packed_gradients, expected_packed_gradients)
+            @test isapprox(gradient, expected; rtol, atol, nans)
+        end
+    end
+end

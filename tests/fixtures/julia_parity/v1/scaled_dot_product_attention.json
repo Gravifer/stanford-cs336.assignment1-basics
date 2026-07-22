@@ -1,0 +1,182 @@
+{
+  "array_file": "scaled_dot_product_attention.npz",
+  "arrays": {
+    "expected.gradient.input.key": {
+      "axes": [
+        "batch",
+        "head",
+        "key",
+        "qk_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_input_gradient",
+      "shape": [
+        2,
+        2,
+        4,
+        4
+      ]
+    },
+    "expected.gradient.input.query": {
+      "axes": [
+        "batch",
+        "head",
+        "query",
+        "qk_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_input_gradient",
+      "shape": [
+        2,
+        2,
+        3,
+        4
+      ]
+    },
+    "expected.gradient.input.value": {
+      "axes": [
+        "batch",
+        "head",
+        "key",
+        "value_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_input_gradient",
+      "shape": [
+        2,
+        2,
+        4,
+        5
+      ]
+    },
+    "expected.output": {
+      "axes": [
+        "batch",
+        "head",
+        "query",
+        "value_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_output",
+      "shape": [
+        2,
+        2,
+        3,
+        5
+      ]
+    },
+    "input.key": {
+      "axes": [
+        "batch",
+        "head",
+        "key",
+        "qk_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "input",
+      "shape": [
+        2,
+        2,
+        4,
+        4
+      ]
+    },
+    "input.mask": {
+      "axes": [
+        "batch",
+        "head",
+        "query",
+        "key"
+      ],
+      "dtype": "bool",
+      "finiteness": "not_applicable",
+      "physical_representation": "dense",
+      "role": "input",
+      "shape": [
+        2,
+        2,
+        3,
+        4
+      ]
+    },
+    "input.query": {
+      "axes": [
+        "batch",
+        "head",
+        "query",
+        "qk_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "input",
+      "shape": [
+        2,
+        2,
+        3,
+        4
+      ]
+    },
+    "input.value": {
+      "axes": [
+        "batch",
+        "head",
+        "key",
+        "value_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "input",
+      "shape": [
+        2,
+        2,
+        4,
+        5
+      ]
+    }
+  },
+  "contract_version": 1,
+  "gradients": {
+    "objective": "sum(expected.output ** 2)",
+    "physical_representation": "dense",
+    "present": true
+  },
+  "notes": [
+    "The boolean mask is adapter input; true permits attention.",
+    "One query row is fully masked and must produce finite zero output and gradients."
+  ],
+  "operation": "run_scaled_dot_product_attention",
+  "producer": {
+    "language": "Python",
+    "packages": {
+      "numpy": "2.4.4",
+      "torch": "2.11.0+cpu"
+    },
+    "runtime_version": "26.0.0"
+  },
+  "scalars": {
+    "is_causal": false,
+    "scale": "1/sqrt(qk_feature)"
+  },
+  "source": {
+    "generated_at": "2026-07-23T02:49:42+08:00",
+    "git_commit": "04cac655b28b893f1eb82f414facc36c3ca26fa4",
+    "working_tree_clean": true
+  },
+  "tolerances": {
+    "atol": 2e-05,
+    "equal_nan": false,
+    "rtol": 2e-05
+  }
+}

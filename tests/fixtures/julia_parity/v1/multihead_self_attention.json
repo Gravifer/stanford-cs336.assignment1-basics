@@ -1,0 +1,202 @@
+{
+  "array_file": "multihead_self_attention.npz",
+  "arrays": {
+    "expected.gradient.input.x": {
+      "axes": [
+        "batch",
+        "sequence",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_input_gradient",
+      "shape": [
+        2,
+        4,
+        8
+      ]
+    },
+    "expected.gradient.parameter.key_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "expected.gradient.parameter.output_weight": {
+      "axes": [
+        "output_feature",
+        "joined_head_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "expected.gradient.parameter.query_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "expected.gradient.parameter.value_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_parameter_gradient",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "expected.output": {
+      "axes": [
+        "batch",
+        "sequence",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "expected_output",
+      "shape": [
+        2,
+        4,
+        8
+      ]
+    },
+    "input.x": {
+      "axes": [
+        "batch",
+        "sequence",
+        "model_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "input",
+      "shape": [
+        2,
+        4,
+        8
+      ]
+    },
+    "parameter.key_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "parameter.output_weight": {
+      "axes": [
+        "output_feature",
+        "joined_head_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "parameter.query_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        8
+      ]
+    },
+    "parameter.value_weight": {
+      "axes": [
+        "projected_feature",
+        "input_feature"
+      ],
+      "dtype": "float32",
+      "finiteness": "required",
+      "physical_representation": "dense",
+      "role": "parameter",
+      "shape": [
+        8,
+        8
+      ]
+    }
+  },
+  "contract_version": 1,
+  "gradients": {
+    "objective": "sum(expected.output ** 2)",
+    "physical_representation": "dense",
+    "present": true
+  },
+  "notes": [
+    "Forward values are checked exactly against the working tests adapter.",
+    "Python stores Q/K/V in one packed parameter; its gradient is unpacked into semantic arrays.",
+    "The module is causal by default."
+  ],
+  "operation": "run_multihead_self_attention",
+  "producer": {
+    "language": "Python",
+    "packages": {
+      "numpy": "2.4.4",
+      "torch": "2.11.0+cpu"
+    },
+    "runtime_version": "26.0.0"
+  },
+  "scalars": {
+    "d_model": 8,
+    "is_causal": true,
+    "max_seq_len": null,
+    "num_heads": 2,
+    "theta": null
+  },
+  "source": {
+    "generated_at": "2026-07-23T02:49:42+08:00",
+    "git_commit": "04cac655b28b893f1eb82f414facc36c3ca26fa4",
+    "working_tree_clean": true
+  },
+  "tolerances": {
+    "atol": 3e-05,
+    "equal_nan": false,
+    "rtol": 3e-05
+  }
+}

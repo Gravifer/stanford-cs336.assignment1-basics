@@ -11,8 +11,10 @@ SwiGLU representations now have independent forward/gradient evidence. The
 tokenizer additionally matches exact GPT-2 IDs on ASCII, Unicode, and special
 token cases, while the trainer matches Python on four deliberately tiny
 corpora. The Phase 2 primitives also pass an optional CPU/CUDA forward and
-Zygote-gradient comparison on CUDA.jl 6.2.1. `JULIA_SNAPSHOT_PROVENANCE.md`
-records the remaining limitations of the legacy output-only snapshots.
+Zygote-gradient comparison on CUDA.jl 6.2.1. RoPE, four-dimensional SDPA,
+causal MHA, and causal MHA with RoPE now have self-contained Python
+forward/gradient bundles as well. `JULIA_SNAPSHOT_PROVENANCE.md` records the
+remaining limitations of the legacy output-only snapshots.
 
 ## Public parity surface on `dev`
 
@@ -25,10 +27,10 @@ records the remaining limitations of the legacy output-only snapshots.
 | RMSNorm | `run_rmsnorm`; self-contained v1 bundle | 2 | parity-validated | feature-axis output, stable reduction dtype, input and affine-weight gradients |
 | Cross-entropy | `run_cross_entropy` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
 | Gradient clipping | `run_gradient_clipping` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
-| RoPE | `run_rope`; NPZ snapshot | 3 | planned | rotation values, positions, dtype, and device behavior |
-| Scaled dot-product attention | `run_scaled_dot_product_attention`; 3-D and 4-D snapshots | 3 | planned | outputs, gradients, mask semantics, and fully masked rows |
-| MHA / self-attention | attention adapters and snapshots | 3 | planned | packed/separate projections, input-sharing contraction paths, two feature-first head layouts, outputs, gradients, and shape contracts |
-| Grouped/multi-query attention | no direct adapter; implemented inside adapter-reachable attention family | 3 experiment | execution lane | grouped contraction, expanded-KV reference, gradients, RoPE restrictions, MHA/GQA/MQA timing |
+| RoPE | `run_rope`; self-contained v1 bundle | 3 | parity-validated | elementwise/matrix rotation values, irregular batched positions, Float16 dtype, input gradient, and automatic/separate/stacked Q/K execution; CUDA pending |
+| Scaled dot-product attention | `run_scaled_dot_product_attention`; self-contained 4-D v1 bundle | 3 | parity-validated | output and Q/K/V gradients, boolean/additive/causal mask semantics, and finite zero fully masked rows |
+| MHA / self-attention | attention adapters; self-contained plain/RoPE v1 bundles | 3 | parity-validated | packed/separate projections, causal outputs and all parameter/input gradients, two feature-first head layouts, and three Q/K RoPE policies |
+| Grouped/multi-query attention | no direct adapter; implemented inside adapter-reachable attention family | 3 experiment | structurally validated execution lane | grouped contraction matches expanded-KV MHA without materializing repeated K/V; MHA/GQA/MQA timing and CUDA pending |
 | Transformer block | `run_transformer_block`; NPZ snapshot | 3 | planned | parameter import, output, and gradients |
 | Transformer LM | `run_transformer_lm`; full and truncated snapshots | 3 | planned | logits, truncation behavior, state mapping, and gradients |
 | Batch sampling | `run_get_batch` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
