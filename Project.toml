@@ -1,0 +1,5 @@
+[compat]
+julia = "1.12"
+
+[workspace]
+projects = ["CS336.jl", "CS336.jl/test"]
