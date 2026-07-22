@@ -87,7 +87,7 @@ rope_feature_count(rope::MatrixRotaryEmbedding) = 2 * size(rope.rotation, 3)
 rope_max_sequence_length(rope::ElementwiseRotaryEmbedding) = size(rope.cosine, 2)
 rope_max_sequence_length(rope::MatrixRotaryEmbedding) = size(rope.rotation, 4)
 
-function _validate_rope_input(rope::RotaryEmbedding, x, positions, sequence_dim)
+function _validate_rope_input(rope::RotaryEmbedding, x, positions, sequence_dim, position_layout)
     ndims(x) >= 2 || throw(DimensionMismatch("RoPE input must include feature and sequence axes"))
     2 <= sequence_dim <= ndims(x) || throw(
         ArgumentError("RoPE sequence_dim must be in 2:$(ndims(x)), received $sequence_dim"),
@@ -97,15 +97,26 @@ function _validate_rope_input(rope::RotaryEmbedding, x, positions, sequence_dim)
             "RoPE cache width $(rope_feature_count(rope)) does not match input width $(size(x, 1))",
         ),
     )
-    ndims(positions) >= 1 || throw(ArgumentError("RoPE positions must include a sequence axis"))
-    size(positions, 1) == size(x, sequence_dim) || throw(
-        DimensionMismatch(
-            "RoPE position sequence length $(size(positions, 1)) does not match input length $(size(x, sequence_dim))",
-        ),
+    position_layout in (:batch, :head) ||
+        throw(ArgumentError("unknown RoPE position layout: $position_layout"))
+    position_sequence_axis = position_layout === :batch ? 1 : 2
+    minimum_rank = position_layout === :batch ? 1 : 2
+    ndims(positions) >= minimum_rank ||
+        throw(ArgumentError("RoPE positions do not contain the required layout axes"))
+    size(positions, position_sequence_axis) == size(x, sequence_dim) || throw(
+        DimensionMismatch("RoPE position sequence length does not match input length"),
     )
+    if position_layout === :head
+        sequence_dim >= 3 || throw(
+            DimensionMismatch("head-aligned positions require an explicit head axis"),
+        )
+        size(positions, 1) == size(x, sequence_dim - 1) || throw(
+            DimensionMismatch("RoPE position head count does not match input heads"),
+        )
+    end
 
     batch_shape = size(x)[(sequence_dim + 1):end]
-    position_batch_shape = size(positions)[2:end]
+    position_batch_shape = size(positions)[(position_sequence_axis + 1):end]
     length(position_batch_shape) <= length(batch_shape) || throw(
         DimensionMismatch("RoPE positions have more batch axes than the input"),
     )
@@ -122,33 +133,68 @@ function _validate_rope_input(rope::RotaryEmbedding, x, positions, sequence_dim)
     return nothing
 end
 
-function _rope_selection_shape(x, positions, sequence_dim, cache_prefix)
+function _rope_selection_shape(
+    x,
+    positions,
+    sequence_dim,
+    cache_prefix,
+    position_layout,
+)
     mapped_axes = sequence_dim - 2
     batch_axes = ndims(x) - sequence_dim
-    position_batch_axes = ndims(positions) - 1
+    position_prefix_axes = position_layout === :batch ? 1 : 2
+    position_batch_axes = ndims(positions) - position_prefix_axes
     skipped_batch_axes = batch_axes - position_batch_axes
+    if position_layout === :batch
+        return (
+            cache_prefix...,
+            ntuple(_ -> 1, mapped_axes)...,
+            size(positions, 1),
+            ntuple(_ -> 1, skipped_batch_axes)...,
+            size(positions)[2:end]...,
+        )
+    end
     return (
         cache_prefix...,
-        ntuple(_ -> 1, mapped_axes)...,
+        ntuple(_ -> 1, mapped_axes - 1)...,
         size(positions, 1),
+        size(positions, 2),
         ntuple(_ -> 1, skipped_batch_axes)...,
-        size(positions)[2:end]...,
+        size(positions)[3:end]...,
     )
 end
 
-function _select_rope_cache(cache::AbstractMatrix, x, positions, sequence_dim)
+function _select_rope_cache(cache::AbstractMatrix, x, positions, sequence_dim, position_layout)
     selected = cache[:, vec(positions .+ one(eltype(positions)))]
     return reshape(
         selected,
-        _rope_selection_shape(x, positions, sequence_dim, (size(cache, 1),)),
+        _rope_selection_shape(
+            x,
+            positions,
+            sequence_dim,
+            (size(cache, 1),),
+            position_layout,
+        ),
     )
 end
 
-function _select_rope_cache(cache::AbstractArray{<:Real,4}, x, positions, sequence_dim)
+function _select_rope_cache(
+    cache::AbstractArray{<:Real,4},
+    x,
+    positions,
+    sequence_dim,
+    position_layout,
+)
     selected = cache[:, :, :, vec(positions .+ one(eltype(positions)))]
     return reshape(
         selected,
-        _rope_selection_shape(x, positions, sequence_dim, (2, 2, size(cache, 3))),
+        _rope_selection_shape(
+            x,
+            positions,
+            sequence_dim,
+            (2, 2, size(cache, 3)),
+            position_layout,
+        ),
     )
 end
 
@@ -202,15 +248,27 @@ function _apply_rope_selection(rope::MatrixRotaryEmbedding, x, rotation)
     return eltype(output) === eltype(x) ? output : eltype(x).(output)
 end
 
-function _rope_selection(rope::ElementwiseRotaryEmbedding, x, positions, sequence_dim)
+function _rope_selection(
+    rope::ElementwiseRotaryEmbedding,
+    x,
+    positions,
+    sequence_dim,
+    position_layout,
+)
     return (
-        _select_rope_cache(rope.cosine, x, positions, sequence_dim),
-        _select_rope_cache(rope.sine, x, positions, sequence_dim),
+        _select_rope_cache(rope.cosine, x, positions, sequence_dim, position_layout),
+        _select_rope_cache(rope.sine, x, positions, sequence_dim, position_layout),
     )
 end
 
-function _rope_selection(rope::MatrixRotaryEmbedding, x, positions, sequence_dim)
-    return _select_rope_cache(rope.rotation, x, positions, sequence_dim)
+function _rope_selection(
+    rope::MatrixRotaryEmbedding,
+    x,
+    positions,
+    sequence_dim,
+    position_layout,
+)
+    return _select_rope_cache(rope.rotation, x, positions, sequence_dim, position_layout)
 end
 
 """
@@ -221,10 +279,16 @@ Apply cached RoPE to a feature-first tensor. Positions are zero-based and use
 after `sequence_dim`. Axes between feature and sequence (for example, heads)
 share the selected positions.
 """
-function apply_rope(rope::RotaryEmbedding, x::AbstractArray, positions::AbstractArray{<:Integer}; sequence_dim::Integer=2)
-    _validate_rope_input(rope, x, positions, sequence_dim)
+function apply_rope(
+    rope::RotaryEmbedding,
+    x::AbstractArray,
+    positions::AbstractArray{<:Integer};
+    sequence_dim::Integer=2,
+    position_layout::Symbol=:batch,
+)
+    _validate_rope_input(rope, x, positions, sequence_dim, position_layout)
     isempty(x) && return x
-    selection = _rope_selection(rope, x, positions, sequence_dim)
+    selection = _rope_selection(rope, x, positions, sequence_dim, position_layout)
     return _apply_rope_selection(rope, x, selection)
 end
 
@@ -235,6 +299,7 @@ function apply_rope_qk(
     positions::AbstractArray{<:Integer};
     sequence_dim::Integer=2,
     strategy::Symbol=:auto,
+    position_layout::Symbol=:batch,
 )
     strategy in (:auto, :separate, :stacked) ||
         throw(ArgumentError("unknown Q/K RoPE strategy: $strategy"))
@@ -243,14 +308,14 @@ function apply_rope_qk(
             DimensionMismatch("stacked Q/K RoPE requires equal query and key shapes"),
         )
         return (
-            apply_rope(rope, query, positions; sequence_dim),
-            apply_rope(rope, key, positions; sequence_dim),
+            apply_rope(rope, query, positions; sequence_dim, position_layout),
+            apply_rope(rope, key, positions; sequence_dim, position_layout),
         )
     end
 
-    _validate_rope_input(rope, query, positions, sequence_dim)
+    _validate_rope_input(rope, query, positions, sequence_dim, position_layout)
     if strategy === :auto
-        selection = _rope_selection(rope, query, positions, sequence_dim)
+        selection = _rope_selection(rope, query, positions, sequence_dim, position_layout)
         return (
             _apply_rope_selection(rope, query, selection),
             _apply_rope_selection(rope, key, selection),
@@ -262,7 +327,13 @@ function apply_rope_qk(
         reshape(key, size(key, 1), 1, size(key)[2:end]...);
         dims=2,
     )
-    rotated = apply_rope(rope, stacked, positions; sequence_dim=sequence_dim + 1)
+    rotated = apply_rope(
+        rope,
+        stacked,
+        positions;
+        sequence_dim=sequence_dim + 1,
+        position_layout,
+    )
     return (
         selectdim(rotated, 2, 1),
         selectdim(rotated, 2, 2),
@@ -510,9 +581,25 @@ function _split_projection(projected, head_feature_count, head_count, layout)
     throw(ArgumentError("unknown attention layout: $layout"))
 end
 
-function _apply_attention_rope(rope, query, key, positions, layout, strategy)
+function _apply_attention_rope(
+    rope,
+    query,
+    key,
+    positions,
+    layout,
+    strategy,
+    position_layout,
+)
     if layout === :head_before_sequence
-        return apply_rope_qk(rope, query, key, positions; sequence_dim=3, strategy)
+        return apply_rope_qk(
+            rope,
+            query,
+            key,
+            positions;
+            sequence_dim=3,
+            strategy,
+            position_layout,
+        )
     end
     permutation = (1, 3, 2, ntuple(axis -> axis, ndims(query) - 3) .+ 3...)
     query_head_first = permutedims(query, permutation)
@@ -524,8 +611,27 @@ function _apply_attention_rope(rope, query, key, positions, layout, strategy)
         positions;
         sequence_dim=3,
         strategy,
+        position_layout,
     )
     return permutedims(rotated_query, permutation), permutedims(rotated_key, permutation)
+end
+
+function _apply_single_attention_rope(rope, x, positions, layout, position_layout)
+    if layout === :head_before_sequence
+        return apply_rope(rope, x, positions; sequence_dim=3, position_layout)
+    elseif layout === :head_after_sequence
+        permutation = (1, 3, 2, ntuple(axis -> axis, ndims(x) - 3) .+ 3...)
+        head_first = permutedims(x, permutation)
+        rotated = apply_rope(
+            rope,
+            head_first,
+            positions;
+            sequence_dim=3,
+            position_layout,
+        )
+        return permutedims(rotated, permutation)
+    end
+    throw(ArgumentError("unknown attention layout: $layout"))
 end
 
 function _attention_from_projections(
@@ -537,6 +643,9 @@ function _attention_from_projections(
     num_kv_heads,
     rope,
     positions,
+    key_positions=positions,
+    query_position_layout=:batch,
+    key_position_layout=query_position_layout,
     mask,
     is_causal,
     layout,
@@ -558,9 +667,42 @@ function _attention_from_projections(
     key = _split_projection(projected_key, key_feature_count, num_kv_heads, layout)
     value = _split_projection(projected_value, value_feature_count, num_kv_heads, layout)
     rope === nothing || begin
-        positions === nothing &&
-            (positions = reshape(collect(0:(size(projected_query, 2) - 1)), size(projected_query, 2)))
-        query, key = _apply_attention_rope(rope, query, key, positions, layout, qk_strategy)
+        positions === nothing && (positions = collect(0:(size(projected_query, 2) - 1)))
+        key_positions === nothing &&
+            (key_positions = collect(0:(size(projected_key, 2) - 1)))
+        if size(query) == size(key) &&
+           positions === key_positions &&
+           query_position_layout === key_position_layout
+            query, key = _apply_attention_rope(
+                rope,
+                query,
+                key,
+                positions,
+                layout,
+                qk_strategy,
+                query_position_layout,
+            )
+        else
+            qk_strategy === :stacked && throw(
+                DimensionMismatch(
+                    "stacked Q/K RoPE requires equal shapes and shared positions",
+                ),
+            )
+            query = _apply_single_attention_rope(
+                rope,
+                query,
+                positions,
+                layout,
+                query_position_layout,
+            )
+            key = _apply_single_attention_rope(
+                rope,
+                key,
+                key_positions,
+                layout,
+                key_position_layout,
+            )
+        end
     end
     attended = headed_scaled_dot_product_attention(
         query,
@@ -584,6 +726,137 @@ function _attention_from_projections(
 end
 
 """
+    multihead_attention(query, key, value,
+                        query_weight, key_weight, value_weight, output_weight; ...)
+
+General feature-first attention with separate projection storage. Inputs use
+`(input_feature, sequence, batch...)`; query and key sequence lengths may
+differ, while key and value lengths must agree.
+"""
+function multihead_attention(
+    query_input::AbstractArray,
+    key_input::AbstractArray,
+    value_input::AbstractArray,
+    query_weight::AbstractMatrix,
+    key_weight::AbstractMatrix,
+    value_weight::AbstractMatrix,
+    output_weight::AbstractMatrix;
+    num_heads::Integer,
+    num_kv_heads::Integer=num_heads,
+    rope::Union{Nothing,RotaryEmbedding}=nothing,
+    query_positions=nothing,
+    key_positions=nothing,
+    query_position_layout::Symbol=:batch,
+    key_position_layout::Symbol=:batch,
+    mask=nothing,
+    is_causal::Bool=false,
+    layout::Symbol=:head_before_sequence,
+    qk_strategy::Symbol=:auto,
+)
+    num_heads > 0 && num_kv_heads > 0 && num_heads % num_kv_heads == 0 ||
+        throw(ArgumentError("num_heads must be positive and divisible by num_kv_heads"))
+    return _attention_from_projections(
+        linear(query_input, query_weight),
+        linear(key_input, key_weight),
+        linear(value_input, value_weight),
+        output_weight;
+        num_heads,
+        num_kv_heads,
+        rope,
+        positions=query_positions,
+        key_positions,
+        query_position_layout,
+        key_position_layout,
+        mask,
+        is_causal,
+        layout,
+        qk_strategy,
+    )
+end
+
+"""
+    multihead_attention(query, key, value, packed_input_weight, output_weight; ...)
+
+General attention with Q/K/V rows packed into one input weight. Projection
+execution follows input identity: shared Q/K/V uses one GEMM, shared K/V uses
+two, and three distinct inputs use three. This preserves the authored Python
+execution choices without storing mutable module aliases.
+"""
+function multihead_attention(
+    query_input::AbstractArray,
+    key_input::AbstractArray,
+    value_input::AbstractArray,
+    packed_input_weight::AbstractMatrix,
+    output_weight::AbstractMatrix;
+    num_heads::Integer,
+    num_kv_heads::Integer=num_heads,
+    qk_head_feature_count::Integer=size(output_weight, 2) ÷ num_heads,
+    value_head_feature_count::Integer=size(output_weight, 2) ÷ num_heads,
+    rope::Union{Nothing,RotaryEmbedding}=nothing,
+    query_positions=nothing,
+    key_positions=nothing,
+    query_position_layout::Symbol=:batch,
+    key_position_layout::Symbol=:batch,
+    mask=nothing,
+    is_causal::Bool=false,
+    layout::Symbol=:head_before_sequence,
+    qk_strategy::Symbol=:auto,
+)
+    num_heads > 0 && num_kv_heads > 0 && num_heads % num_kv_heads == 0 ||
+        throw(ArgumentError("num_heads must be positive and divisible by num_kv_heads"))
+    query_width = num_heads * qk_head_feature_count
+    key_width = num_kv_heads * qk_head_feature_count
+    value_width = num_kv_heads * value_head_feature_count
+    size(packed_input_weight, 1) == query_width + key_width + value_width || throw(
+        DimensionMismatch("packed attention projection rows do not match Q/K/V widths"),
+    )
+    trailing = ntuple(_ -> Colon(), ndims(query_input) - 1)
+
+    if query_input === key_input && key_input === value_input
+        projected = linear(query_input, packed_input_weight)
+        projected_query = projected[1:query_width, trailing...]
+        projected_key = projected[(query_width + 1):(query_width + key_width), trailing...]
+        projected_value = projected[
+            (query_width + key_width + 1):(query_width + key_width + value_width),
+            trailing...,
+        ]
+    elseif key_input === value_input
+        query_weight = packed_input_weight[1:query_width, :]
+        key_value_weight = packed_input_weight[(query_width + 1):end, :]
+        projected_query = linear(query_input, query_weight)
+        projected_key_value = linear(key_input, key_value_weight)
+        key_trailing = ntuple(_ -> Colon(), ndims(projected_key_value) - 1)
+        projected_key = projected_key_value[1:key_width, key_trailing...]
+        projected_value = projected_key_value[(key_width + 1):end, key_trailing...]
+    else
+        query_weight = packed_input_weight[1:query_width, :]
+        key_weight = packed_input_weight[(query_width + 1):(query_width + key_width), :]
+        value_weight = packed_input_weight[(query_width + key_width + 1):end, :]
+        projected_query = linear(query_input, query_weight)
+        projected_key = linear(key_input, key_weight)
+        projected_value = linear(value_input, value_weight)
+    end
+
+    return _attention_from_projections(
+        projected_query,
+        projected_key,
+        projected_value,
+        output_weight;
+        num_heads,
+        num_kv_heads,
+        rope,
+        positions=query_positions,
+        key_positions,
+        query_position_layout,
+        key_position_layout,
+        mask,
+        is_causal,
+        layout,
+        qk_strategy,
+    )
+end
+
+"""
     multihead_self_attention(x, q_weight, k_weight, v_weight, output_weight; ...)
 
 Self-attention with explicit projection weights. `x` uses `(model_feature,
@@ -600,6 +873,7 @@ function multihead_self_attention(
     num_kv_heads::Integer=num_heads,
     rope::Union{Nothing,RotaryEmbedding}=nothing,
     positions=nothing,
+    position_layout::Symbol=:batch,
     mask=nothing,
     is_causal::Bool=true,
     layout::Symbol=:head_before_sequence,
@@ -616,6 +890,8 @@ function multihead_self_attention(
         num_kv_heads,
         rope,
         positions,
+        query_position_layout=position_layout,
+        key_position_layout=position_layout,
         mask,
         is_causal,
         layout,
@@ -640,6 +916,7 @@ function multihead_self_attention(
     value_head_feature_count::Integer=size(output_weight, 2) ÷ num_heads,
     rope::Union{Nothing,RotaryEmbedding}=nothing,
     positions=nothing,
+    position_layout::Symbol=:batch,
     mask=nothing,
     is_causal::Bool=true,
     layout::Symbol=:head_before_sequence,
@@ -670,6 +947,8 @@ function multihead_self_attention(
         num_kv_heads,
         rope,
         positions,
+        query_position_layout=position_layout,
+        key_position_layout=position_layout,
         mask,
         is_causal,
         layout,

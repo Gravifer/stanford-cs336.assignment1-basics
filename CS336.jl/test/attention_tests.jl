@@ -52,6 +52,36 @@
     @test auto_query == separate_query == stacked_query
     @test auto_key == separate_key == stacked_key
 
+    head_positions = Array{Int32}(undef, 2, 3, 2)
+    head_positions[1, :, :] .= reshape(Int32[0, 1, 2], 3, 1)
+    head_positions[2, :, :] .= reshape(Int32[2, 3, 4], 3, 1)
+    head_output = apply_rope(
+        elementwise,
+        query,
+        head_positions;
+        sequence_dim=3,
+        position_layout=:head,
+    )
+    for batch in axes(query, 4), head in axes(query, 2)
+        expected = apply_rope(
+            elementwise,
+            query[:, head, :, batch],
+            head_positions[head, :, batch],
+        )
+        @test head_output[:, head, :, batch] ≈ expected
+    end
+    head_stacked_query, head_stacked_key = apply_rope_qk(
+        elementwise,
+        query,
+        key,
+        head_positions;
+        sequence_dim=3,
+        strategy=:stacked,
+        position_layout=:head,
+    )
+    @test head_stacked_query ≈ head_output
+    @test size(head_stacked_key) == size(key)
+
     half_output = apply_rope(
         RotaryEmbedding(theta, 4, 3),
         Float16.(input[:, :, 1]),
@@ -62,6 +92,13 @@
     @test_throws ArgumentError RotaryEmbedding(theta, 4, 8; variant=:unknown)
     @test_throws ArgumentError apply_rope(elementwise, input, Int32[0, 1, 8])
     @test_throws DimensionMismatch apply_rope(elementwise, input, Int32[0, 1])
+    @test_throws DimensionMismatch apply_rope(
+        elementwise,
+        query,
+        zeros(Int32, 3, 3, 2);
+        sequence_dim=3,
+        position_layout=:head,
+    )
 end
 
 @testset "scaled dot-product attention semantics" begin
@@ -230,6 +267,162 @@ end
     )
     @test size(input_gradient) == size(input)
     @test all(isfinite, input_gradient)
+end
+
+@testset "general attention input-sharing paths" begin
+    d_model = 8
+    num_heads = 2
+    query_input = randn(Float32, d_model, 3, 2)
+    key_input = randn(Float32, d_model, 4, 2)
+    value_input = randn(Float32, d_model, 4, 2)
+    query_weight = randn(Float32, d_model, d_model)
+    key_weight = randn(Float32, d_model, d_model)
+    value_weight = randn(Float32, d_model, d_model)
+    output_weight = randn(Float32, d_model, d_model)
+    packed_weight = vcat(query_weight, key_weight, value_weight)
+
+    separate = multihead_attention(
+        query_input,
+        key_input,
+        value_input,
+        query_weight,
+        key_weight,
+        value_weight,
+        output_weight;
+        num_heads,
+    )
+    packed_distinct = multihead_attention(
+        query_input,
+        key_input,
+        value_input,
+        packed_weight,
+        output_weight;
+        num_heads,
+    )
+    @test packed_distinct ≈ separate rtol = 3.0f-5 atol = 3.0f-5
+
+    separate_shared_kv = multihead_attention(
+        query_input,
+        key_input,
+        key_input,
+        query_weight,
+        key_weight,
+        value_weight,
+        output_weight;
+        num_heads,
+    )
+    packed_shared_kv = multihead_attention(
+        query_input,
+        key_input,
+        key_input,
+        packed_weight,
+        output_weight;
+        num_heads,
+    )
+    @test packed_shared_kv ≈ separate_shared_kv rtol = 3.0f-5 atol = 3.0f-5
+
+    self_input = randn(Float32, d_model, 3, 2)
+    packed_shared_qkv = multihead_attention(
+        self_input,
+        self_input,
+        self_input,
+        packed_weight,
+        output_weight;
+        num_heads,
+        is_causal=true,
+    )
+    self_attention = multihead_self_attention(
+        self_input,
+        packed_weight,
+        output_weight;
+        num_heads,
+    )
+    @test packed_shared_qkv == self_attention
+
+    rope = RotaryEmbedding(10_000.0f0, d_model ÷ num_heads, 5)
+    query_positions = Int32[0, 2, 4]
+    key_positions = Int32[0, 1, 3, 4]
+    rope_separate = multihead_attention(
+        query_input,
+        key_input,
+        value_input,
+        query_weight,
+        key_weight,
+        value_weight,
+        output_weight;
+        num_heads,
+        rope,
+        query_positions,
+        key_positions,
+    )
+    rope_packed = multihead_attention(
+        query_input,
+        key_input,
+        value_input,
+        packed_weight,
+        output_weight;
+        num_heads,
+        rope,
+        query_positions,
+        key_positions,
+    )
+    @test rope_packed ≈ rope_separate rtol = 3.0f-5 atol = 3.0f-5
+    @test_throws DimensionMismatch multihead_attention(
+        query_input,
+        key_input,
+        value_input,
+        packed_weight,
+        output_weight;
+        num_heads,
+        rope,
+        query_positions,
+        key_positions,
+        qk_strategy=:stacked,
+    )
+
+    gradients = Zygote.gradient(
+        (q, k, v, packed, output) -> sum(
+            abs2,
+            multihead_attention(q, k, v, packed, output; num_heads),
+        ),
+        query_input,
+        key_input,
+        value_input,
+        packed_weight,
+        output_weight,
+    )
+    @test size.(gradients) == size.(
+        (query_input, key_input, value_input, packed_weight, output_weight),
+    )
+    @test all(gradient -> all(isfinite, gradient), gradients)
+
+    head_query_positions = repeat(
+        reshape(Int32[0, 2, 4, 1, 3, 4], num_heads, 3, 1),
+        1,
+        1,
+        2,
+    )
+    head_key_positions = repeat(
+        reshape(Int32[0, 1, 3, 4, 1, 2, 3, 4], num_heads, 4, 1),
+        1,
+        1,
+        2,
+    )
+    head_position_output = multihead_attention(
+        query_input,
+        key_input,
+        value_input,
+        packed_weight,
+        output_weight;
+        num_heads,
+        rope,
+        query_positions=head_query_positions,
+        key_positions=head_key_positions,
+        query_position_layout=:head,
+        key_position_layout=:head,
+    )
+    @test size(head_position_output) == size(query_input)
+    @test all(isfinite, head_position_output)
 end
 
 attention_fixture_path(stem) = normpath(
