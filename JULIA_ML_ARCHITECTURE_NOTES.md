@@ -74,7 +74,7 @@ Lux is not selected because it is assumed faster than Flux or PyTorch, nor becau
 
 On 2026-07-22, the isolated `CS336.jl/environments/lux` project resolved Lux 1.31.4, NNlib 0.9.38, Optimisers 0.4.7, and Zygote 0.7.11 on Julia 1.12.6. A fresh process successfully exercised the documented explicit path: `Lux.setup`, `Lux.apply`, a Zygote gradient with respect to the parameter tree, an Optimisers Adam update, and NNlib softmax. The package itself remains dependency-free.
 
-This establishes that the chosen interfaces compose today; it is not a speed result. CPU/GPU operation parity and the “not more than 10×” comparability question remain gated on matched implementations and the benchmark protocol. The already isolated CUDA.jl 6.2.1 environment proves that the NVIDIA toolchain is functional on the target host, but Lux-on-CUDA and model-level performance have not yet been measured.
+This establishes that the chosen interfaces compose today; it is not a speed result. The separate `environments/lux_cuda` project subsequently validated LuxCUDA 0.3.6 with CUDA.jl 6.2.1: documented device selection, Dense forward, Zygote backward, Optimisers Adam update, NNlib softmax, synchronization, and host round-trip all succeeded on the RTX 3070 Ti. The tiny CPU/GPU forward comparison differed by at most one `Float32` ulp at the observed scale. Operation/model performance and the “not more than 10×” comparability question remain gated on matched implementations and the benchmark protocol.
 
 ## Side note: “tabular ML”
 

@@ -70,6 +70,8 @@ CS336.jl/                    # actual Julia package root
       Project.toml           # optional workspace member, isolated CUDA stack
     lux/
       Project.toml           # optional workspace member, baseline ML integration
+    lux_cuda/
+      Project.toml           # optional workspace member, combined native NVIDIA path
     reactant/
       Project.toml           # optional workspace member, isolated compiler stack
 ```
@@ -162,7 +164,7 @@ Lux is not intended to replace the educational code. Implement softmax, RMSNorm,
 ### Phase 5: compiled and accelerator paths
 
 - Establish native Julia CPU and CUDA-array baselines first.
-- CUDA toolchain readiness is already verified in the optional `CS336.jl/environments/cuda` workspace member; operation/model baselines remain pending correctness implementations.
+- CUDA toolchain readiness is verified in `CS336.jl/environments/cuda`, and Lux forward/backward/update composition is verified in `CS336.jl/environments/lux_cuda`; operation/model baselines remain pending correctness implementations.
 - Evaluate Enzyme for mutation-friendly differentiation.
 - Evaluate Reactant+Enzyme for compiled inference and a compiled training step.
 - Treat unsupported tracing/control-flow cases as measured limitations, not reasons to distort the baseline implementation prematurely.

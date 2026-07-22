@@ -78,3 +78,9 @@ Verified 2026-07-22T20:45:36+08:00 through the isolated `CS336.jl/environments/c
 | GPU memory at query | 6.217 GiB available of 8.000 GiB |
 
 `CUDA.functional(true)` succeeded. A 256-element `Float32` CuArray broadcast was executed, explicitly synchronized, copied to host, and verified exactly. The artifact runtime is newer than the native driver's reported CUDA level, so final benchmarks must record whether CUDA's compatibility mechanism is active and must not assume this combination has identical performance characteristics to a natively matching driver/runtime.
+
+## LuxCUDA composition check
+
+Verified 2026-07-22T20:58:55+08:00 through the isolated `CS336.jl/environments/lux_cuda` member. LuxCUDA 0.3.6 loaded with Lux 1.31.4, CUDA.jl 6.2.1, and cuDNN.jl 6.2.1. Lux's documented `gpu_device()` selected a CUDA device; Dense forward, explicit Zygote parameter backward, Optimisers Adam update, NNlib softmax, explicit synchronization, and CPU round-trip passed. For the tiny deterministic smoke input, the maximum absolute CPU/GPU forward difference was 1.1920929e-7.
+
+This removes a basic integration unknown but does not establish throughput, kernel coverage, memory efficiency, or model-scale stability. Those remain subject to the correctness gates and controlled benchmark protocol.

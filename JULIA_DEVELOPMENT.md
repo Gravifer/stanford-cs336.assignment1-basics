@@ -52,6 +52,14 @@ julia --project=CS336.jl/environments/lux -e 'using Lux, NNlib, Optimisers, Zygo
 
 The lock currently resolves Lux 1.31.4, NNlib 0.9.38, Optimisers 0.4.7, and Zygote 0.7.11. This environment is for integration experiments until a course implementation actually needs a justified runtime dependency.
 
+The combined native NVIDIA integration is kept separate so it cannot silently become a CPU requirement:
+
+```powershell
+julia --project=CS336.jl/environments/lux_cuda -e 'using CUDA, Lux, LuxCUDA; CUDA.functional(true); println((device=typeof(gpu_device()), LuxCUDA=pkgversion(LuxCUDA), CUDA=pkgversion(CUDA)))'
+```
+
+It locks LuxCUDA 0.3.6 and CUDA.jl 6.2.1, including cuDNN.jl 6.2.1. A forward/backward/update smoke has passed on the recorded RTX 3070 Ti host. This is readiness evidence, not a benchmark.
+
 ## Benchmarks
 
 Benchmark dependencies live in their own workspace member and do not belong in the runtime or test projects:
