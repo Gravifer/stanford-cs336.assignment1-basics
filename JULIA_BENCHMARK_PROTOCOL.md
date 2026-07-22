@@ -6,7 +6,7 @@ Infrastructure status as of 2026-07-22: `CS336.jl/benchmark` is a dedicated root
 
 `JULIA_BENCHMARK_HOST.md` records the provisional host, GPU, Julia/BLAS threading, and Python lock baseline. It is readiness evidence only; final results require a new frozen-host record at the benchmark commit.
 
-The optional `CS336.jl/environments/cuda` workspace member pins CUDA v6.2 (currently 6.2.1) and has passed a synchronized CuArray smoke operation. This proves device/toolchain readiness only; CUDA is not a runtime dependency and no model performance claim follows from the smoke test.
+The optional `CS336.jl/environments/cuda` workspace member pins CUDA v6.2 (currently 6.2.1) and has passed a synchronized CuArray smoke operation. The separate `environments/lux_cuda` member pins the complete LuxCUDA path and has passed forward/backward/update integration. A thermally uncontrolled cuBLAS spot check is preserved in the host record. These prove toolchain/integration readiness only; CUDA is not a runtime dependency and no comparative performance claim follows.
 
 ## Comparison lanes
 
@@ -63,6 +63,7 @@ GPU launches are asynchronous. Synchronize the relevant accelerator before and a
 - Warm allocator pools and kernels before steady-state trials.
 - Keep host-to-device transfer outside kernel/model timing unless transfer is explicitly the benchmark.
 - Record device model, memory, driver, runtime, vendor libraries, framework/backend versions, power mode, and dtype features such as TF32 or BF16.
+- For nominal `Float32` matrix multiplication, explicitly align and record TF32/tensor-core permission and vendor math mode; matching element types alone do not prove matching numerical or hardware paths.
 - Capture both host wall time and device/kernel profiles when investigating a gap.
 - Report peak device memory with a consistent reset/measurement procedure and report host allocation separately.
 

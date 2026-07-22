@@ -84,3 +84,11 @@ Verified 2026-07-22T20:45:36+08:00 through the isolated `CS336.jl/environments/c
 Verified 2026-07-22T20:58:55+08:00 through the isolated `CS336.jl/environments/lux_cuda` member. LuxCUDA 0.3.6 loaded with Lux 1.31.4, CUDA.jl 6.2.1, and cuDNN.jl 6.2.1. Lux's documented `gpu_device()` selected a CUDA device; Dense forward, explicit Zygote parameter backward, Optimisers Adam update, NNlib softmax, explicit synchronization, and CPU round-trip passed. For the tiny deterministic smoke input, the maximum absolute CPU/GPU forward difference was 1.1920929e-7.
 
 This removes a basic integration unknown but does not establish throughput, kernel coverage, memory efficiency, or model-scale stability. Those remain subject to the correctness gates and controlled benchmark protocol.
+
+## Provisional vendor-GEMM spot check
+
+At 2026-07-22T21:14:45+08:00, a readiness-only Julia process allocated three 4096×4096 `Float32` CuArrays, warmed five allocation-free `mul!` calls, synchronized, then collected 20 `CUDA.@elapsed` samples. CUDA.jl documents CuArray matrix multiplication as a high-level route to cuBLAS.
+
+Observed device times were 20.812 ms minimum, 23.499 ms median, and 37.931 ms maximum, corresponding to 5.85 decimal TFLOP/s at the median using `2n³/time`. Immediately after the process, the laptop GPU reported 87 °C and had returned to P8; power limit was unavailable through the query. Raw per-sample data was not preserved.
+
+This demonstrates an operational vendor-library path, not Julia/PyTorch comparability. The thermal state, absent PyTorch lane, unverified TF32/math-mode equivalence, non-randomized lane order, and lack of raw samples disqualify it from final results. It is retained so later work does not accidentally promote this number into the benchmark report.
