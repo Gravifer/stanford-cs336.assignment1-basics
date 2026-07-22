@@ -12,15 +12,15 @@ Harness status as of 2026-07-22: the root Julia workspace can read every existin
 | --- | --- | ---: | --- | --- |
 | Linear | `run_linear`; self-contained v1 bundle | 2 | parity-validated | feature-first output plus dense input/weight gradients through explicit Zygote arguments |
 | Embedding | `run_embedding`; self-contained v1 bundle | 2 | parity-validated | zero-based lookup, repeated-ID accumulation, output, and full dense weight gradient through explicit Zygote arguments |
-| SiLU / SwiGLU | `run_silu`, `run_swiglu`; SiLU v1 bundle | 2 | SiLU parity-validated; SwiGLU planned | SiLU output/input gradient and extreme-value stability; SwiGLU remains |
+| SiLU / SwiGLU | `run_silu`, `run_swiglu`; self-contained v1 bundles | 2 | SiLU parity-validated; SwiGLU parity-validated | two Julia lanes only: explicit separate and packed input projection; output/input/all-parameter gradients |
 | Stable softmax | `run_softmax`; self-contained v1 bundle | 2 | parity-validated | explicit Julia dimension mapping, large-offset stability, dtype, output, and input gradient |
-| RMSNorm | `run_rmsnorm`; NPZ snapshot | 2 | planned | output and gradient fixtures |
+| RMSNorm | `run_rmsnorm`; self-contained v1 bundle | 2 | fixture-ready | feature-axis output, stable reduction dtype, input and affine-weight gradients |
 | Cross-entropy | `run_cross_entropy` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
 | Gradient clipping | `run_gradient_clipping` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
 | RoPE | `run_rope`; NPZ snapshot | 3 | planned | rotation values, positions, dtype, and device behavior |
 | Scaled dot-product attention | `run_scaled_dot_product_attention`; 3-D and 4-D snapshots | 3 | planned | outputs, gradients, mask semantics, and fully masked rows |
-| MHA / self-attention | attention adapters and snapshots | 3 | planned | parameter mapping, outputs, gradients, and shape contracts |
-| Grouped-query attention | no adapter function | excluded | excluded | outside current port boundary |
+| MHA / self-attention | attention adapters and snapshots | 3 | planned | packed/separate projections, input-sharing contraction paths, two feature-first head layouts, outputs, gradients, and shape contracts |
+| Grouped/multi-query attention | no direct adapter; implemented inside adapter-reachable attention family | 3 experiment | execution lane | grouped contraction, expanded-KV reference, gradients, RoPE restrictions, MHA/GQA/MQA timing |
 | Transformer block | `run_transformer_block`; NPZ snapshot | 3 | planned | parameter import, output, and gradients |
 | Transformer LM | `run_transformer_lm`; full and truncated snapshots | 3 | planned | logits, truncation behavior, state mapping, and gradients |
 | Batch sampling | `run_get_batch` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
@@ -31,7 +31,13 @@ Harness status as of 2026-07-22: the root Julia workspace can read every existin
 | BPE tokenizer | `get_tokenizer`; tokenizer and CLI tests | 1 | planned | encode/decode, special tokens, streaming input, and GPT-2 fixtures |
 | Symbolic cost analytics | no adapter function | excluded | excluded | outside current port boundary |
 
-The matrix follows the adapter boundary because that is the explicit progress contract selected for this port. Internal Python class structure and Python-only tests are not automatically Julia requirements. When `dev` advances, update this matrix after rebasing and before expanding implementation scope. Do not turn this ledger into a Julia assignment harness.
+The matrix follows the adapter boundary for parity status, not as permission to
+erase meaningful implementation choices inside an adapter-reachable component.
+`JULIA_VARIANT_AUDIT.md` records which Python distinctions become Julia
+execution lanes, which collapse naturally under explicit parameters, and which
+remain outside scope. When `dev` advances, update both records after rebasing
+and before expanding implementation scope. Do not turn either ledger into a
+Julia assignment harness.
 
 ## Cross-language fixture policy
 

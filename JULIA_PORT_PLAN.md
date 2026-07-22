@@ -37,6 +37,7 @@ The Julia package is not a second CS336 course distribution. Do not recreate ass
 
 - `JULIA_ML_ARCHITECTURE_NOTES.md` preserves the ecosystem conclusions and the boundary between structural streamlining and funded capability.
 - `JULIA_PARITY_MATRIX.md` tracks the evolving Python adapter/test surface and assigns it to baseline or experimental Julia tracks.
+- `JULIA_VARIANT_AUDIT.md` prevents adapter parity from erasing meaningful Python storage, contraction, layout, and compilation experiments.
 - `JULIA_FIXTURE_CONTRACT.md` defines self-contained neutral inputs, weights, outputs, gradients, and metadata for cross-language parity.
 - `JULIA_SNAPSHOT_PROVENANCE.md` maps every legacy NPZ output to its live producer, semantic axes, dependencies, tolerances, and migration gap.
 - `JULIA_PHASE0_CHECKLIST.md` is the acceptance checklist for the root workspace and minimal package scaffold.
@@ -154,14 +155,22 @@ Lux is not intended to replace the direct port. Implement the currently exposed 
 ### Phase 2: numerical primitives
 
 - Stable softmax, linear, embedding, SiLU/SwiGLU, and RMSNorm.
+- Preserve exactly two SwiGLU execution lanes: explicit separate weights and
+  packed input weights. The Python delegated/owned class distinction collapses
+  under explicit Julia parameters. The common `swiglu` function selects the
+  two storage forms by positional arity; the model default uses packed input
+  projection.
 - Test output values, edge cases, gradients, dtype promotion, allocations, and CPU/GPU behavior.
 - For embedding, test both gradient values and the physical gradient representation; a mathematically row-sparse result is not necessarily stored sparsely by either framework.
 - Keep array shapes explicit in docstrings and tests; Julia does not need a direct imitation of `jaxtyping`.
 
 ### Phase 3: attention and transformer layers
 
-- RoPE, scaled dot-product attention, causal and additive/boolean masks, fully masked rows, MHA/GQA, transformer block, and language model.
-- Decide and document one canonical Julia axis layout. Boundary adapters may transpose imported PyTorch weights or fixtures; do not scatter layout conversions through kernels.
+- RoPE, scaled dot-product attention, causal and additive/boolean masks, fully masked rows, MHA/GQA/MQA, transformer block, and language model.
+- Use canonical feature-first `(head_feature, head, sequence, batch...)` attention activations and preserve `(head_feature, sequence, head, batch...)` as the authored experimental layout. Boundary adapters may transpose imported PyTorch weights or fixtures; do not scatter layout conversions through kernels.
+- Preserve packed/separate projection storage, input-sharing projection paths,
+  elementwise/matrix RoPE caches, and automatic/separate/stacked Q/K rotation
+  paths as named benchmark lanes.
 - Match existing Python snapshots and gradient checks before optimizing.
 
 ### Phase 4: optimization and training — gated by Python adapters
