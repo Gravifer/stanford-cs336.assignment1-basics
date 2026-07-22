@@ -103,6 +103,18 @@ self-attention with RoPE. Lazy GPU-backed gradient wrappers are preserved and
 checked by their root storage rather than being materialized solely for a type
 assertion.
 
+The LuxCore model composition has its own full-tree device check:
+
+```powershell
+julia --project=CS336.jl/environments/lux_cuda CS336.jl/environments/lux_cuda/model_smoke.jl
+```
+
+It uses full Lux only as the integration driver: `Lux.setup`/`Lux.apply` work
+with the runtime's LuxCore layers, LuxCUDA moves parameters and state, and
+Zygote differentiates a two-layer LM on CPU and CUDA. The smoke compares every
+parameter gradient and verifies the single shared RoPE/position state moved to
+CuArray storage.
+
 ## Benchmarks
 
 Benchmark dependencies live in their own workspace member and do not belong in the runtime or test projects:

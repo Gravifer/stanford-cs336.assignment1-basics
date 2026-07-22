@@ -34,7 +34,7 @@ output-only snapshots.
 | MHA / self-attention | attention adapters; self-contained plain/RoPE v1 bundles | 3 | parity-validated | packed/separate projections, causal outputs and all parameter/input gradients, two feature-first head layouts, and three Q/K RoPE policies |
 | Grouped/multi-query attention | no direct adapter; implemented inside adapter-reachable attention family | 3 experiment | structurally validated execution lane | grouped contraction matches expanded-KV MHA without materializing repeated K/V; MHA/GQA/MQA timing and grouped CUDA remain pending |
 | Transformer block | `run_transformer_block`; self-contained v1 bundle | 3 | parity-validated | LuxCore explicit parameter/state interface; packed attention/SwiGLU; output, input gradient, and every semantic parameter gradient |
-| Transformer LM | `run_transformer_lm`; tiny two-layer self-contained v1 bundle | 3 | parity-validated | feature-first logits, truncated/context behavior, one shared device-movable RoPE state, and every semantic parameter-tree gradient |
+| Transformer LM | `run_transformer_lm`; tiny two-layer self-contained v1 bundle | 3 | parity-validated | feature-first logits, truncated/context behavior, one shared device-movable RoPE state, every semantic parameter-tree gradient, and full LuxCUDA forward/gradient-tree agreement |
 | Batch sampling | `run_get_batch` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
 | AdamW | `get_adamw_cls` raises `NotImplementedError` | gated | gated | legacy NPZ output alone is not an adapter boundary |
 | Cosine schedule | `run_get_lr_cosine_schedule` raises `NotImplementedError` | gated | gated | expand scope only after Python adapter implementation |
