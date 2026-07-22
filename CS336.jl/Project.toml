@@ -1,0 +1,6 @@
+name = "CS336"
+uuid = "39ccc5dd-36ad-402e-b592-2c67158c70ea"
+version = "0.1.0"
+
+[compat]
+julia = "1.12"
