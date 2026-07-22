@@ -166,6 +166,7 @@ Lux is not intended to replace the educational code. Implement softmax, RMSNorm,
 
 - Establish native Julia CPU and CUDA-array baselines first.
 - CUDA toolchain readiness is verified in `CS336.jl/environments/cuda`, and Lux forward/backward/update composition is verified in `CS336.jl/environments/lux_cuda`; operation/model baselines remain pending correctness implementations.
+- Lux's built-in multi-head attention has passed a separate CPU/CUDA forward, Zygote backward, Adam update, and identical-input numerical comparison; this is ecosystem readiness only and does not substitute for the course-authored attention path.
 - Evaluate Enzyme for mutation-friendly differentiation.
 - Evaluate Reactant+Enzyme for compiled inference and a compiled training step.
 - Treat unsupported tracing/control-flow cases as measured limitations, not reasons to distort the baseline implementation prematurely.
