@@ -38,6 +38,17 @@ Julia Pkg extensions allow integration code to load when optional dependencies a
 
 The cost is a compatibility graph spread across independently released packages. A package extension removes unconditional coupling; it does not fund or test all combinations.
 
+The isolation is observable in this repository. With compilation caches already populated, three fresh processes per case produced these full process-start-plus-load medians on the provisional host:
+
+| Scope | Median elapsed | Fresh-process peak RSS |
+| --- | ---: | ---: |
+| bare Julia process | 0.389 s | 199,352,320 bytes |
+| dependency-free `CS336` | 0.438 s | 201,306,112 bytes |
+| `CS336` + Lux/NNlib/Optimisers/Zygote | 2.862 s | 381,984,768 bytes |
+| preceding stack + LuxCUDA/CUDA initialization | 7.400 s | 1,057,271,808 bytes |
+
+These are three-sample boundary diagnostics, not cross-language benchmarks. They demonstrate both sides of the design: Julia does not make accelerator/framework loading free, but the baseline package can avoid paying it until the relevant optional environment is selected. PyTorch comparison requires the final cold-start protocol on matched processes.
+
 ## What is not streamlined away
 
 ### Vendor and hardware behavior
