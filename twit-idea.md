@@ -13,8 +13,8 @@
 -->
 
 Vibe coding has made worktrees a must!
-But I've found them useful even when I didn't have a coding plan subscription,
-or had burned through my wallet by selecting an Opus on Fast through OpenRouter.
+But I'd found them useful even before I had a coding plan subscription or could
+burn through my wallet by selecting Opus on Fast through OpenRouter.
 I'm somewhat of a yak-shaving die-hard; it's always tempting for me
 to turn a transient idea into a wild goose chase;
 at least being almost expelled from college didn't help me stop doing it.
@@ -23,23 +23,27 @@ So: worktrees. A gateway substance to let me feel
 
 Boy am I gonna [die on that hill](https://en.wikipedia.org/wiki/Boyi_and_Shuqi "伯夷叔齐").
 
-Codex was perfectly happy to put the worktree in its cache directory. I was not.
+Agent harnesses prefer to keep worktrees in a cache directory. Human
+devs usually want them somewhere near the primary clone.
 After getting annoyed by Codex desktop recently, I've decided to pin down how
 I'm gonna use worktrees in the future, once and for all.
 
 ## What is a worktree?
 
-The [manual](https://git-scm.com/docs/git-worktree) is almost aggressively
-unexcited about them. Check out more than one branch at a time. Make a detached
-worktree for an experiment. `lock` one if its directory is on a removable disk
-or network share. Remove it when you're done.
+The [manual](https://git-scm.com/docs/git-worktree) gives worktrees a modest
+job: keep more than one branch checked out at once. A clone or `init` supplies
+the main worktree; `git worktree add` attaches more of them to the same
+repository. Git also imagines a temporary detached worktree for an experiment,
+and provides `lock` for a worktree that may disappear with a removable disk or
+network mount.
 
 Each gets a `HEAD`, an index and its own half-finished rebase; objects and refs
 are shared. Hence the usual refusal to check out the same branch twice. The
 directory and branch names need not match, and Git has no opinion on where the
 directory should go.
 
-Good. It shouldn't. I was the one who had not decided what that path meant.
+That is about all the Git lesson this post needs. The path argument was left to
+the caller. My problem is with what callers have lately decided it means.
 
 ## Why do harness people hype about it?
 
