@@ -24,8 +24,8 @@ A gateway substance to let me feel
 
 Boy am I gonna [die on that hill](https://en.wikipedia.org/wiki/Boyi_and_Shuqi "伯夷叔齐").
 
-Agent harnesses prefer to keep worktrees in a cache directory.
-Human devs usually want them somewhere near the primary clone.
+Agent harnesses prefer to keep worktrees in a cache directory;
+human devs usually want them somewhere near the primary clone.
 After getting annoyed by Codex desktop recently,
 I've decided to pin down how I'm gonna use worktrees in the future, once and for all.
 
@@ -86,7 +86,8 @@ On Windows its `wt` collides with Windows Terminal,
 so the package exposes `git-wt`;
 `git wt` happens to work as an external Git command after all.
 There are many more—`git gtr`, Branchlet, several Groves, several TUIs—and they do not converge
-because a durable checkout, a throwaway chat, a reusable slot and a peer around a bare controller are not the same product.
+because a durable checkout, a throwaway chat, a reusable slot
+and a peer around a bare controller are not the same product.
 
 My unfinished tree is not a rented slot.
 Treating it as one is the part I object to.
@@ -136,18 +137,25 @@ Then the obvious basename means the whole local project,
 not whichever checkout happened to arrive first.
 
 The symmetrical version uses a bare repository as controller.
-Morgan Cugerone described a clean [bare worktree layout](https://morgan.cugerone.com/blog/how-to-use-git-worktree-and-in-a-clean-way/) in 2021,
-and this older [layout note](https://gist.github.com/sellout/3361145fac9bf2dfdc6a9bc18dcdff36) was already worrying the same bone.
+Morgan Cugerone described a clean
+[bare worktree layout](https://morgan.cugerone.com/blog/how-to-use-git-worktree-and-in-a-clean-way/)
+in 2021,
+and this older
+[layout note](https://gist.github.com/sellout/3361145fac9bf2dfdc6a9bc18dcdff36)
+was already worrying the same bone.
 This is cleaner than my answer:
 the repository sits in the middle
 and every working copy is honestly a peer.
 
 Unfortunately I do not like it enough
 to make every tool sit the entrance exam.
-A [`--bare` clone](https://git-scm.com/docs/git-clone.html) is not an ordinary clone with its files swept away:
+A [`--bare` clone](https://git-scm.com/docs/git-clone.html)
+is not an ordinary clone with its files swept away:
 among other differences,
-remote heads are copied directly into local branch refs instead of the usual `origin/*` arrangement.
-IDEs, Git GUIs, hook installers, Git LFS, submodules, language tools and miscellaneous project scripts
+remote heads are copied directly into local branch refs
+instead of the usual `origin/*` arrangement.
+IDEs, Git GUIs, hook installers, Git LFS, submodules,
+language tools and miscellaneous project scripts
 are routinely tested against an ordinary checkout.
 Each bare-controller inconvenience is soluble.
 Their sum is still a tax.
@@ -163,7 +171,8 @@ The furniture can wait until the end.
 
 [Jujutsu](https://docs.jj-vcs.dev/latest/) is where the extra roof stops being mere tidiness.
 It calls its additional checkouts **workspaces**;
-the glossary even defines one as [what Git calls a worktree](https://docs.jj-vcs.dev/latest/glossary/#workspace).
+the glossary even defines one as
+[what Git calls a worktree](https://docs.jj-vcs.dev/latest/glossary/#workspace).
 Same idea, different paperwork.
 
 A linked Git worktree has a `.git` pointer.
@@ -210,7 +219,8 @@ and leaves the directory.
 Git's `worktree remove` removes the directory
 and leaves the branch.
 
-Tools such as [Treq](https://treq.dev/docs/concepts/workspaces/) build a managed Git/jj hybrid above this.
+Tools such as [Treq](https://treq.dev/docs/concepts/workspaces/)
+build a managed Git/jj hybrid above this.
 The combination is useful.
 The working copies are still not interchangeable.
 This is the one case
@@ -312,7 +322,8 @@ so the price of the warning is having to open the base clone explicitly.
 
 Repository scripts, hooks setup and `AGENTS.md` belong in the repository
 and therefore arrive in every worktree.
-A multi-root editor file or a note that really describes the whole household may sit in the umbrella,
+A multi-root editor file or a note that really describes the whole household
+may sit in the umbrella,
 but Git cannot back up a file outside every repository.
 I would keep that material scarce,
 back it up separately,
@@ -331,7 +342,8 @@ or compiler downloads and a CMake build directory.
 Two build trees do not become safely concurrent
 because their downloads were good neighbours.
 
-The default hooks directory and ordinary Git configuration are already shared through the common `.git`;
+The default hooks directory and ordinary Git configuration
+are already shared through the common `.git`;
 `core.hooksPath` may point somewhere else.
 When a setting really belongs to one worktree,
 enable `extensions.worktreeConfig`
@@ -355,7 +367,8 @@ git worktree remove ../auth
 git branch -d feat/auth
 ```
 
-Ignored material is exactly where `.env`, virtual environments, build trees and model checkpoints tend to live.
+Ignored material is exactly where `.env`, virtual environments,
+build trees and model checkpoints tend to live.
 Removing the worktree and deleting the branch are separate acts;
 `branch -d` gets its own chance to refuse.
 
@@ -384,7 +397,8 @@ while several agents may be writing objects;
 Git's normal grace period exists for a reason.
 
 Submodules remain the conspicuous exception.
-Git's own [worktree manual](https://git-scm.com/docs/git-worktree#_bugs) still calls their multiple-checkout support incomplete.
+Git's own [worktree manual](https://git-scm.com/docs/git-worktree#_bugs)
+still calls their multiple-checkout support incomplete.
 A linked worktree containing submodules cannot be moved with `git worktree move`,
 and even a clean one needs `--force` to be removed.
 I would not let an automatic janitor learn about that flag.
