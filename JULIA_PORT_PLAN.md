@@ -128,7 +128,12 @@ Avoid an open-ended matrix of interchangeable frameworks. Start with one path:
 - A small fixture reader such as `NPZ.jl` and `JSON3.jl` only if needed to consume the existing Python snapshots.
 - `Enzyme.jl` plus `Reactant.jl` as an optional second-stage compiled path, in an isolated environment after the baseline is correct.
 
-Do not adopt Flux and Lux simultaneously. Do not switch AD systems opportunistically inside the baseline. Pin the manifest and add a smoke test for the complete dependency combination.
+Do not adopt Flux and Lux simultaneously inside the baseline. A later optional
+Flux facade may reuse the completed functional kernels as an explicit
+PyTorch-to-Lux comparison, but both that facade and a Python JAX comparison are
+deferred until the course assignment's Python adapter boundaries are complete.
+Do not switch AD systems opportunistically inside the baseline. Pin the manifest
+and add a smoke test for the complete dependency combination.
 
 ## Why Lux
 

@@ -89,9 +89,77 @@ Lux is selected because its current documented interface fits the experiment:
 
 Lux is not selected because it is assumed faster than Flux or PyTorch, nor because every course primitive should be replaced by a built-in Lux layer. The reference math remains visible; a practical/library path is added separately when needed for a fair performance comparison.
 
+### Current framework landscape and deferred comparison paths
+
+Flux and Lux are the two current general-purpose native Julia deep-learning
+frameworks relevant to this transformer experiment. Flux keeps trainable arrays
+inside callable Julia structures and now uses explicit structural gradients;
+Lux separates an architecture description from explicit parameter and state
+trees. Both are active. Lux remains the gold Julia path here because its
+functional state boundary is the architectural question this repository wants
+to test, not because Flux is obsolete.
+
+The other notable names occupy narrower roles:
+
+- Knet was a serious historical general-purpose framework, but its latest
+  published release is from 2022 and it is not a current implementation target.
+- SimpleChains is a serious specialized option for small, often non-batched
+  scientific networks where framework overhead dominates; it is not a general
+  transformer stack.
+- MLJ is an orchestration/evaluation ecosystem for tabular and classical ML,
+  not a neural-network parameter/state framework.
+- NNlib provides shared neural-network primitives; Zygote, Enzyme, Mooncake,
+  and ForwardDiff provide AD; Reactant provides a compiler path. They are
+  components or backends rather than competing layer frameworks.
+
+A later Flux facade can bridge the parameter-owning PyTorch surface and the
+explicit Lux surface while sharing the same CS336 mathematical kernels and
+semantic parameter schema. A later Python JAX comparison can cover pure JAX,
+Equinox, and Flax's explicit/ergonomic tradeoffs. Both comparison paths are
+deliberately deferred until the course assignment's currently gated Python
+adapters are complete. They must not widen the present Lux baseline or delay
+course parity.
+
+## Existing Python tokenizer artifact audit
+
+The committed Python artifacts were inspected on 2026-07-23 before choosing a
+standalone interchange format. All five repository pickles use protocol 4 and
+contain only primitive containers. Pickle opcode inspection found no globals,
+reducers, persistent IDs, NumPy objects, or custom classes, and every stream
+ends exactly at the root object.
+
+The four runtime tokenizer files have a particularly simple schema:
+
+| Corpus | Vocabulary | Merges | Vocabulary bytes | Longest token |
+| --- | ---: | ---: | ---: | ---: |
+| TinyStories | 10,000 | 9,743 | 57,913 | 15 |
+| OpenWebText | 32,000 | 31,743 | 202,787 | 64 |
+
+Each vocabulary is `Dict{int, bytes}` in Python terms with contiguous IDs
+starting at zero, one `<|endoftext|>` token at ID zero, all 256 singleton bytes,
+and one unique vocabulary result for every merge. Each merge file is an ordered
+list of unique `(bytes, bytes)` pairs. Every merge side and concatenated result
+is present in the corresponding vocabulary. File sizes range from about 107 KiB
+to 386 KiB.
+
+The fifth pickle is not a tokenizer runtime artifact. It is a pytest snapshot
+containing the three keys `vocab_keys`, `vocab_values`, and `merges`; the first
+two values are sets and the last is an ordered merge list.
+
+This evidence keeps both HDF5 and a non-object NPZ schema viable. `h5py` could
+live in Python's development dependency group without changing the
+staff-provided base dependencies, so its absence from the base list is not a
+disqualifier. HDF5 provides a self-describing single-file hierarchy but adds
+native HDF5 bindings on both sides. The actual tokenizer payload is small and
+already reduces to integer arrays, flat byte blobs, and offsets, so an
+`allow_pickle=false` NPZ contract remains the lower-dependency candidate.
+Neither format should store arbitrary token bytes as escaped JSON strings.
+Retain pickle reading as a migration path even after a neutral writer becomes
+the default.
+
 ### Compatibility result on this repository
 
-On 2026-07-22, the isolated `CS336.jl/environments/lux` project resolved Lux 1.31.4, NNlib 0.9.38, Optimisers 0.4.7, and Zygote 0.7.11 on Julia 1.12.6. A fresh process successfully exercised the documented explicit path: `Lux.setup`, `Lux.apply`, a Zygote gradient with respect to the parameter tree, an Optimisers Adam update, and NNlib softmax. The package itself remains dependency-free.
+On 2026-07-22, the isolated `CS336.jl/environments/lux` project resolved Lux 1.31.4, NNlib 0.9.38, Optimisers 0.4.7, and Zygote 0.7.11 on Julia 1.12.6. A fresh process successfully exercised the documented explicit path: `Lux.setup`, `Lux.apply`, a Zygote gradient with respect to the parameter tree, an Optimisers Adam update, and NNlib softmax. The full Lux/optimizer/AD stack remains optional; the runtime later adopted only NNlib, LuxCore, and WeightInitializers for the directly implemented kernels and explicit model interface.
 
 This establishes that the chosen interfaces compose today; it is not a speed result. The separate `environments/lux_cuda` project subsequently validated LuxCUDA 0.3.6 with CUDA.jl 6.2.1: documented device selection, Dense forward, Zygote backward, Optimisers Adam update, NNlib softmax, synchronization, and host round-trip all succeeded on the RTX 3070 Ti. The tiny CPU/GPU forward comparison differed by at most one `Float32` ulp at the observed scale. Operation/model performance and the “not more than 10×” comparability question remain gated on matched implementations and the benchmark protocol.
 
@@ -116,3 +184,9 @@ Tabular ML means prediction from row-and-column datasets such as database tables
 - [Zygote limitations](https://fluxml.ai/Zygote.jl/stable/limitations/)
 - [Enzyme documentation](https://enzymead.github.io/Enzyme.jl/stable/)
 - [Reactant automatic differentiation](https://enzymead.github.io/Reactant.jl/stable/tutorials/automatic-differentiation)
+- [Current Flux model and structural-gradient guide](https://fluxml.ai/Flux.jl/stable/guide/models/basics/)
+- [SciML function-approximation framework overview](https://docs.sciml.ai/Overview/dev/highlevels/function_approximation/)
+- [Knet repository and release history](https://github.com/denizyuret/Knet.jl)
+- [HDF5 data model](https://portal.hdfgroup.org/documentation/hdf5/latest/_h5_d_m__u_g.html)
+- [HDF5.jl dataset interface](https://juliaio.github.io/HDF5.jl/stable/interface/dataset/)
+- [h5py string representation](https://docs.h5py.org/en/stable/strings.html)
