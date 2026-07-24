@@ -146,62 +146,54 @@ into the convention I mean to use from now on.
 [Jujutsu](https://docs.jj-vcs.dev/latest/) is an emerging VCS.
 The first thing you'll notice is that there is no staging area,
 and the second is that it does not care about 'branches' like Git
-(what Git calls branches are physiologically buds on a plant).
+(what Git calls branches are physiologically [buds](https://en.wikipedia.org/wiki/Bud) on a plant).
 But most of its appeal lies in how casually it lets you edit a stack of changes.
 The working copy belongs to the change being edited;
 `jj` snapshots it into a new commit at the start of almost every command.
 
-Each [change](https://docs.jj-vcs.dev/latest/glossary/#change)
-keeps a stable identity as its underlying commit is rewritten.
+What makes a branchless and stackful life easy is the new layer of abstraction
+called [changes](https://docs.jj-vcs.dev/latest/glossary/#change).
+Each change keeps a stable identity as its underlying commit is rewritten.
 Edit one in the middle of a stack and jj rebases its descendants automatically;
 [conflicts](https://docs.jj-vcs.dev/latest/conflicts/) can remain in commits
-instead of interrupting the operation,
+rather than being an interruptable operation,
 and the [operation log](https://docs.jj-vcs.dev/latest/operation-log/)
 makes the rearrangement inspectable and undoable.
 
-Losing the staging area does not lose the useful part of `git commit -p`.
-The [official command table](https://docs.jj-vcs.dev/latest/git-command-table/)
-maps that to `jj split`;
-`jj squash -i` can move selected work into an existing change
-instead of only preparing whatever commit comes next.
-
-The [official comparison](https://docs.jj-vcs.dev/latest/git-comparison/)
-does the concept-by-concept version.
-For the actual tour, [Evan Martin's tutorial](https://evmar.github.io/jjtut/)
-is concise and aimed at Git users,
-while [Steve Klabnik's](https://steveklabnik.github.io/jujutsu-tutorial/)
-is more conversational.
-
-Here, the important word is *workspace*.
-A jj [workspace](https://docs.jj-vcs.dev/latest/glossary/#workspace)
-is one working copy and its associated repository;
-the glossary explicitly says this is what Git calls a worktree.
-The umbrella may contain several Git worktrees or jj workspaces,
-so `somerepo.workspace/` puts the name one level too high.
-
-Git and jj can share one child.
-A Git-backed workspace created by current jj is
+Jujutsu is very Git-compatible at the moment:
+a Git-backed workspace created by current jj is
 [colocated by default](https://docs.jj-vcs.dev/latest/git-compatibility/#colocated-jujutsugit-workspaces):
 `.git/` and `.jj/` sit beside each other,
 both tools use the same working copy,
 and jj imports and exports Git state as it runs.
-The conventional clone beneath the umbrella can therefore remain useful to Git tools
-while also becoming a jj workspace.
+
+I won't make this any more of a jj shill than I already have.
+See [Justin's cheatsheet](https://justinpombrio.net/2025/02/11/jj-cheat-sheet.html#:~:text=cheat%20sheet%20for%20Jujutsu);
+alternatively, the [official docs](https://docs.jj-vcs.dev/latest/git-comparison/)
+compare against Git concept by concept.
+[Evan Martin's tutorial](https://evmar.github.io/jjtut/) is concise and aimed at Git users,
+while [Steve Klabnik's](https://steveklabnik.github.io/jujutsu-tutorial/) is more conversational.
+
+What matters for us, though, is jj's counterpart to a worktree.
+A jj *[workspace](https://docs.jj-vcs.dev/latest/glossary/#workspace)*
+is one working copy and its associated repository.
+They can live alongside worktrees,
+though neither tool has much of a clue about
+the other's additional checkout directories.
+The umbrella may contain any number of Git worktrees or jj workspaces,
+so `somerepo.workspace/` would be confusing to a jj user.
+Colocating jj with Git in the primary clone
+lets one checkout serve both tools without ceremony,
+a convenience the bare-clone layout cannot offer.
 
 That cooperation stops at the additional working copies.
-Jujutsu still does not treat a linked Git worktree as a jj workspace;
-its compatibility table points users to `jj workspace` instead.
-A secondary jj workspace is likewise not another Git worktree.
-They may share commits through the colocated child,
-but their working copies remain siblings rather than interchangeable.
+Jujutsu still does not treat a linked Git worktree as a jj workspace.
 
-This is where the neutral umbrella earns its keep.
-It can contain the colocated child, Git worktrees and jj workspaces
-without pretending that the whole thing is any one of them.
-If both kinds multiply, `git/` and `jj/` layers can earn their place;
-otherwise direct children remain enough.
+So: the umbrella can contain the colocated child, Git worktrees and jj workspaces.
+If both kinds multiply, intermediate `git/` and `jj/` layers can earn their place.
+Otherwise direct children remain enough.
 [Treq](https://treq.dev/docs/concepts/workspaces/) already manages one such hybrid;
-my convention only needs to leave room for it.
+my convention happens to leave room for it.
 
 ## See the grove and have the trees too
 
