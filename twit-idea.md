@@ -129,76 +129,62 @@ it just no longer gets to name the whole local project.
 I see no need for a compulsory `worktrees/` layer beneath the umbrella.
 Direct children are the default; another layer can earn its place later.
 
+Like many have talked about,
 Git does not restrict the worktree [path to its branch name](https://git-scm.com/docs/git-worktree).
 A durable tree still deserves a useful name,
 so `auth/` may contain `feat/oauth-retry`;
 an ad-hoc one can keep whatever was convenient.
 
-This combines the shared-container convention Zakas describes,
-the peer checkouts of bare layouts
-and Git's separate path and branch arguments.
-I am only deciding how to assemble them
+We now hve a rough idea that combines 
+the shared-container convention Zakas describes,
+the peer checkouts of bare layouts, and so on.
+What remains is just to decide how to assemble them
 into the convention I mean to use from now on.
-The exact directory names can wait until the end.
 
 ## Break a leg with じゅじゅつ
 
-[Jujutsu](https://docs.jj-vcs.dev/latest/) is where the extra roof stops being mere tidiness.
-It calls its additional checkouts **workspaces**;
-the glossary even defines one as
-[what Git calls a worktree](https://docs.jj-vcs.dev/latest/glossary/#workspace).
-Same idea, different paperwork.
+[Jujutsu](https://docs.jj-vcs.dev/latest/) is Git-compatible,
+but it is not Git with the commands renamed.
+Its working copy is itself a mutable commit,
+which `jj` snapshots at the start of almost every command;
+there is no staging index or current branch.
+The [official comparison](https://docs.jj-vcs.dev/latest/git-comparison/)
+does the concept-by-concept version.
+For the actual tour, [Evan Martin's tutorial](https://evmar.github.io/jjtut/)
+is concise and aimed at Git users,
+while [Steve Klabnik's](https://steveklabnik.github.io/jujutsu-tutorial/)
+is more conversational.
 
-A linked Git worktree has a `.git` pointer.
-A secondary jj workspace has a `.jj/` directory
-whose `repo` file points back to the initial jj repository.
-Current jj refuses to initialise a colocated repository inside a linked Git worktree:
-"Cannot create a colocated jj repo inside a Git worktree."
-Going the other way is no cleverer:
-`git status` in a jj-only secondary workspace finds no repository.
-They can be neighbours,
-but neither adopts the other's working copies.
+Here, the important word is *workspace*.
+A jj [workspace](https://docs.jj-vcs.dev/latest/glossary/#workspace)
+is one working copy and its associated repository;
+the glossary explicitly says this is what Git calls a worktree.
+The umbrella may contain several Git worktrees or jj workspaces,
+so `somerepo.workspace/` puts the name one level too high.
 
-The main checkout can bridge the repositories.
-It may be a [colocated Git/jj repository](https://docs.jj-vcs.dev/latest/git-compatibility/),
-with both `.git/` and `.jj/`.
-Both systems then use the same Git object store,
-and jj automatically imports and exports supported Git refs
-when commands run there.
-A Git-linked worktree and a jj secondary workspace can then be siblings of that common checkout.
-They are still not each other's working copies.
+Git and jj can share one child.
+A Git-backed workspace created by current jj is
+[colocated by default](https://docs.jj-vcs.dev/latest/git-compatibility/#colocated-jujutsugit-workspaces):
+`.git/` and `.jj/` sit beside each other,
+both tools use the same working copy,
+and jj imports and exports Git state as it runs.
+The conventional clone beneath the umbrella can therefore remain useful to Git tools
+while also becoming a jj workspace.
 
-The dotfiles reflect a real disagreement.
-A Git worktree owns an index
-and usually a branch or detached `HEAD`.
-A jj workspace owns a working-copy commit,
-shown as `workspace-name@`;
-bookmarks are repository-wide names,
-not "the current branch".
-If another jj workspace changes that commit's tree,
-the files can go stale
-and jj asks for `jj workspace update-stale`.
-Git's one-branch-per-worktree rule is guarding something else.
+That cooperation stops at the additional working copies.
+Jujutsu still does not treat a linked Git worktree as a jj workspace;
+its compatibility table points users to `jj workspace` instead.
+A secondary jj workspace is likewise not another Git worktree.
+They may share commits through the colocated child,
+but their working copies remain siblings rather than interchangeable.
 
-They even disagree about which half of deletion to perform:
-
-```console
-$ jj workspace add ../jj-second --name jj-second
-$ jj workspace list
-$ jj workspace forget jj-second
-```
-
-`forget` stops tracking the workspace
-and leaves the directory.
-Git's `worktree remove` removes the directory
-and leaves the branch.
-
-Tools such as [Treq](https://treq.dev/docs/concepts/workspaces/)
-build a managed Git/jj hybrid above this.
-The combination is useful.
-The working copies are still not interchangeable.
-This is the one case
-where the neutral umbrella earns its rent without further pleading.
+This is where the neutral umbrella earns its keep.
+It can contain the colocated child, Git worktrees and jj workspaces
+without pretending that the whole thing is any one of them.
+If both kinds multiply, `git/` and `jj/` layers can earn their place;
+otherwise direct children remain enough.
+[Treq](https://treq.dev/docs/concepts/workspaces/) already manages one such hybrid;
+my convention only needs to leave room for it.
 
 ## See the grove and have the trees too
 
@@ -422,8 +408,12 @@ he will at least have to argue with a directory full of evidence.
 - [Git: `git-clone`](https://git-scm.com/docs/git-clone.html)
 - [Git: `git clone --bare`](https://git-scm.com/docs/git-clone#Documentation/git-clone.txt---bare)
 - [Jujutsu documentation](https://docs.jj-vcs.dev/latest/)
+- [Jujutsu: comparison with Git](https://docs.jj-vcs.dev/latest/git-comparison/)
+- [Evan Martin's Jujutsu tutorial](https://evmar.github.io/jjtut/)
+- [Steve Klabnik's Jujutsu tutorial](https://steveklabnik.github.io/jujutsu-tutorial/)
 - [Jujutsu glossary: workspace](https://docs.jj-vcs.dev/latest/glossary/#workspace)
 - [Jujutsu: colocated Git repositories](https://docs.jj-vcs.dev/latest/git-compatibility/)
+- [Jujutsu: colocated Git/jj workspaces](https://docs.jj-vcs.dev/latest/git-compatibility/#colocated-jujutsugit-workspaces)
 - [Treq workspaces](https://treq.dev/docs/concepts/workspaces/)
 - [Git: `git-gc`](https://git-scm.com/docs/git-gc.html)
 - [Git worktree submodule caveat](https://git-scm.com/docs/git-worktree#_bugs)
