@@ -94,7 +94,7 @@ a durable checkout, a throwaway chat, a reusable slot or a peer around a bare co
 In all practical terms, worktree (and task agent) orchestration
 is a solved problem, albeit with a fragmented landscape.
 
-## But I'm not content with that...
+## But I'm not content yet...
 
 The part I am not content with is older and dumber:
 `git clone REMOTE somerepo` spends the best local name on one working copy.
@@ -108,8 +108,8 @@ A global pool only moves the decision out of sight.
 Nicholas Zakas calls direct siblings and a shared sibling container
 the two conventions in his recent [introduction](https://humanwhocodes.com/blog/2026/07/introduction-git-worktrees/),
 and prefers `my-project.worktrees/feature-name`.
-The roof is right; leaving the original clone beside it
-still gives one local project two top-level names.
+I like the roof; leaving the original clone beside it
+still gives one local project two external entry points.
 I want the original checkout beneath the roof as well,
 so the obvious basename means the whole household.
 
@@ -119,26 +119,27 @@ but an ordinary clone is still a useful checkout
 and the compatibility option that asks least of the next tool.
 I want the symmetry without giving that up.
 
-So keep the ordinary clone, but demote it mentally.
+So, keep the ordinary clone, but demote it mentally.
 It remains the main worktree, with the real `.git/`
 and all the habits of a conventional clone.
 Linked worktrees become its siblings under a neutral umbrella.
 The original checkout remains administratively special;
 it just no longer gets to name the whole local project.
 
-That also frees the child names from the branch taxonomy.
-Git already accepts the worktree path and branch as separate arguments.
-The directory is where the line of thought physically lives;
-the branch is one Git name associated with it.
-I may want `auth/` in a window title
-while the repository calls the branch `feat/oauth-retry`.
+I see no need for a compulsory `worktrees/` layer beneath the umbrella.
+Direct children are the default; another layer can earn its place later.
+
+Git does not restrict the worktree [path to its branch name](https://git-scm.com/docs/git-worktree).
+A durable tree still deserves a useful name,
+so `auth/` may contain `feat/oauth-retry`;
+an ad-hoc one can keep whatever was convenient.
 
 This combines the shared-container convention Zakas describes,
 the peer checkouts of bare layouts
 and Git's separate path and branch arguments.
 I am only deciding how to assemble them
 into the convention I mean to use from now on.
-The furniture can wait until the end.
+The exact directory names can wait until the end.
 
 ## Break a leg with じゅじゅつ
 
@@ -219,14 +220,6 @@ especially when it has to coexist with an already conventional checkout.
 When two remotes have the same basename,
 `owner-somerepo/` or `host.owner.somerepo/` will do.
 I do not intend to standardise the exceptions.
-
-I see no point in a compulsory `worktrees/` layer beneath it.
-The children already know what they are,
-and so do `git worktree list` and `jj workspace list`.
-If I am using both systems heavily,
-`git/` and `jj/` subdirectories may become useful.
-I will pay for that distinction
-when I actually have it.
 
 The base clone is an ordinary clone:
 
