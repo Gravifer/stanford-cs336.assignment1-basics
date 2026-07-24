@@ -55,23 +55,11 @@ while an urgent fix happens elsewhere.
 The editor stays open, the breakpoints stay put,
 and nobody has to remember whether the useful uncommitted change is in stash number three.
 
-For me it also makes starting another ill-advised chase feel nearly free.
-I can leave the previous one exactly where it was
-and tell myself that this is continuity, not accumulation.
-
-Agents did not invent this use.
-They made it fashionable again
-because two processes in two directories are less immediately destructive than two processes in one.
-GitHub's recent [worktree introduction](https://github.blog/ai-and-ml/github-copilot/what-are-git-worktrees-and-why-should-i-use-them/) credits AI for the revival.
-Fair enough.
-Separate working directories and indexes stop one common form of carnage.
-Refs and objects are still shared;
-ports, databases, GPUs and everything else never entered the bargain.
-Five worktrees do not make five agents a distributed system.
-
-Then the harness has to put them somewhere.
-[Claude Code](https://code.claude.com/docs/en/worktrees) uses `.claude/worktrees/` for its managed ones.
-Codex has used `$CODEX_HOME/worktrees`;
+Agents did not invent [this use](https://github.blog/ai-and-ml/github-copilot/what-are-git-worktrees-and-why-should-i-use-them/);
+but with token consumption being the best proxy indicator of welfare
+that mankind can come up with, it's not at all surprising.
+The harness has to put them somewhere.
+[Claude Code](https://code.claude.com/docs/en/worktrees) uses `.claude/worktrees/`, and Codex uses `$CODEX_HOME/worktrees`;
 the current [settings](https://learn.chatgpt.com/docs/environments/git-worktrees) at least let the user choose another root
 and distinguish managed from permanent worktrees.
 [`gwq`](https://github.com/d-kuro/gwq) builds a global `~/worktrees/host/owner/repo/branch` forest.

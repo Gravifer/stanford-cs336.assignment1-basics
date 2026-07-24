@@ -7,6 +7,7 @@ Explicit instructions for a particular piece take precedence.
 
 - Preserve the author's voice and sentence structure when making small fixes.
 - Prefer human, direct phrasing over polished-but-generic explanatory prose.
+- Do not restate a motive the piece has already established.
 - Do not explain a joke after making it.
 - Do not assume a technical audience is completely new to the subject.
 - Treat author-provided titles and section headings as fixed unless asked to change them.
