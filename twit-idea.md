@@ -14,12 +14,11 @@
 
 Vibe coding has made worktrees a must!
 But I'd found them useful even before I had a coding plan subscription
-or could burn through my wallet by selecting Opus on Fast through OpenRouter.
+or accidentally burnt through my wallet by selecting Opus on Fast through OpenRouter.
 I'm somewhat of a yak-shaving die-hard;
 it's always tempting for me to turn a transient idea into a wild goose chase;
 at least being almost expelled from college didn't help me stop doing it.
-So: worktrees.
-A gateway substance to let me feel
+So: worktrees. A gateway substance to let me feel
 "oh surely it won't hurt; my working tree is there, ready to resume at any time..."
 
 Boy am I gonna [die on that hill](https://en.wikipedia.org/wiki/Boyi_and_Shuqi "伯夷叔齐").
@@ -41,14 +40,15 @@ and provides `lock` for a worktree that may disappear with a removable disk or n
 Each worktree gets a `HEAD`, an index and its own half-finished rebase;
 objects and refs are shared.
 The directory and branch names need not match,
-and Git has no opinion on where the directory should go.
+and Git doesn't give a rat about where the directory should go. 
+(except, not in the original clone though; why would anyone do that?)
 
 Traditionally, the main worktree keeps the repository's obvious name
 and linked worktrees become its neighbours:
 `somerepo/`, `somerepo-hotfix/`, `somerepo-new-parser/`.
 Git's own `../hotfix` example points in exactly that direction.
 It is simple, and the original clone remains an ordinary checkout;
-it also lets one repository gradually colonise the parent directory.
+it also lets one repository gradually colonize the parent directory.
 Spoiler: make an umbrella directory; the purpose of this post
 is really just the trivial part of what to name of it.
 
@@ -85,14 +85,7 @@ its current [settings](https://learn.chatgpt.com/docs/environments/git-worktrees
 [`gwq`](https://github.com/d-kuro/gwq) builds a global `~/worktrees/host/owner/repo/branch` forest.
 [Treehouse](https://github.com/kunchenguid/treehouse) leases warm numbered slots.
 Many other worktree tools are emerging too:
-[Worktrunk](https://github.com/max-sixty/worktrunk),
-[`git gtr`](https://github.com/coderabbitai/git-worktree-runner),
-[Branchlet](https://github.com/raghavpillai/branchlet),
-[sev](https://github.com/thisguymartin/grove)[er](https://github.com/nicksenap/grove)[al](https://github.com/lost-in-the/grove) [Groves](https://www.usegrove.dev/),
-[LazyWorktree](https://github.com/chmouel/lazyworktree),
-[Wisetree](https://github.com/victorcorcos/wisetree),
-[rust-git-worktree](https://github.com/ozankasikci/rust-git-worktree)
-and [forestui](https://pypi.org/project/forestui/).
+[Worktrunk](https://github.com/max-sixty/worktrunk), [`git gtr`](https://github.com/coderabbitai/git-worktree-runner), [Branchlet](https://github.com/raghavpillai/branchlet), [sev](https://github.com/thisguymartin/grove)[er](https://github.com/nicksenap/grove)[al](https://github.com/lost-in-the/grove) [Groves](https://www.usegrove.dev/), [LazyWorktree](https://github.com/chmouel/lazyworktree), [Wisetree](https://github.com/victorcorcos/wisetree), [rust-git-worktree](https://github.com/ozankasikci/rust-git-worktree) and [forestui](https://pypi.org/project/forestui/).
 They make different choices about where a tree goes, what names it,
 what gets copied into it and how much of its lifecycle the tool owns,
 because they support different things:
