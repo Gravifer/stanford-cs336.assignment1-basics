@@ -43,6 +43,23 @@ objects and refs are shared.
 The directory and branch names need not match,
 and Git has no opinion on where the directory should go.
 
+Traditionally, the main worktree keeps the repository's obvious name
+and linked worktrees become its neighbours:
+`somerepo/`, `somerepo-hotfix/`, `somerepo-new-parser/`.
+Git's own `../hotfix` example points in exactly that direction.
+It is simple, and the original clone remains an ordinary checkout;
+it also lets one repository gradually colonise the parent directory.
+Spoiler: make an umbrella directory; the purpose of this post
+is really just the trivial part of what to name of it.
+
+A purist can remove even the privilege of the main checkout:
+make a [bare clone](https://git-scm.com/docs/git-clone#Documentation/git-clone.txt---bare) and make every working copy a linked peer.
+Morgan Cugerone described a clean [bare worktree layout](https://morgan.cugerone.com/blog/how-to-use-git-worktree-and-in-a-clean-way/) in 2021,
+and this older [layout note](https://gist.github.com/sellout/3361145fac9bf2dfdc6a9bc18dcdff36) was already worrying the same bone.
+The symmetry is attractive.
+The controller is no longer a checkout that an editor can open or a build can use;
+tools written with an ordinary clone in mind must be pointed at a linked worktree.
+
 That is about all the Git lesson this post needs.
 The path argument was left to the caller.
 My problem is with what callers have lately decided it means.
@@ -58,27 +75,23 @@ and nobody has to remember whether the useful uncommitted change is in stash num
 Agents did not invent [this use](https://github.blog/ai-and-ml/github-copilot/what-are-git-worktrees-and-why-should-i-use-them/);
 but with token consumption being the best proxy indicator of welfare
 that mankind can come up with, it's not at all surprising.
-The harness has to put them somewhere.
-[Claude Code](https://code.claude.com/docs/en/worktrees) uses `.claude/worktrees/`, and Codex uses `$CODEX_HOME/worktrees`;
-the current [settings](https://learn.chatgpt.com/docs/environments/git-worktrees) at least let the user choose another root
-and distinguish managed from permanent worktrees.
+One worktree per task gives each agent its own files and index without paying for another clone.
+Refs remain shared; ports, databases, GPUs
+and every other non-Git resource remain somebody else's problem.
+
+The harness then has to decide whether its checkout is a possession or a room key.
+[Claude Code](https://code.claude.com/docs/en/worktrees) keeps managed worktrees under `.claude/worktrees/`.
+Codex has used `$CODEX_HOME/worktrees`;
+its current [settings](https://learn.chatgpt.com/docs/environments/git-worktrees) also distinguish managed worktrees from permanent ones.
 [`gwq`](https://github.com/d-kuro/gwq) builds a global `~/worktrees/host/owner/repo/branch` forest.
 [Treehouse](https://github.com/kunchenguid/treehouse) leases warm numbered slots.
-If the thing is disposable execution,
-a cache or pool is exactly where it belongs.
+[Worktrunk](https://github.com/max-sixty/worktrunk) derives sibling paths from branch names.
+There are many more—`git gtr`, Branchlet, several Groves, several TUIs—
+and they do not converge because they are not managing the same thing:
+a durable checkout, a throwaway chat, a reusable slot or a peer around a bare controller.
 
-[Worktrunk](https://github.com/max-sixty/worktrunk), the most visible specialist wrapper I found,
-instead defaults to branch-derived siblings such as `repo.feature-auth`,
-then adds cache copying, hooks, ports, agent launch and cleanup.
-On Windows its `wt` collides with Windows Terminal,
-so the package exposes `git-wt`;
-`git wt` happens to work as an external Git command after all.
-There are many more—`git gtr`, Branchlet, several Groves, several TUIs—and they do not converge
-because a durable checkout, a throwaway chat, a reusable slot
-and a peer around a bare controller are not the same product.
-
-My unfinished tree is not a rented slot.
-Treating it as one is the part I object to.
+A cache is a perfectly good home for disposable execution.
+My unfinished tree is not a rented slot; that is the part I object to.
 
 ## But I'm not content with that...
 
