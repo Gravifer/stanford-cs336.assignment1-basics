@@ -143,11 +143,28 @@ into the convention I mean to use from now on.
 
 ## Break a leg with じゅじゅつ
 
-[Jujutsu](https://docs.jj-vcs.dev/latest/) is Git-compatible,
-but it is not Git with the commands renamed.
-Its working copy is itself a mutable commit,
-which `jj` snapshots at the start of almost every command;
-there is no staging index or current branch.
+[Jujutsu](https://docs.jj-vcs.dev/latest/) is an emerging VCS.
+The first thing you'll notice is that there is no staging area,
+and the second is that it does not care about 'branches' like Git
+(what Git calls branches are physiologically buds on a plant).
+But most of its appeal lies in how casually it lets you edit a stack of changes.
+The working copy belongs to the change being edited;
+`jj` snapshots it into a new commit at the start of almost every command.
+
+Each [change](https://docs.jj-vcs.dev/latest/glossary/#change)
+keeps a stable identity as its underlying commit is rewritten.
+Edit one in the middle of a stack and jj rebases its descendants automatically;
+[conflicts](https://docs.jj-vcs.dev/latest/conflicts/) can remain in commits
+instead of interrupting the operation,
+and the [operation log](https://docs.jj-vcs.dev/latest/operation-log/)
+makes the rearrangement inspectable and undoable.
+
+Losing the staging area does not lose the useful part of `git commit -p`.
+The [official command table](https://docs.jj-vcs.dev/latest/git-command-table/)
+maps that to `jj split`;
+`jj squash -i` can move selected work into an existing change
+instead of only preparing whatever commit comes next.
+
 The [official comparison](https://docs.jj-vcs.dev/latest/git-comparison/)
 does the concept-by-concept version.
 For the actual tour, [Evan Martin's tutorial](https://evmar.github.io/jjtut/)
