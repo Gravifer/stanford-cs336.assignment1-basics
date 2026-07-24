@@ -197,6 +197,63 @@ my convention happens to leave room for it.
 
 ## See the grove and have the trees too
 
+There are two names hiding in this layout,
+which is how I lost an unreasonable amount of time
+to a directory convention.
+The outside names the local project as a whole;
+the inside names the ordinary clone that happens to remain
+Git's administrative centre.
+Those are different jobs,
+even if a one-worktree life lets one directory perform both.
+
+The umbrella should not be named after one kind of child.
+`somerepo.worktrees/` becomes inaccurate
+as soon as a jj workspace or a household note moves in;
+it also makes the ordinary clone sound like an exception to its own project.
+`somerepo.workspace/` is worse now that jj uses *workspace*
+for each individual working copy.
+The repository basename already names the thing I mean,
+so the boring answer is simply `somerepo/`.
+
+`somerepo.grove/` is annoyingly apt.
+It names a collection without choosing Git or jj,
+and several tools have independently arrived at *Grove*
+for exactly that reason.
+That does not make the name bad;
+it makes the naked basename a better default.
+I will keep `.grove` as a stylistic variation,
+especially when the umbrella must coexist with an old conventional checkout.
+
+The distinguished child caused the real tournament.
+It is an ordinary clone,
+not the parent of the other working copies;
+yet it owns the common Git directory
+and is the checkout most tools will meet first.
+Names meaning *root*, *control* or *anchor* give it too much authority.
+Names meaning *main* or *master* confuse a checkout with a branch.
+Names meaning *seed* or *init* describe how the household began,
+not what the directory is six months later.
+`repo` manages to be both accurate and useless.
+
+Repeating the basename is the sober answer:
+`somerepo/somerepo` looks slightly like an accidental stutter,
+but the inner checkout gets a perfectly ordinary editor title.
+`somerepo/.somerepo` adds the visual warning
+without inventing another noun.
+Neither is a deal-breaker.
+
+I still want the warning,
+and I apparently want it enough to name the directory `.twit`.
+It is short,
+does not pretend to describe a hierarchy Git does not have,
+and is difficult to mistake for the project as a whole.
+I decline to rescue it with an acronym.
+
+So, for now:
+the naked repository basename outside,
+`.twit/` for the conventional clone,
+and useful names for its direct peers.
+
 Next time, I am cloning into this:
 
 ```text
@@ -209,9 +266,6 @@ Next time, I am cloning into this:
     └── jj-type-inference/    # perhaps a jj workspace
 ```
 
-The umbrella gets the repository basename.
-`somerepo.grove/` is a tolerable stylistic variation,
-especially when it has to coexist with an already conventional checkout.
 When two remotes have the same basename,
 `owner-somerepo/` or `host.owner.somerepo/` will do.
 I do not intend to standardise the exceptions.
@@ -364,19 +418,13 @@ A linked worktree containing submodules cannot be moved with `git worktree move`
 and even a clean one needs `--force` to be removed.
 I would not let an automatic janitor learn about that flag.
 
-What should the main clone be called?
-`root` is accurate
-until an agent sees the word and gets ideas.
-`anchor` and `control` sound like infrastructure products.
-`repo` says nothing.
-Repeating `somerepo/somerepo` is prosaic,
-which is not a vice,
-and gives editor windows a wonderfully normal title.
-
-The dot-directory tournament was less dignified:
-`.twit`, `.prime`, `.ansein`, `.noumenon`, `.self`, `.GIT`, `.canopy`, a repeated `.somerepo`,
-`.master`, `.sith`, `.hermit`, `.inclave`, `.vader`, `.monos`, `.monad`,
-`.demiurge`, `.init`, `.dictator`, `.stalin`,
+A naming epilogue,
+because the bracket deserves a record.
+Honourable nominations went to `.prime`,
+a repeated `.somerepo`, `.canopy`, `.hermit` and `.monad`.
+The less dignified side contained `.ansein`, `.noumenon`, `.self`, `.GIT`,
+`.master`, `.sith`, `.inclave`, `.vader`, `.monos`, `.demiurge`,
+`.init`, `.dictator`, `.stalin`,
 and several things best left in the chat log.
 `.host` was rejected.
 `.seed` sounds like an RNG.
