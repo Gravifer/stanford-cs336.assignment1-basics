@@ -66,15 +66,14 @@ My problem is with what callers have lately decided it means.
 
 ## Why do harness people hype about it?
 
-For someone with a healthy life,
+For a human dev with a healthy life,
 a second worktree lets the half-debugged thing remain half-debugged
 while an urgent fix happens elsewhere.
 The editor stays open, the breakpoints stay put,
 and nobody has to remember whether the useful uncommitted change is in stash number three.
-
 Agents did not invent [this use](https://github.blog/ai-and-ml/github-copilot/what-are-git-worktrees-and-why-should-i-use-them/);
 but with token consumption being the best proxy indicator of welfare
-that mankind can come up with, it's not at all surprising.
+that mankind can come up with, it's not at all surprising this is catching on.
 One worktree per task gives each agent its own files and index without paying for another clone.
 Refs remain shared; ports, databases, GPUs
 and every other non-Git resource remain somebody else's problem.
@@ -85,13 +84,22 @@ Codex has used `$CODEX_HOME/worktrees`;
 its current [settings](https://learn.chatgpt.com/docs/environments/git-worktrees) also distinguish managed worktrees from permanent ones.
 [`gwq`](https://github.com/d-kuro/gwq) builds a global `~/worktrees/host/owner/repo/branch` forest.
 [Treehouse](https://github.com/kunchenguid/treehouse) leases warm numbered slots.
-[Worktrunk](https://github.com/max-sixty/worktrunk) derives sibling paths from branch names.
-There are many more—`git gtr`, Branchlet, several Groves, several TUIs—
-and they do not converge because they are not managing the same thing:
+Many other worktree tools are emerging too:
+[Worktrunk](https://github.com/max-sixty/worktrunk),
+[`git gtr`](https://github.com/coderabbitai/git-worktree-runner),
+[Branchlet](https://github.com/raghavpillai/branchlet),
+[sev](https://github.com/thisguymartin/grove)[er](https://github.com/nicksenap/grove)[al](https://github.com/lost-in-the/grove) [Groves](https://www.usegrove.dev/),
+[LazyWorktree](https://github.com/chmouel/lazyworktree),
+[Wisetree](https://github.com/victorcorcos/wisetree),
+[rust-git-worktree](https://github.com/ozankasikci/rust-git-worktree)
+and [forestui](https://pypi.org/project/forestui/).
+They make different choices about where a tree goes, what names it,
+what gets copied into it and how much of its lifecycle the tool owns,
+because they support different things:
 a durable checkout, a throwaway chat, a reusable slot or a peer around a bare controller.
 
-A cache is a perfectly good home for disposable execution.
-My unfinished tree is not a rented slot; that is the part I object to.
+In all practical terms, worktree (and task agent) orchestration
+is a solved problem, albeit with a fragmented landscape.
 
 ## But I'm not content with that...
 
@@ -441,10 +449,21 @@ he will at least have to argue with a directory full of evidence.
 - [`gwq`](https://github.com/d-kuro/gwq)
 - [Treehouse](https://github.com/kunchenguid/treehouse)
 - [Worktrunk](https://github.com/max-sixty/worktrunk)
+- [`git gtr`](https://github.com/coderabbitai/git-worktree-runner)
+- [Branchlet](https://github.com/raghavpillai/branchlet)
+- [Grove: Zellij worktree workspaces](https://github.com/thisguymartin/grove)
+- [Grove: multi-repository worktree workspaces](https://github.com/nicksenap/grove)
+- [Grove: worktree and tmux management](https://github.com/lost-in-the/grove)
+- [Grove: Claude Code session and worktree management](https://www.usegrove.dev/)
+- [LazyWorktree](https://github.com/chmouel/lazyworktree)
+- [Wisetree](https://github.com/victorcorcos/wisetree)
+- [rust-git-worktree](https://github.com/ozankasikci/rust-git-worktree)
+- [forestui](https://pypi.org/project/forestui/)
 - [Nicholas Zakas: An introduction to Git worktrees](https://humanwhocodes.com/blog/2026/07/introduction-git-worktrees/)
 - [Morgan Cugerone: a bare-repository worktree layout](https://morgan.cugerone.com/blog/how-to-use-git-worktree-and-in-a-clean-way/)
 - [Sellout's worktree layout note](https://gist.github.com/sellout/3361145fac9bf2dfdc6a9bc18dcdff36)
 - [Git: `git-clone`](https://git-scm.com/docs/git-clone.html)
+- [Git: `git clone --bare`](https://git-scm.com/docs/git-clone#Documentation/git-clone.txt---bare)
 - [Jujutsu documentation](https://docs.jj-vcs.dev/latest/)
 - [Jujutsu glossary: workspace](https://docs.jj-vcs.dev/latest/glossary/#workspace)
 - [Jujutsu: colocated Git repositories](https://docs.jj-vcs.dev/latest/git-compatibility/)

@@ -8,6 +8,8 @@ Explicit instructions for a particular piece take precedence.
 - Preserve the author's voice and sentence structure when making small fixes.
 - Prefer human, direct phrasing over polished-but-generic explanatory prose.
 - Do not restate a motive the piece has already established.
+- Describe other people's tools as answers to different workflows, not as failed
+  attempts to converge.
 - Do not explain a joke after making it.
 - Do not assume a technical audience is completely new to the subject.
 - Treat author-provided titles and section headings as fixed unless asked to change them.
@@ -31,3 +33,6 @@ Explicit instructions for a particular piece take precedence.
 - Never discard a reference link.
 - If a link no longer belongs naturally in the prose, retain it in a reference
   section at the bottom.
+- Prefer attaching links to names already present over adding prose merely to
+  introduce sources. When several same-named tools share a collective phrase,
+  fragments of that phrase may carry separate links.
