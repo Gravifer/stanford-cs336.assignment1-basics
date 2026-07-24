@@ -103,77 +103,48 @@ is a solved problem, albeit with a fragmented landscape.
 
 ## But I'm not content with that...
 
-What set me off was a child task
-that had supposedly been sent to the worktree I made.
-Codex quietly made another one under its own installation
-and sent the task there instead.
-Technically, splendid:
-the files were separate.
-Practically,
-it had filed my work under product innards.
+The part I am not content with is older and dumber:
+`git clone REMOTE somerepo` spends the best local name on one working copy.
+The second durable checkout becomes `somerepo-auth`, the third `somerepo-parser`,
+and soon the parent directory looks as if a repository burst
+(again, not [my](https://humanwhocodes.com/blog/2026/07/introduction-git-worktrees/)
+[original](https://morgan.cugerone.com/blog/how-to-use-git-worktree-and-in-a-clean-way/)
+[idea](https://gist.github.com/sellout/3361145fac9bf2dfdc6a9bc18dcdff36)).
+A global pool only moves the decision out of sight.
 
-I want to see a worktree six weeks later
-and know why I kept it.
-I want to open it as an ordinary project,
-move the whole household,
-back up the odd note that belongs to the household rather than one checkout,
-and not depend on the lifetime or current branding of an agent harness.
-A chat ID is welcome to own a throwaway tree.
-It does not get to own mine.
+Nicholas Zakas calls direct siblings and a shared sibling container
+the two conventions in his recent [introduction](https://humanwhocodes.com/blog/2026/07/introduction-git-worktrees/),
+and prefers `my-project.worktrees/feature-name`.
+The roof is right; leaving the original clone beside it
+still gives one local project two top-level names.
+I want the original checkout beneath the roof as well,
+so the obvious basename means the whole household.
 
-This also exposed a much older mistake in how I clone things.
-Once `projects/somerepo` is the conventional clone,
-it has already taken the clean name for the whole local project.
-The second checkout becomes `projects/somerepo-auth`,
-the third `projects/somerepo-parser`,
-and soon the parent directory looks as if a repository burst.
-Nesting them inside `somerepo/` makes one checkout pretend to be everybody's parent.
-A global pool only moves the burst offstage.
+The bare layout from the previous section gets that symmetry by doing without a main worktree.
+Modern tools generally cope with it;
+but an ordinary clone is still a useful checkout
+and the compatibility option that asks least of the next tool.
+I want the symmetry without giving that up.
 
-The branch name is not much help with this.
-The directory is where the abandoned thought physically lives;
+So keep the ordinary clone, but demote it mentally.
+It remains the main worktree, with the real `.git/`
+and all the habits of a conventional clone.
+Linked worktrees become its siblings under a neutral umbrella.
+The original checkout remains administratively special;
+it just no longer gets to name the whole local project.
+
+That also frees the child names from the branch taxonomy.
+Git already accepts the worktree path and branch as separate arguments.
+The directory is where the line of thought physically lives;
 the branch is one Git name associated with it.
 I may want `auth/` in a window title
 while the repository calls the branch `feat/oauth-retry`.
-Git is already fine with that.
 
-Nicholas Zakas calls direct siblings and a shared sibling container the two conventions
-in his recent [introduction](https://humanwhocodes.com/blog/2026/07/introduction-git-worktrees/),
-and prefers `my-project.worktrees/feature-name`.
-I want the roof,
-but I also want the original checkout beneath it.
-Then the obvious basename means the whole local project,
-not whichever checkout happened to arrive first.
-
-The symmetrical version uses a bare repository as controller.
-Morgan Cugerone described a clean
-[bare worktree layout](https://morgan.cugerone.com/blog/how-to-use-git-worktree-and-in-a-clean-way/)
-in 2021,
-and this older
-[layout note](https://gist.github.com/sellout/3361145fac9bf2dfdc6a9bc18dcdff36)
-was already worrying the same bone.
-This is cleaner than my answer:
-the repository sits in the middle
-and every working copy is honestly a peer.
-
-Unfortunately I do not like it enough
-to make every tool sit the entrance exam.
-A [`--bare` clone](https://git-scm.com/docs/git-clone.html)
-is not an ordinary clone with its files swept away:
-among other differences,
-remote heads are copied directly into local branch refs
-instead of the usual `origin/*` arrangement.
-IDEs, Git GUIs, hook installers, Git LFS, submodules,
-language tools and miscellaneous project scripts
-are routinely tested against an ordinary checkout.
-Each bare-controller inconvenience is soluble.
-Their sum is still a tax.
-
-So:
-a normal clone,
-with the real `.git/` and a useful working tree,
-demoted one directory
-so it no longer monopolises the project's name.
+This combines the shared-container convention Zakas describes,
+the peer checkouts of bare layouts
+and Git's separate path and branch arguments.
+I am only deciding how to assemble them
+into the convention I mean to use from now on.
 The furniture can wait until the end.
 
 ## Break a leg with じゅじゅつ
