@@ -206,7 +206,7 @@ Next time, I am cloning into this:
 ```text
 <projects>/
 └── somerepo/                 # umbrella; normally just the repository basename
-    ├── .prime/               # ordinary clone; main worktree; real .git/
+    ├── .twit/                # ordinary clone; main worktree; real .git/
     ├── dev/                  # a long-lived Git worktree
     ├── auth-retry/           # another Git worktree
     ├── parser-probe/         # perhaps temporary, but mine
@@ -214,8 +214,8 @@ Next time, I am cloning into this:
 ```
 
 The umbrella gets the repository basename.
-If that has to coexist with an already conventional checkout,
-`somerepo.grove/` is a tolerable variation.
+`somerepo.grove/` is a tolerable stylistic variation,
+especially when it has to coexist with an already conventional checkout.
 When two remotes have the same basename,
 `owner-somerepo/` or `host.owner.somerepo/` will do.
 I do not intend to standardise the exceptions.
@@ -232,8 +232,8 @@ The base clone is an ordinary clone:
 
 ```powershell
 New-Item -ItemType Directory somerepo | Out-Null
-git clone REMOTE somerepo/.prime
-Set-Location somerepo/.prime
+git clone REMOTE somerepo/.twit
+Set-Location somerepo/.twit
 
 git fetch origin
 git worktree add -b feat/auth ../auth origin/main
@@ -262,8 +262,8 @@ for a convention that lives outside the repository.
 For a new repository with no remote:
 
 ```powershell
-New-Item -ItemType Directory -Force somerepo/.prime | Out-Null
-git -C somerepo/.prime init -b main
+New-Item -ItemType Directory -Force somerepo/.twit | Out-Null
+git -C somerepo/.twit init -b main
 # Make the first commit before adding linked worktrees.
 ```
 
@@ -283,11 +283,11 @@ then either clone afresh
 or move everything and repair all the linked paths.
 
 The umbrella is not a repository.
-Editors and coding agents should open `.prime/` or one of its siblings,
+Editors and coding agents should open `.twit/` or one of its siblings,
 not the household.
 Otherwise an agent given the "project root"
 may quite reasonably regard every worktree as its territory.
-The dot on `.prime` is a visual warning,
+The dot on `.twit` is a visual warning,
 not a sandbox;
 on Windows it does not even make the directory hidden.
 Unix shells and plenty of file pickers do hide it,
@@ -349,21 +349,21 @@ If a directory was definitely deleted behind Git's back,
 I can override the normal three-month expiry:
 
 ```powershell
-git -C .prime worktree prune --dry-run --verbose --expire now
-git -C .prime worktree prune --verbose --expire now
+git -C .twit worktree prune --dry-run --verbose --expire now
+git -C .twit worktree prune --verbose --expire now
 ```
 
 If the whole umbrella was moved behind Git's back,
 give `repair` the new path of every linked worktree:
 
 ```powershell
-git -C .prime worktree repair ../dev ../auth-retry ../parser-probe
+git -C .twit worktree repair ../dev ../auth-retry ../parser-probe
 ```
 
 `prune` removes stale administrative records,
 not live worktree directories.
 `repair` is for moved umbrellas and pointers.
-Hand-editing `.prime/.git/worktrees/` is a fine way
+Hand-editing `.twit/.git/worktrees/` is a fine way
 to turn a directory convention into an archaeology project.
 Nor should an eager cleanup script run [`git gc --prune=now`](https://git-scm.com/docs/git-gc.html)
 while several agents may be writing objects;
@@ -386,7 +386,7 @@ which is not a vice,
 and gives editor windows a wonderfully normal title.
 
 The dot-directory tournament was less dignified:
-`.prime`, `.ansein`, `.noumenon`, `.self`, `.GIT`, `.twit`, `.canopy`, a repeated `.somerepo`,
+`.twit`, `.prime`, `.ansein`, `.noumenon`, `.self`, `.GIT`, `.canopy`, a repeated `.somerepo`,
 `.master`, `.sith`, `.hermit`, `.inclave`, `.vader`, `.monos`, `.monad`,
 `.demiurge`, `.init`, `.dictator`, `.stalin`,
 and several things best left in the chat log.
@@ -397,7 +397,7 @@ and several things best left in the chat log.
 `.demiurge` beats `.noumenon` in their particular niche.
 Repeating the basename remains the option for people with better judgment.
 
-I am choosing `.prime`.
+I am choosing `.twit`.
 Future me can reopen the tournament if he likes;
 he will at least have to argue with a directory full of evidence.
 
