@@ -12,6 +12,8 @@ Explicit instructions for a particular piece take precedence.
   attempts to converge.
 - Do not explain a joke after making it.
 - Do not assume a technical audience is completely new to the subject.
+- Keep connected reasoning in natural-sized paragraphs. Avoid the ChatGPT habit
+  of giving every turn of thought its own miniature paragraph.
 - Treat author-provided titles and section headings as fixed unless asked to change them.
 - Do not introduce em dashes merely to recast a sentence.
 - Semicolons are part of the author's style. Preserve them; warn if a passage

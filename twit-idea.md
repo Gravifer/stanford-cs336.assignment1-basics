@@ -197,62 +197,30 @@ my convention happens to leave room for it.
 
 ## See the grove and have the trees too
 
-There are two names hiding in this layout,
-which is how I lost an unreasonable amount of time
-to a directory convention.
-The outside names the local project as a whole;
-the inside names the ordinary clone that happens to remain
-Git's administrative centre.
-Those are different jobs,
-even if a one-worktree life lets one directory perform both.
+So we are just deciding the naming of the umbrella and the primary clone now.
 
-The umbrella should not be named after one kind of child.
-`somerepo.worktrees/` becomes inaccurate
-as soon as a jj workspace or a household note moves in;
-it also makes the ordinary clone sound like an exception to its own project.
-`somerepo.workspace/` is worse now that jj uses *workspace*
-for each individual working copy.
-The repository basename already names the thing I mean,
-so the boring answer is simply `somerepo/`.
+People already use `somerepo.worktrees/` in the sibling-container way;
+someone deleting old worktrees could possibly delete the primary clone by accident
+if one names the umbrella with this.
+`somerepo.workspace/` is decent and weakly aligns with vs code usage,
+but I just like jj enough that I want to avoid its word for the counterpart of worktrees.
+`somerepo.grove/` sounds intuitive enough to me.
+Several worktree tools use the word *grove* too, but I don't think a collision is likely.
+It remains a useful variation, though for me the basename already suffices for me.
 
-`somerepo.grove/` is annoyingly apt.
-It names a collection without choosing Git or jj,
-and several tools have independently arrived at *Grove*
-for exactly that reason.
-That does not make the name bad;
-it makes the naked basename a better default.
-I will keep `.grove` as a stylistic variation,
-especially when the umbrella must coexist with an old conventional checkout.
-
-The distinguished child caused the real tournament.
-It is an ordinary clone,
-not the parent of the other working copies;
-yet it owns the common Git directory
-and is the checkout most tools will meet first.
-Names meaning *root*, *control* or *anchor* give it too much authority.
-Names meaning *main* or *master* confuse a checkout with a branch.
-Names meaning *seed* or *init* describe how the household began,
-not what the directory is six months later.
-`repo` manages to be both accurate and useless.
-
-Repeating the basename is the sober answer:
-`somerepo/somerepo` looks slightly like an accidental stutter,
-but the inner checkout gets a perfectly ordinary editor title.
-`somerepo/.somerepo` adds the visual warning
-without inventing another noun.
+I had a little too much fun naming the primary clone though.
+It is Git's main worktree, but it need not contain the main branch;
+it holds the common Git directory, but the other working copies are its siblings.
+Names of authority overstate the case,
+names of initialization age badly,
+and branch-like names describe the wrong thing.
+I could avoid inventing a role for it and repeat the basename:
+`somerepo/somerepo` gives the inner checkout a wonderfully normal editor title,
+while `somerepo/.somerepo` makes the distinction visible in the path.
 Neither is a deal-breaker.
-
-I still want the warning,
-and I apparently want it enough to name the directory `.twit`.
-It is short,
-does not pretend to describe a hierarchy Git does not have,
-and is difficult to mistake for the project as a whole.
-I decline to rescue it with an acronym.
-
-So, for now:
-the naked repository basename outside,
-`.twit/` for the conventional clone,
-and useful names for its direct peers.
+I still prefer a short dot-name; after all that ontology,
+`.twit` wins because I like it.
+I decline to make it stand for anything.
 
 Next time, I am cloning into this:
 
@@ -270,14 +238,13 @@ When two remotes have the same basename,
 `owner-somerepo/` or `host.owner.somerepo/` will do.
 I do not intend to standardise the exceptions.
 
-The base clone is an ordinary clone:
+The primary clone is still an ordinary clone:
 
 ```powershell
 New-Item -ItemType Directory somerepo | Out-Null
 git clone REMOTE somerepo/.twit
 Set-Location somerepo/.twit
 
-git fetch origin
 git worktree add -b feat/auth ../auth origin/main
 git worktree list
 ```
@@ -289,17 +256,11 @@ An existing, unoccupied branch needs no new one:
 git worktree add ../auth feat/auth
 ```
 
-The worktree directory is named for what I want in a shell prompt, editor title or task list.
-It need not repeat the branch's namespace.
-The branch remains the branch;
-the directory is where I left the thing.
-
-If I eventually tire of typing the path twice,
-a small PowerShell function can derive it,
-run the safety checks
-and call Git's porcelain.
-I do not need a template repository
-for a convention that lives outside the repository.
+I name the worktree directory for the shell prompt, editor title or task list.
+It does not have to repeat the branch namespace:
+`auth/` can contain `feat/oauth-retry`.
+A PowerShell function can automate the spelling and checks later;
+the convention itself does not need a template repository.
 
 For a new repository with no remote:
 
@@ -310,40 +271,36 @@ git -C somerepo/.twit init -b main
 ```
 
 If every Git that may touch the repository is 2.48 or newer,
-relative worktree links make moving the whole umbrella less eventful:
+I can make the worktree links relative:
 
 ```powershell
 git config worktree.useRelativePaths true
 ```
 
-That setting enables a repository extension
-older Git refuses to open.
-Absolute paths and a later `worktree repair` remain the compatibility-first choice.
-I would not turn an existing dirty household into this layout with a clever one-liner:
-preserve local refs, tracked changes, untracked files and ignored material first,
-then either clone afresh
-or move everything and repair all the linked paths.
+That makes moving the whole umbrella less eventful,
+but it also enables a repository extension that older Git refuses to open.
+Absolute paths and a later `worktree repair` are the compatibility-first choice.
+I would not rearrange an existing dirty repository with a clever one-liner:
+preserve its local refs, tracked changes, untracked files and ignored material,
+then clone afresh or move it and repair the linked paths.
 
 The umbrella is not a repository.
 Editors and coding agents should open `.twit/` or one of its siblings,
-not the household.
+not the umbrella.
 Otherwise an agent given the "project root"
 may quite reasonably regard every worktree as its territory.
-The dot on `.twit` is a visual warning,
-not a sandbox;
-on Windows it does not even make the directory hidden.
-Unix shells and plenty of file pickers do hide it,
-so the price of the warning is having to open the base clone explicitly.
+The dot on `.twit` is only a visual warning, not a sandbox;
+Windows does not hide it,
+while Unix shells and plenty of file pickers do.
 
 Repository scripts, hooks setup and `AGENTS.md` belong in the repository
 and therefore arrive in every worktree.
-A multi-root editor file or a note that really describes the whole household
+A multi-root editor file or a note about the whole local project
 may sit in the umbrella,
 but Git cannot back up a file outside every repository.
-I would keep that material scarce,
-back it up separately,
-and avoid an editor workspace that eagerly indexes every checkout
-merely because they share a parent.
+I would keep such files scarce and back them up separately.
+I would also avoid an editor workspace that eagerly indexes every checkout
+just because they share a parent.
 
 I am not turning this into six package-manager articles.
 Share downloads;
@@ -357,22 +314,21 @@ or compiler downloads and a CMake build directory.
 Two build trees do not become safely concurrent
 because their downloads were good neighbours.
 
-The default hooks directory and ordinary Git configuration
+Ordinary Git configuration and the default hooks directory
 are already shared through the common `.git`;
 `core.hooksPath` may point somewhere else.
 When a setting really belongs to one worktree,
 enable `extensions.worktreeConfig`
 and use `git config --worktree`;
-don't infer the current checkout by scraping the `.git` file.
-Git provides `git rev-parse --git-dir`, `--git-common-dir`, and `--git-path`
-precisely because `.git` is not always a directory.
+scripts should use `git rev-parse --git-dir`, `--git-common-dir` or `--git-path`
+rather than assume `.git` is a directory.
 Enabling that extension is a repository-format choice:
 older Git versions refuse to open it,
 so it is not part of my bootstrap.
 
-Removal is where a durable line of thought can accidentally be treated like a rented slot.
-I want the boring ritual to enumerate tracked, untracked and ignored material
-before the porcelain gets to decide anything:
+Before removing a worktree,
+I want the boring ritual to enumerate tracked changes,
+untracked files and ignored material:
 
 ```powershell
 git -C ../auth status --short --branch --untracked-files=no
@@ -382,8 +338,9 @@ git worktree remove ../auth
 git branch -d feat/auth
 ```
 
-Ignored material is exactly where `.env`, virtual environments,
-build trees and model checkpoints tend to live.
+Ignored material is where `.env`, virtual environments,
+build trees and model checkpoints tend to live;
+`git status` alone is not the inventory.
 Removing the worktree and deleting the branch are separate acts;
 `branch -d` gets its own chance to refuse.
 
@@ -402,12 +359,12 @@ give `repair` the new path of every linked worktree:
 git -C .twit worktree repair ../dev ../auth-retry ../parser-probe
 ```
 
-`prune` removes stale administrative records,
-not live worktree directories.
-`repair` is for moved umbrellas and pointers.
+`prune` removes stale administrative records, not live worktree directories;
+`repair` fixes the pointers after directories move.
 Hand-editing `.twit/.git/worktrees/` is a fine way
 to turn a directory convention into an archaeology project.
-Nor should an eager cleanup script run [`git gc --prune=now`](https://git-scm.com/docs/git-gc.html)
+An eager cleanup script should not run
+[`git gc --prune=now`](https://git-scm.com/docs/git-gc.html)
 while several agents may be writing objects;
 Git's normal grace period exists for a reason.
 
@@ -418,13 +375,12 @@ A linked worktree containing submodules cannot be moved with `git worktree move`
 and even a clean one needs `--force` to be removed.
 I would not let an automatic janitor learn about that flag.
 
-A naming epilogue,
-because the bracket deserves a record.
+A naming epilogue, because the bracket deserves a record.
 Honourable nominations went to `.prime`,
-a repeated `.somerepo`, `.canopy`, `.hermit` and `.monad`.
-The less dignified side contained `.ansein`, `.noumenon`, `.self`, `.GIT`,
+a repeated `.somerepo`, `.canopy`, `.hermit` and `.monad`;
+the other side contained `.ansein`, `.noumenon`, `.self`, `.GIT`,
 `.master`, `.sith`, `.inclave`, `.vader`, `.monos`, `.demiurge`,
-`.init`, `.dictator`, `.stalin`,
+`.init`, `.dictator`, `.stalin`
 and several things best left in the chat log.
 `.host` was rejected.
 `.seed` sounds like an RNG.
