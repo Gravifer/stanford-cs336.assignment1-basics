@@ -59,9 +59,9 @@ The symmetry is attractive.
 The controller is no longer a checkout that an editor can open or a build can use;
 tools written with an ordinary clone in mind must be pointed at a linked worktree.
 
+The directory and branch names need not match,
+and Git has no opinion on where the directory should go.
 That is about all the Git lesson this post needs.
-The path argument was left to the caller.
-My problem is with what callers have lately decided it means.
 
 ## Why do harness people hype it up?
 
@@ -169,7 +169,7 @@ The [operation log](https://docs.jj-vcs.dev/latest/operation-log/)
 makes the rearrangement inspectable and undoable.
 
 Jujutsu is very Git-compatible at the moment:
-`jj git init` and `jj git clone` create Git-backed workspaces
+`jj git init` and `jj git clone` create [Git-backed](https://github.com/jj-vcs/jj/blob/main/lib/src/git_backend.rs) workspaces
 [colocated by default](https://docs.jj-vcs.dev/latest/git-compatibility/#colocated-jujutsugit-workspaces):
 `.git/` and `.jj/` sit beside each other,
 both tools use the same working copy,
