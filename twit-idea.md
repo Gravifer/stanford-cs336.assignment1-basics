@@ -210,34 +210,36 @@ It remains a useful variation, though the basename already suffices for me.
 
 I had a little too much fun naming the primary clone though:
 
-| | |
-|---|---|
-| `<umbrella>/.repo` | Closest to the plain arrangement example in `git worktree` documentation. |
-| `<umbrella>/somerepo` | Repetitive in the path, if the umbrella also uses the basename; but plays nice with editor titlebars. |
-| `<umbrella>/.somerepo` | Can suggest that one probably does not work in this checkout, and may even be leaving it detached. |
-| `.root` | The agent makes a mistake with a shell command, and boom. |
-| `.anchor` | Apt if this checkout is only administrative; less so if active development also happens in it. |
-| `.control` | Similar. |
-| `.host` | The same sort of shell-command hazard as `.root`. |
-| `.master` / `.main` | Except one doesn't have to checkout the trunk here. |
-| `.GIT` | Immediately collides with `.git` on ordinary Windows filesystems. |
-| `.init` / `.clone` | Describes an event; perhaps too enigmatic? |
-| `.genesis` | More enigmatic. |
-| `.seed` | Sounds like an RNG. |
-| `.zero` | |
-| `.nucleus` | |
-| `.substrate` | |
-| `.canopy` | There is already a [project](https://canopy.itsol.tech/) with this name. |
-| `.hermit` | There is already a [project](https://cashapp.github.io/hermit/usage/get-started/) with this name. |
-| `.self` | |
-| `.ansich` | |
-| `.monos` / `.monad` | |
-| `.noumenon` / `.demiurge` | |
-| `.sith` / `.vader` | |
-| `.dictator` / `.stalin` | |
-| `.prime` | Conveys that this is either the OG init or the first clone; looks pretty good? |
-| `.primary` | Variant of `.prime`. |
-| `.twit` | or `.twig`; whatever. |
+<!-- https://stackoverflow.com/questions/17536216/create-a-table-without-a-header-in-markdown -->
+
+| &nbsp;                    | &nbsp;                                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `<umbrella>/.repo`        | Closest to the plain arrangement example in `git worktree` documentation.                                    |
+| `<umbrella>/somerepo`     | Repetitive in the path, if the umbrella also uses the basename; but plays nice with editor titlebars.        |
+| `<umbrella>/.somerepo`    | A dot-dir can suggest that one probably does not work in this checkout, and may even be leaving it detached. |
+| `.root`                   | The agent makes a mistake with a shell command, and boom.                                                    |
+| `.anchor`                 | Apt if this checkout is only administrative; less so if active development also happens in it.               |
+| `.control`                | Similar.                                                                                                     |
+| `.host`                   | The same sort of shell-command hazard as `.root`.                                                            |
+| `.master` / `.main`       | Except one doesn't have to checkout the trunk here.                                                          |
+| `.GIT`                    | Immediately collides with `.git` on ordinary Windows filesystems.                                            |
+| `.init` / `.clone`        | Describes an event; perhaps too enigmatic?                                                                   |
+| `.genesis`                | More enigmatic.                                                                                              |
+| `.seed`                   | Sounds like an RNG.                                                                                          |
+| `.zero`                   |                                                                                                              |
+| `.nucleus`                |                                                                                                              |
+| `.substrate`              |                                                                                                              |
+| `.canopy`                 | There is already a [project](https://canopy.itsol.tech/) with this name.                                     |
+| `.hermit`                 | There is already a [project](https://cashapp.github.io/hermit/usage/get-started/) with this name.            |
+| `.self`                   |                                                                                                              |
+| `.ansich`                 |                                                                                                              |
+| `.monos` / `.monad`       |                                                                                                              |
+| `.noumenon` / `.demiurge` |                                                                                                              |
+| `.sith` / `.vader`        |                                                                                                              |
+| `.dictator` / `.stalin`   |                                                                                                              |
+| `.prime`                  | Conveys that this is either the OG init or the first clone; looks pretty good?                               |
+| `.primary`                | Variant of `.prime`.                                                                                         |
+| `.twit`                   | or `.twig`; whatever.                                                                                        |
 
 `.prime` feels like the all-rounder to me,
 though `.anchor` may convey your intention more clearly
@@ -294,21 +296,11 @@ Git 2.48 also lets the worktree links be relative:
 git config worktree.useRelativePaths true
 ```
 
-That makes the umbrella easier to move,
-at the cost of a repository extension older Git refuses to open.
-I will usually take absolute paths and a later `worktree repair`.
-I am not rearranging an existing dirty repository with a clever one-liner either:
-preserve its local refs, tracked changes, untracked files and ignored material;
-then clone afresh,
-or move it and repair the linked paths.
-
 The umbrella is not a repository,
-so I open `.twit/` or one of its siblings in editors and coding agents.
+so open `.twit/` or one of its siblings in editors and coding agents.
 Give an agent the umbrella as its "project root"
-and it may reasonably treat every checkout as in scope.
-The dot on `.twit` warns me about the distinction;
-it is not a sandbox,
-and Windows does not even hide it.
+and it may reasonably treat every checkout as in scope;
+or alternatively, give a subagent a specific worktree, so you have slightly better isolation.
 
 Repository scripts, hooks setup and `AGENTS.md` belong in the repository
 and therefore arrive in every worktree.
