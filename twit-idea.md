@@ -286,14 +286,23 @@ git init -b main somerepo/.twit
 # Make the first commit before adding linked worktrees.
 ```
 
-With Git 2.48 or newer, you can additionally make
+`prune` removes stale registrations, not live worktree directories;
+`repair` fixes pointers after the directories move.
+If the whole umbrella moved without Git's notice,
+give `repair` every new worktree path:
+
+```console
+git -C .twit worktree repair ../dev ../auth-retry ../parser-probe
+```
+
+or, with Git 2.48 or higher, you can actually make
 the worktree links relative:
 
 ```console
 git config worktree.useRelativePaths true
 ```
 
-to make the umbrella more self-contained.
+so that the umbrella is more self-contained.
 
 The umbrella is not a repository,
 so open `.twit/` or one of its siblings in editors and coding agents.
@@ -334,14 +343,7 @@ git worktree remove ../auth
 git branch -d feat/oauth-retry
 ```
 
-The first command shows tracked changes,
-the next two list untracked and ignored files.
-Ignored files are where `.env`, virtual environments,
-build trees and model checkpoints tend to live.
-Removing the worktree and deleting the branch are separate acts;
-`branch -d` gets its own chance to refuse.
-
-If the directory was definitely deleted behind Git's back,
+If a directory was definitely deleted behind Git's back,
 override the usual three-month expiry:
 
 ```console
@@ -349,28 +351,12 @@ git -C .twit worktree prune --dry-run --verbose --expire now
 git -C .twit worktree prune --verbose --expire now
 ```
 
-If the whole umbrella moved behind Git's back,
-give `repair` every new worktree path:
-
-```console
-git -C .twit worktree repair ../dev ../auth-retry ../parser-probe
-```
-
-`prune` removes stale registrations, not live worktree directories;
-`repair` fixes pointers after the directories move.
-Hand-editing `.twit/.git/worktrees/` is a fine way
-to turn a directory convention into an archaeology project.
-Nor should a cleanup script run
-[`git gc --prune=now`](https://git-scm.com/docs/git-gc.html)
-while several agents may be writing objects;
-Git's normal grace period exists for a reason.
-
 Submodules remain the conspicuous exception to automatic cleanup.
 Git's own [worktree manual](https://git-scm.com/docs/git-worktree#_bugs)
 still calls their multiple-checkout support incomplete.
 A linked worktree containing submodules cannot be moved with `git worktree move`,
 and even a clean one needs `--force` to be removed.
-Do not teach an automatic janitor that flag.
+So don't use agent orchestration with those.
 
 ---
 
