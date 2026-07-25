@@ -309,28 +309,22 @@ with a template,
 while [Worktrunk](https://github.com/max-sixty/worktrunk) can use worktrees
 created directly by Git.
 
-In a linked worktree, `.git` is a file containing a `gitdir:` pointer
-into `.twit/.git/worktrees/`.
-That per-worktree administrative directory holds its `HEAD`, index and so on,
-plus a `commondir` file pointing back to `.twit/.git/`.
-Git calls the latter the *common Git directory*;
+The primary clone's `.git/` is what Git calls the *common Git directory*:
 it holds the objects, refs, ordinary configuration and default hooks
-shared by all the worktrees.
+shared by every worktree.
 `core.hooksPath` may put hooks somewhere else.
+`git rev-parse --git-common-dir` finds the shared directory
+from any worktree;
+`git rev-parse --git-dir` instead finds that worktree's own
+administrative directory.
 If a setting really belongs to one worktree,
 enable `extensions.worktreeConfig`
-and use `git config --worktree`;
-that is another repository extension older Git refuses to open,
-so I will not enable it in the bootstrap.
-From a linked worktree,
-`git rev-parse --git-dir` returns its per-worktree directory,
-while `git rev-parse --git-common-dir` returns `.twit/.git/`;
-`git rev-parse --git-path PATH` asks Git to resolve a particular
-administrative path.
-Scripts should use those instead of assuming `.git` is a directory.
+and use `git config --worktree`.
+Scripts should use those commands or `git rev-parse --git-path PATH`
+instead of assuming `.git` is a directory.
 
 Before removing a worktree,
-I want to see more than `git status` normally shows:
+inspect more than `git status` normally shows:
 
 ```console
 git -C ../auth status --short --branch --untracked-files=no
@@ -348,15 +342,15 @@ Removing the worktree and deleting the branch are separate acts;
 `branch -d` gets its own chance to refuse.
 
 If the directory was definitely deleted behind Git's back,
-I can override the usual three-month expiry:
+override the usual three-month expiry:
 
 ```console
 git -C .twit worktree prune --dry-run --verbose --expire now
 git -C .twit worktree prune --verbose --expire now
 ```
 
-If I moved the whole umbrella behind Git's back,
-I give `repair` every new worktree path:
+If the whole umbrella moved behind Git's back,
+give `repair` every new worktree path:
 
 ```console
 git -C .twit worktree repair ../dev ../auth-retry ../parser-probe
@@ -364,18 +358,19 @@ git -C .twit worktree repair ../dev ../auth-retry ../parser-probe
 
 `prune` removes stale registrations, not live worktree directories;
 `repair` fixes pointers after the directories move.
-I am not hand-editing `.twit/.git/worktrees/`.
+Hand-editing `.twit/.git/worktrees/` is a fine way
+to turn a directory convention into an archaeology project.
 Nor should a cleanup script run
 [`git gc --prune=now`](https://git-scm.com/docs/git-gc.html)
 while several agents may be writing objects;
 Git's normal grace period exists for a reason.
 
-Submodules are the exception I would not automate.
+Submodules remain the conspicuous exception to automatic cleanup.
 Git's own [worktree manual](https://git-scm.com/docs/git-worktree#_bugs)
 still calls their multiple-checkout support incomplete.
 A linked worktree containing submodules cannot be moved with `git worktree move`,
 and even a clean one needs `--force` to be removed.
-I would not let an automatic janitor learn about that flag.
+Do not teach an automatic janitor that flag.
 
 ---
 
