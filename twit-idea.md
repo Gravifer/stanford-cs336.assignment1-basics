@@ -267,25 +267,16 @@ The primary clone is still an ordinary clone:
 mkdir somerepo
 git clone REMOTE somerepo/.twit
 cd somerepo/.twit
-```
 
-where `origin/main` just stands for the actual remote branch you want.
-For a worktree with a topic/focus:
-
-```console
 git worktree add -b feat/oauth-retry ../auth origin/main
 # or if `feat/oauth-retry` already exists:
 # git worktree add ../auth feat/oauth-retry
 git worktree list
 ```
 
-The convention only asks a helper to preserve that separation.
-A small script can pass the path, branch and optional starting point to Git;
-[Branchlet](https://github.com/raghavpillai/branchlet) can express the same layout
-with a path template,
-and [Worktrunk](https://github.com/max-sixty/worktrunk) can recognize
-worktrees created directly by Git.
-I can settle the directory convention without settling on a manager.
+where `origin/main` just stands for the actual remote branch you want.
+`auth/` is the name you in a shell prompt or editor title;
+Git can keep calling the branch `feat/oauth-retry`.
 
 For a new repository with no remote,
 Git can create the nested directory itself:
@@ -295,31 +286,26 @@ git init -b main somerepo/.twit
 # Make the first commit before adding linked worktrees.
 ```
 
-If every Git that may open the repository is 2.48 or newer,
-the worktree links can be relative:
+With Git 2.48 or newer, you can additionally make
+the worktree links relative:
 
 ```console
 git config worktree.useRelativePaths true
 ```
 
-Otherwise I will keep absolute paths
-and use `worktree repair` after moving the umbrella.
+to make the umbrella more self-contained.
 
-The umbrella is not a repository.
-I open `.twit/` or one of its siblings in editors and coding agents.
+The umbrella is not a repository,
+so open `.twit/` or one of its siblings in editors and coding agents.
 Give an agent the umbrella as its "project root"
-and it may reasonably treat every checkout as in scope.
-For a subagent,
-one worktree is the narrower filesystem boundary.
+and it may reasonably treat every checkout as in scope;
+or alternatively, give a subagent a specific worktree, and you have slightly better isolation.
 
-Repository scripts, hooks setup and `AGENTS.md` belong in the repository
-and therefore arrive in every worktree.
-The umbrella may hold a multi-root editor file
-or a note about the local layout.
-Git will not back those up;
-I will keep them few and back them up separately.
-Nor will I make one editor workspace index every checkout
-just because they share a parent.
+The layout does not require a particular manager.
+A small script can pass the path, branch and optional starting point to Git;
+[Branchlet](https://github.com/raghavpillai/branchlet) can express the same layout with a path template,
+and [Worktrunk](https://github.com/max-sixty/worktrunk) can recognize worktrees created directly by Git.
+I can settle the directory convention without settling on a manager.
 
 I am not turning this into six package-manager articles.
 Share downloads;
@@ -367,15 +353,15 @@ If the directory was definitely deleted behind Git's back,
 I can override the usual three-month expiry:
 
 ```console
-git worktree prune --dry-run --verbose --expire now
-git worktree prune --verbose --expire now
+git -C .twit worktree prune --dry-run --verbose --expire now
+git -C .twit worktree prune --verbose --expire now
 ```
 
 If I moved the whole umbrella behind Git's back,
-I run this from its new `.twit/`:
+I give `repair` every new worktree path:
 
 ```console
-git worktree repair ../dev ../auth-retry ../parser-probe
+git -C .twit worktree repair ../dev ../auth-retry ../parser-probe
 ```
 
 `prune` removes stale registrations, not live worktree directories;
