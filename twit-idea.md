@@ -74,7 +74,7 @@ Agents did not invent [this use](https://github.blog/ai-and-ml/github-copilot/wh
 but with token consumption being the best proxy indicator of welfare
 that mankind can come up with, it's not at all surprising this is catching on.
 One worktree per task gives each agent its own files and index without paying for another clone.
-Refs remain shared; ports, databases, GPUs
+Ordinary refs remain shared; ports, databases, GPUs
 and every other non-Git resource remain somebody else's problem.
 
 The harness then has to decide whether its checkout is a possession or a room key.
@@ -160,10 +160,11 @@ The working copy belongs to the change being edited;
 What makes a branchless and stackful life easy is the new layer of abstraction
 called [changes](https://docs.jj-vcs.dev/latest/glossary/#change).
 Each change keeps a stable identity as its underlying commit is rewritten.
-Edit one in the middle of a stack and jj rebases its descendants automatically;
-[conflicts](https://docs.jj-vcs.dev/latest/conflicts/) can remain in commits
-rather than being an interruptible operation,
-and the [operation log](https://docs.jj-vcs.dev/latest/operation-log/)
+Edit one in the middle of a stack and jj rebases its descendants automatically.
+If that produces [conflicts](https://docs.jj-vcs.dev/latest/conflicts/),
+jj [records](https://docs.jj-vcs.dev/latest/technical/conflicts/) them in the resulting commits
+instead of stopping the rebase for you to resolve them.
+The [operation log](https://docs.jj-vcs.dev/latest/operation-log/)
 makes the rearrangement inspectable and undoable.
 
 Jujutsu is very Git-compatible at the moment:
@@ -318,7 +319,7 @@ while [Worktrunk](https://github.com/max-sixty/worktrunk) can use worktrees
 created directly by Git.
 
 The primary clone's `.git/` is what Git calls the *common Git directory*:
-it holds the objects, refs, ordinary configuration and default hooks
+it holds the objects, ordinary refs, configuration and default hooks
 shared by every worktree.
 `core.hooksPath` may put hooks somewhere else.
 `git rev-parse --git-common-dir` finds the shared directory
