@@ -1,5 +1,6 @@
 import warnings
 from collections.abc import Callable
+from typing import Final
 
 import pytest
 import torch
@@ -7,7 +8,7 @@ import torch
 from cs336_basics.nn.feed_forward import SwiGLU_delegate, SwiGLU_own_weights, SwiGLU_packed_input
 
 
-SWIGLU_TYPES: tuple[Callable[..., torch.nn.Module], ...] = (
+SWIGLU_TYPES: Final[tuple[Callable[..., torch.nn.Module], ...]] = (
     SwiGLU_delegate,
     SwiGLU_own_weights,
     SwiGLU_packed_input,

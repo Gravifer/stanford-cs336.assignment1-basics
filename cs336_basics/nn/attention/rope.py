@@ -1,7 +1,7 @@
 """Rotary positional embeddings for headed attention activations."""
 
 import warnings
-from typing import Literal
+from typing import Final, Literal
 
 import einops
 import einx
@@ -20,14 +20,13 @@ class RotaryPositionalEmbedding(Module):
     the size of the equivalent cosine/sine caches.
     """
 
-    __constants__ = ["theta", "d_pair", "max_seq_len", "use_matrix_form"]
-    theta: float
-    d_pair: int
-    max_seq_len: int
+    theta: Final[float]
+    d_pair: Final[int]
+    max_seq_len: Final[int]
     # sin_angles: Float[torch.Tensor, "{self.max_seq_len} {self.d_pair}"]
     # cos_angles: Float[torch.Tensor, "{self.max_seq_len} {self.d_pair}"]
     # trigs: Float[torch.Tensor, "2 {self.max_seq_len} {self.d_pair}"]
-    use_matrix_form: bool
+    use_matrix_form: Final[bool]
     rot: Float[torch.Tensor, "{self.max_seq_len} {self.d_pair} 2 2"] | None
     cos: Float[torch.Tensor, "{self.max_seq_len} {self.d_pair}"] | None
     sin: Float[torch.Tensor, "{self.max_seq_len} {self.d_pair}"] | None

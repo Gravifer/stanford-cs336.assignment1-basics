@@ -17,7 +17,7 @@
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true,
   "workbench.editor.defaultBinaryEditor": "hexEditor.hexedit",
-  "workbench.editor.pinnedTabSizing": "shrink",
+  "workbench.editor.pinnedTabSizing": "normal",
   "files.exclude": {
     "**/.git": false,
     "**/.svn": true,
@@ -38,5 +38,7 @@
   ],
   "files.readonlyInclude": {
     ".venv/**": true
-  }
+  },
+  "explorerExcludeManager.backup": {},
+  "workbench.editor.pinnedTabsOnSeparateRow": true
 }

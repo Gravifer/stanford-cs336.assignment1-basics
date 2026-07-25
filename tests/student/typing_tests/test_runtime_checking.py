@@ -1,4 +1,5 @@
 import os
+from typing import Final
 
 import pytest
 import torch
@@ -9,7 +10,7 @@ from cs336_basics.nn.attention import RotaryPositionalEmbedding
 from cs336_basics.nn.modules import Embedding, Linear
 
 
-_HOOK_REQUIRED = os.environ.get("CS336_REQUIRE_RUNTIME_IMPORT_HOOK") == "1"
+_HOOK_REQUIRED: Final = os.environ.get("CS336_REQUIRE_RUNTIME_IMPORT_HOOK") == "1"
 
 pytestmark = pytest.mark.skipif(
     not _HOOK_REQUIRED,

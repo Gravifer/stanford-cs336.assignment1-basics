@@ -4,6 +4,7 @@ import json
 import os
 import resource
 import sys
+from typing import Final
 
 import psutil
 import pytest
@@ -12,8 +13,8 @@ import tiktoken
 from .adapters import get_tokenizer
 from .common import FIXTURES_PATH, gpt2_bytes_to_unicode
 
-VOCAB_PATH = FIXTURES_PATH / "gpt2_vocab.json"
-MERGES_PATH = FIXTURES_PATH / "gpt2_merges.txt"
+VOCAB_PATH: Final = FIXTURES_PATH / "gpt2_vocab.json"
+MERGES_PATH: Final = FIXTURES_PATH / "gpt2_merges.txt"
 
 
 def memory_limit(max_mem):

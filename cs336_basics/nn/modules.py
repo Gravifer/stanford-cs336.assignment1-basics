@@ -3,7 +3,7 @@
 from collections.abc import Callable, Iterable, Mapping
 from functools import update_wrapper
 from math import prod
-from typing import Any, Never, NoReturn, cast
+from typing import Any, Final, Never, NoReturn, cast
 
 import einx
 import einx._src.namedtensor.stage1 as einx_stage1
@@ -110,9 +110,8 @@ def DeltaLayer[ModuleT: nn.Module](module_type: type[ModuleT]) -> type[ModuleT]:
 class Embedding(Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torch.nn.sparse`
     """Lookup table mapping token IDs to learned embedding vectors."""
 
-    __constants__ = ["num_embeddings", "embedding_dim"]
-    num_embeddings: int  # vocab_size
-    embedding_dim: int  # d_model
+    num_embeddings: Final[int]  # vocab_size
+    embedding_dim: Final[int]  # d_model
     weight: Float[torch.Tensor, "{self.num_embeddings} {self.embedding_dim}"]  # matrix of embeddings
 
     def __init__(
@@ -198,11 +197,10 @@ class RMSNorm(Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer norm
     and :math:`eps` is a hyperparameter that is often fixed at `1e-5`.
     """
 
-    __constants__ = ["d_model", "eps"]
-    d_model: int
+    d_model: Final[int]
     eps: float
     weight: ModelVec | None  # the `gᵢ`s # noqa: F821
-    elementwise_affine: bool
+    elementwise_affine: Final[bool]
 
     def __init__(
         self,
@@ -441,7 +439,6 @@ class SoftMax(Module):  # mimicking :cls:`torch.nn.Softmax`
     the static method softmax_einx allows more flexible operation.
     """
 
-    __constants__ = ["dim"]
     dim: int | None
 
     def __init__(self, dim: int | None = None) -> None:
@@ -485,9 +482,8 @@ class SoftMax(Module):  # mimicking :cls:`torch.nn.Softmax`
 class Linear(Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
     """Applies a linear transformation to the incoming data: :math:`y = x A^T` where :math:`A` is the learnable weight matrix."""
 
-    __constants__ = ["in_features", "out_features"]
-    in_features: int
-    out_features: int
+    in_features: Final[int]
+    out_features: Final[int]
     weight: Float[torch.Tensor, "{self.out_features} {self.in_features}"]
     bias: Never
 

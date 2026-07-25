@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import Collection, Iterable, Iterator, Set
 from queue import Queue
-from typing import Literal, LiteralString, NamedTuple
+from typing import Final, Literal, LiteralString, NamedTuple
 
 import regex as re
 from tqdm import tqdm
@@ -21,7 +21,7 @@ from ..pretokenization_example import find_chunk_boundaries
 
 __all__: list[str] = ["train_bpe", "BPETokenizer", "Tokenizer"]
 
-_PAT: LiteralString = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""  # see <https://github.com/openai/tiktoken/pull/234/change>
+_PAT: Final[LiteralString] = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""  # see <https://github.com/openai/tiktoken/pull/234/change>
 _pattern: re.Pattern[str] = re.compile(_PAT)
 
 

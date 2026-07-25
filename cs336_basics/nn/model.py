@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from math import prod
-from typing import Any
+from typing import Any, Final
 
 import torch
 from jaxtyping import Float, Int
@@ -44,7 +44,7 @@ def _activation_call_bindings(
     }
 
 
-_COURSE_BLOCK_KEY_TRANSLATION = {
+_COURSE_BLOCK_KEY_TRANSLATION: Final = {
     "ln1.weight": "attn.norm.weight",
     "attn.q_proj.weight": "attn.update.q_proj.weight",
     "attn.k_proj.weight": "attn.update.k_proj.weight",
@@ -277,6 +277,11 @@ TransformerBlock = GPTDecoderLayer
 
 class TransformerLM(Module):
     """Decoder-only Transformer language model."""
+
+    vocab_size: Final[int]
+    context_length: Final[int]
+    d_model: Final[int]
+    num_layers: Final[int]
 
     def __init__(
         self,
