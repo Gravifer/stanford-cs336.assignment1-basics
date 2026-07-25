@@ -96,7 +96,7 @@ They make different choices about where a tree goes, what names it,
 what gets copied into it and how much of its lifecycle the tool owns,
 because they support different things:
 a durable checkout, a throwaway chat, a reusable slot or a peer around a bare controller.
-
+[OpenKanban](https://github.com/TechDufus/openkanban) and [KanBots](https://www.kanbots.dev/docs/the-board) put a task board above the same machinery.
 In all practical terms, worktree (and task agent) orchestration
 is a solved problem, albeit with a fragmented landscape.
 
