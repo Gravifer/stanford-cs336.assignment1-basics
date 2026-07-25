@@ -275,7 +275,7 @@ git worktree list
 ```
 
 where `origin/main` just stands for the actual remote branch you want.
-`auth/` is the name you in a shell prompt or editor title;
+`auth/` is the name you see in a shell prompt or editor title;
 Git can keep calling the branch `feat/oauth-retry`.
 
 For a new repository with no remote,
@@ -301,35 +301,33 @@ Give an agent the umbrella as its "project root"
 and it may reasonably treat every checkout as in scope;
 or alternatively, give a subagent a specific worktree, and you have slightly better isolation.
 
-The layout does not require a particular manager.
-A small script can pass the path, branch and optional starting point to Git;
-[Branchlet](https://github.com/raghavpillai/branchlet) can express the same layout with a path template,
-and [Worktrunk](https://github.com/max-sixty/worktrunk) can recognize worktrees created directly by Git.
-I can settle the directory convention without settling on a manager.
+A small wrapper is enough to create worktrees in this layout:
+pass a directory, a branch and, when needed, a starting point to Git.
+Some existing tools fit too:
+[Branchlet](https://github.com/raghavpillai/branchlet) can produce the same paths
+with a template,
+while [Worktrunk](https://github.com/max-sixty/worktrunk) can use worktrees
+created directly by Git.
 
-I am not turning this into six package-manager articles.
-Share downloads;
-do not share things being built or mutated.
-Each Python worktree gets its own `.venv`
-while uv shares its package cache.
-The same line runs between a Julia depot and project,
-Cargo's registry and `target/`,
-a package-manager store and `node_modules`,
-or compiler downloads and a CMake build directory.
-Two build trees do not become safely concurrent
-because their downloads were good neighbours.
-
-Ordinary Git configuration and the default hooks directory
-already live in the common `.git`;
-`core.hooksPath` may point somewhere else.
+In a linked worktree, `.git` is a file containing a `gitdir:` pointer
+into `.twit/.git/worktrees/`.
+That per-worktree administrative directory holds its `HEAD`, index and so on,
+plus a `commondir` file pointing back to `.twit/.git/`.
+Git calls the latter the *common Git directory*;
+it holds the objects, refs, ordinary configuration and default hooks
+shared by all the worktrees.
+`core.hooksPath` may put hooks somewhere else.
 If a setting really belongs to one worktree,
 enable `extensions.worktreeConfig`
 and use `git config --worktree`;
 that is another repository extension older Git refuses to open,
 so I will not enable it in the bootstrap.
-Scripts should use `git rev-parse --git-dir`,
-`--git-common-dir` or `--git-path`
-instead of assuming `.git` is a directory.
+From a linked worktree,
+`git rev-parse --git-dir` returns its per-worktree directory,
+while `git rev-parse --git-common-dir` returns `.twit/.git/`;
+`git rev-parse --git-path PATH` asks Git to resolve a particular
+administrative path.
+Scripts should use those instead of assuming `.git` is a directory.
 
 Before removing a worktree,
 I want to see more than `git status` normally shows:
