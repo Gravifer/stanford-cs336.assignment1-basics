@@ -361,41 +361,10 @@ and even a clean one needs `--force` to be removed.
 So don't let agent orchestration automate either operation.
 
 ---
+##
+**See also**
 
-**References accumulated while overthinking this**
-
-- [Boyi and Shuqi](https://en.wikipedia.org/wiki/Boyi_and_Shuqi)
-- [Git: `git-worktree`](https://git-scm.com/docs/git-worktree)
-- [GitHub: What are Git worktrees and why should I use them?](https://github.blog/ai-and-ml/github-copilot/what-are-git-worktrees-and-why-should-i-use-them/)
-- [Claude Code worktrees](https://code.claude.com/docs/en/worktrees)
-- [Codex worktree settings](https://learn.chatgpt.com/docs/environments/git-worktrees)
-- [`gwq`](https://github.com/d-kuro/gwq)
-- [Treehouse](https://github.com/kunchenguid/treehouse)
-- [Worktrunk](https://github.com/max-sixty/worktrunk)
-- [`git gtr`](https://github.com/coderabbitai/git-worktree-runner)
-- [Branchlet](https://github.com/raghavpillai/branchlet)
-- [Grove: Zellij worktree workspaces](https://github.com/thisguymartin/grove)
-- [Grove: multi-repository worktree workspaces](https://github.com/nicksenap/grove)
-- [Grove: worktree and tmux management](https://github.com/lost-in-the/grove)
-- [Grove: Claude Code session and worktree management](https://www.usegrove.dev/)
-- [LazyWorktree](https://github.com/chmouel/lazyworktree)
-- [Wisetree](https://github.com/victorcorcos/wisetree)
-- [rust-git-worktree](https://github.com/ozankasikci/rust-git-worktree)
-- [forestui](https://pypi.org/project/forestui/)
-- [Canopy](https://canopy.itsol.tech/)
-- [Hermit](https://cashapp.github.io/hermit/usage/get-started/)
-- [Nicholas Zakas: An introduction to Git worktrees](https://humanwhocodes.com/blog/2026/07/introduction-git-worktrees/)
-- [Morgan Cugerone: a bare-repository worktree layout](https://morgan.cugerone.com/blog/how-to-use-git-worktree-and-in-a-clean-way/)
-- [Sellout's worktree layout note](https://gist.github.com/sellout/3361145fac9bf2dfdc6a9bc18dcdff36)
-- [Git: `git-clone`](https://git-scm.com/docs/git-clone.html)
-- [Git: `git clone --bare`](https://git-scm.com/docs/git-clone#Documentation/git-clone.txt---bare)
-- [Jujutsu documentation](https://docs.jj-vcs.dev/latest/)
+- Git: [`git-worktree`](https://git-scm.com/docs/git-worktree) [`git-gc`](https://git-scm.com/docs/git-gc.html)
+- [Greg Pfeil's Git worktree layout note](https://gist.github.com/sellout/3361145fac9bf2dfdc6a9bc18dcdff36)
+- [Justin Pombrio's Jujutsu cheatsheet](https://justinpombrio.net/2025/02/11/jj-cheat-sheet.html#:~:text=cheat%20sheet%20for%20Jujutsu)
 - [Jujutsu: comparison with Git](https://docs.jj-vcs.dev/latest/git-comparison/)
-- [Evan Martin's Jujutsu tutorial](https://evmar.github.io/jjtut/)
-- [Steve Klabnik's Jujutsu tutorial](https://steveklabnik.github.io/jujutsu-tutorial/)
-- [Jujutsu glossary: workspace](https://docs.jj-vcs.dev/latest/glossary/#workspace)
-- [Jujutsu: colocated Git repositories](https://docs.jj-vcs.dev/latest/git-compatibility/)
-- [Jujutsu: colocated Git/jj workspaces](https://docs.jj-vcs.dev/latest/git-compatibility/#colocated-jujutsugit-workspaces)
-- [Treq workspaces](https://treq.dev/docs/concepts/workspaces/)
-- [Git: `git-gc`](https://git-scm.com/docs/git-gc.html)
-- [Git worktree submodule caveat](https://git-scm.com/docs/git-worktree#_bugs)
