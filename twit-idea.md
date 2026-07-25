@@ -267,20 +267,25 @@ The primary clone is still an ordinary clone:
 mkdir somerepo
 git clone REMOTE somerepo/.twit
 cd somerepo/.twit
-
-git worktree add -b feat/auth ../auth origin/main
-git worktree list
 ```
 
 where `origin/main` just stands for the actual remote branch you want.
-An existing, unoccupied branch needs no new one:
+For a worktree with a topic/focus:
 
 ```console
-git worktree add ../auth feat/auth
+git worktree add -b feat/oauth-retry ../auth origin/main
+# or if `feat/oauth-retry` already exists:
+# git worktree add ../auth feat/oauth-retry
+git worktree list
 ```
 
-`auth/` is the name I want to see in a shell prompt or editor title;
-Git can keep calling the branch `feat/oauth-retry`.
+The convention only asks a helper to preserve that separation.
+A small script can pass the path, branch and optional starting point to Git;
+[Branchlet](https://github.com/raghavpillai/branchlet) can express the same layout
+with a path template,
+and [Worktrunk](https://github.com/max-sixty/worktrunk) can recognize
+worktrees created directly by Git.
+I can settle the directory convention without settling on a manager.
 
 For a new repository with no remote,
 Git can create the nested directory itself:
@@ -290,17 +295,22 @@ git init -b main somerepo/.twit
 # Make the first commit before adding linked worktrees.
 ```
 
-Git 2.48 also lets the worktree links be relative:
+If every Git that may open the repository is 2.48 or newer,
+the worktree links can be relative:
 
 ```console
 git config worktree.useRelativePaths true
 ```
 
-The umbrella is not a repository,
-so open `.twit/` or one of its siblings in editors and coding agents.
+Otherwise I will keep absolute paths
+and use `worktree repair` after moving the umbrella.
+
+The umbrella is not a repository.
+I open `.twit/` or one of its siblings in editors and coding agents.
 Give an agent the umbrella as its "project root"
-and it may reasonably treat every checkout as in scope;
-or alternatively, give a subagent a specific worktree, so you have slightly better isolation.
+and it may reasonably treat every checkout as in scope.
+For a subagent,
+one worktree is the narrower filesystem boundary.
 
 Repository scripts, hooks setup and `AGENTS.md` belong in the repository
 and therefore arrive in every worktree.
@@ -343,12 +353,12 @@ git -C ../auth status --short --branch --untracked-files=no
 git -C ../auth ls-files --others --exclude-standard
 git -C ../auth ls-files --others --ignored --exclude-standard
 git worktree remove ../auth
-git branch -d feat/auth
+git branch -d feat/oauth-retry
 ```
 
 The first command shows tracked changes,
 the next two list untracked and ignored files.
-Ignored is where `.env`, virtual environments,
+Ignored files are where `.env`, virtual environments,
 build trees and model checkpoints tend to live.
 Removing the worktree and deleting the branch are separate acts;
 `branch -d` gets its own chance to refuse.
@@ -357,15 +367,15 @@ If the directory was definitely deleted behind Git's back,
 I can override the usual three-month expiry:
 
 ```console
-git -C .twit worktree prune --dry-run --verbose --expire now
-git -C .twit worktree prune --verbose --expire now
+git worktree prune --dry-run --verbose --expire now
+git worktree prune --verbose --expire now
 ```
 
 If I moved the whole umbrella behind Git's back,
-I give `repair` every new worktree path:
+I run this from its new `.twit/`:
 
 ```console
-git -C .twit worktree repair ../dev ../auth-retry ../parser-probe
+git worktree repair ../dev ../auth-retry ../parser-probe
 ```
 
 `prune` removes stale registrations, not live worktree directories;
