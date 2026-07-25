@@ -256,72 +256,67 @@ Next time, I am cloning into this:
     └── jj-type-inference/    # perhaps a jj workspace
 ```
 
-When two remotes have the same basename,
-`owner-somerepo/` or `host.owner.somerepo/` will do.
-I do not intend to standardise the exceptions.
+I may also name the umbrella `owner.somerepo(.grove)/` or even `forge.owner.somerepo(.grove)/`
+if I need disambiguation.
 
 The primary clone is still an ordinary clone:
 
-```powershell
-New-Item -ItemType Directory somerepo | Out-Null
+```console
+mkdir somerepo
 git clone REMOTE somerepo/.twit
-Set-Location somerepo/.twit
+cd somerepo/.twit
 
 git worktree add -b feat/auth ../auth origin/main
 git worktree list
 ```
 
-Here `origin/main` stands for the remote's actual default branch.
+where `origin/main` just stands for the actual remote branch you want.
 An existing, unoccupied branch needs no new one:
 
-```powershell
+```console
 git worktree add ../auth feat/auth
 ```
 
-I name the worktree directory for the shell prompt, editor title or task list.
-It does not have to repeat the branch namespace:
-`auth/` can contain `feat/oauth-retry`.
-A PowerShell function can automate the spelling and checks later;
-the convention itself does not need a template repository.
+`auth/` is the name I want to see in a shell prompt or editor title;
+Git can keep calling the branch `feat/oauth-retry`.
 
-For a new repository with no remote:
+For a new repository with no remote,
+Git can create the nested directory itself:
 
-```powershell
-New-Item -ItemType Directory -Force somerepo/.twit | Out-Null
-git -C somerepo/.twit init -b main
+```console
+git init -b main somerepo/.twit
 # Make the first commit before adding linked worktrees.
 ```
 
-If every Git that may touch the repository is 2.48 or newer,
-I can make the worktree links relative:
+Git 2.48 also lets the worktree links be relative:
 
-```powershell
+```console
 git config worktree.useRelativePaths true
 ```
 
-That makes moving the whole umbrella less eventful,
-but it also enables a repository extension that older Git refuses to open.
-Absolute paths and a later `worktree repair` are the compatibility-first choice.
-I would not rearrange an existing dirty repository with a clever one-liner:
-preserve its local refs, tracked changes, untracked files and ignored material,
-then clone afresh or move it and repair the linked paths.
+That makes the umbrella easier to move,
+at the cost of a repository extension older Git refuses to open.
+I will usually take absolute paths and a later `worktree repair`.
+I am not rearranging an existing dirty repository with a clever one-liner either:
+preserve its local refs, tracked changes, untracked files and ignored material;
+then clone afresh,
+or move it and repair the linked paths.
 
-The umbrella is not a repository.
-Editors and coding agents should open `.twit/` or one of its siblings,
-not the umbrella.
-Otherwise an agent given the "project root"
-may quite reasonably regard every worktree as its territory.
-The dot on `.twit` is only a visual warning, not a sandbox;
-Windows does not hide it,
-while Unix shells and plenty of file pickers do.
+The umbrella is not a repository,
+so I open `.twit/` or one of its siblings in editors and coding agents.
+Give an agent the umbrella as its "project root"
+and it may reasonably treat every checkout as in scope.
+The dot on `.twit` warns me about the distinction;
+it is not a sandbox,
+and Windows does not even hide it.
 
 Repository scripts, hooks setup and `AGENTS.md` belong in the repository
 and therefore arrive in every worktree.
-A multi-root editor file or a note about the whole local project
-may sit in the umbrella,
-but Git cannot back up a file outside every repository.
-I would keep such files scarce and back them up separately.
-I would also avoid an editor workspace that eagerly indexes every checkout
+The umbrella may hold a multi-root editor file
+or a note about the local layout.
+Git will not back those up;
+I will keep them few and back them up separately.
+Nor will I make one editor workspace index every checkout
 just because they share a parent.
 
 I am not turning this into six package-manager articles.
@@ -337,22 +332,21 @@ Two build trees do not become safely concurrent
 because their downloads were good neighbours.
 
 Ordinary Git configuration and the default hooks directory
-are already shared through the common `.git`;
+already live in the common `.git`;
 `core.hooksPath` may point somewhere else.
-When a setting really belongs to one worktree,
+If a setting really belongs to one worktree,
 enable `extensions.worktreeConfig`
 and use `git config --worktree`;
-scripts should use `git rev-parse --git-dir`, `--git-common-dir` or `--git-path`
-rather than assume `.git` is a directory.
-Enabling that extension is a repository-format choice:
-older Git versions refuse to open it,
-so it is not part of my bootstrap.
+that is another repository extension older Git refuses to open,
+so I will not enable it in the bootstrap.
+Scripts should use `git rev-parse --git-dir`,
+`--git-common-dir` or `--git-path`
+instead of assuming `.git` is a directory.
 
 Before removing a worktree,
-I want the boring ritual to enumerate tracked changes,
-untracked files and ignored material:
+I want to see more than `git status` normally shows:
 
-```powershell
+```console
 git -C ../auth status --short --branch --untracked-files=no
 git -C ../auth ls-files --others --exclude-standard
 git -C ../auth ls-files --others --ignored --exclude-standard
@@ -360,37 +354,37 @@ git worktree remove ../auth
 git branch -d feat/auth
 ```
 
-Ignored material is where `.env`, virtual environments,
-build trees and model checkpoints tend to live;
-`git status` alone is not the inventory.
+The first command shows tracked changes,
+the next two list untracked and ignored files.
+Ignored is where `.env`, virtual environments,
+build trees and model checkpoints tend to live.
 Removing the worktree and deleting the branch are separate acts;
 `branch -d` gets its own chance to refuse.
 
-If a directory was definitely deleted behind Git's back,
-I can override the normal three-month expiry:
+If the directory was definitely deleted behind Git's back,
+I can override the usual three-month expiry:
 
-```powershell
+```console
 git -C .twit worktree prune --dry-run --verbose --expire now
 git -C .twit worktree prune --verbose --expire now
 ```
 
-If the whole umbrella was moved behind Git's back,
-give `repair` the new path of every linked worktree:
+If I moved the whole umbrella behind Git's back,
+I give `repair` every new worktree path:
 
-```powershell
+```console
 git -C .twit worktree repair ../dev ../auth-retry ../parser-probe
 ```
 
-`prune` removes stale administrative records, not live worktree directories;
-`repair` fixes the pointers after directories move.
-Hand-editing `.twit/.git/worktrees/` is a fine way
-to turn a directory convention into an archaeology project.
-An eager cleanup script should not run
+`prune` removes stale registrations, not live worktree directories;
+`repair` fixes pointers after the directories move.
+I am not hand-editing `.twit/.git/worktrees/`.
+Nor should a cleanup script run
 [`git gc --prune=now`](https://git-scm.com/docs/git-gc.html)
 while several agents may be writing objects;
 Git's normal grace period exists for a reason.
 
-Submodules remain the conspicuous exception.
+Submodules are the exception I would not automate.
 Git's own [worktree manual](https://git-scm.com/docs/git-worktree#_bugs)
 still calls their multiple-checkout support incomplete.
 A linked worktree containing submodules cannot be moved with `git worktree move`,
