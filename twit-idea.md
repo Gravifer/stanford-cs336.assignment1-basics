@@ -38,10 +38,9 @@ Git also imagines a temporary detached worktree for an experiment,
 and provides `lock` for a worktree that may disappear with a removable disk or network mount.
 
 Each worktree gets a `HEAD`, an index and its own half-finished rebase;
-objects and refs are shared.
+objects and ordinary refs are shared.
 The directory and branch names need not match,
-and Git doesn't give a rat about where the directory should go. 
-(except, not in the original clone though; why would anyone do that?)
+and Git doesn't give a rat about where the directory should go.
 
 Traditionally, the main worktree keeps the repository's obvious name
 and linked worktrees become its neighbours:
@@ -49,8 +48,8 @@ and linked worktrees become its neighbours:
 Git's own `../hotfix` example points in exactly that direction.
 It is simple, and the original clone remains an ordinary checkout;
 it also lets one repository gradually colonize the parent directory.
-Spoiler: make an umbrella directory; the purpose of this post
-is really just the trivial part of what to name of it.
+Spoiler: make an umbrella directory; this post is really just about
+the trivial part: what to name it.
 
 A purist can remove even the privilege of the main checkout:
 make a [bare clone](https://git-scm.com/docs/git-clone#Documentation/git-clone.txt---bare) and make every working copy a linked peer.
@@ -64,7 +63,7 @@ That is about all the Git lesson this post needs.
 The path argument was left to the caller.
 My problem is with what callers have lately decided it means.
 
-## Why do harness people hype about it?
+## Why do harness people hype it?
 
 For a human dev with a healthy life,
 a second worktree lets the half-debugged thing remain half-debugged
@@ -85,7 +84,14 @@ its current [settings](https://learn.chatgpt.com/docs/environments/git-worktrees
 [`gwq`](https://github.com/d-kuro/gwq) builds a global `~/worktrees/host/owner/repo/branch` forest.
 [Treehouse](https://github.com/kunchenguid/treehouse) leases warm numbered slots.
 Many other worktree tools are emerging too:
-[Worktrunk](https://github.com/max-sixty/worktrunk), [`git gtr`](https://github.com/coderabbitai/git-worktree-runner), [Branchlet](https://github.com/raghavpillai/branchlet), [sev](https://github.com/thisguymartin/grove)[er](https://github.com/nicksenap/grove)[al](https://github.com/lost-in-the/grove) [Groves](https://www.usegrove.dev/), [LazyWorktree](https://github.com/chmouel/lazyworktree), [Wisetree](https://github.com/victorcorcos/wisetree), [rust-git-worktree](https://github.com/ozankasikci/rust-git-worktree) and [forestui](https://pypi.org/project/forestui/).
+[Worktrunk](https://github.com/max-sixty/worktrunk),
+[`git gtr`](https://github.com/coderabbitai/git-worktree-runner),
+[Branchlet](https://github.com/raghavpillai/branchlet),
+[sev](https://github.com/thisguymartin/grove)[er](https://github.com/nicksenap/grove)[al](https://github.com/lost-in-the/grove) [Groves](https://www.usegrove.dev/),
+[LazyWorktree](https://github.com/chmouel/lazyworktree),
+[Wisetree](https://github.com/victorcorcos/wisetree),
+[rust-git-worktree](https://github.com/ozankasikci/rust-git-worktree)
+and [forestui](https://pypi.org/project/forestui/).
 They make different choices about where a tree goes, what names it,
 what gets copied into it and how much of its lifecycle the tool owns,
 because they support different things:
@@ -111,10 +117,10 @@ and prefers `my-project.worktrees/feature-name`.
 I like the roof; leaving the original clone beside it
 still gives one local project two external entry points.
 I want the original checkout beneath the roof as well,
-so the obvious basename means the whole household.
+so the obvious basename means the whole local project.
 
 The bare layout from the previous section gets that symmetry by doing without a main worktree.
-Modern tools generally cope with it;
+Modern tools generally cope with it,
 but an ordinary clone is still a useful checkout
 and the compatibility option that asks least of the next tool.
 I want the symmetry without giving that up.
@@ -129,13 +135,13 @@ it just no longer gets to name the whole local project.
 I see no need for a compulsory `worktrees/` layer beneath the umbrella.
 Direct children are the default; another layer can earn its place later.
 
-Like many have talked about,
+As many have noted,
 Git does not restrict the worktree [path to its branch name](https://git-scm.com/docs/git-worktree).
 A durable tree still deserves a useful name,
 so `auth/` may contain `feat/oauth-retry`;
 an ad-hoc one can keep whatever was convenient.
 
-We now hve a rough idea that combines 
+We now have a rough idea that combines
 the shared-container convention Zakas describes,
 the peer checkouts of bare layouts, and so on.
 What remains is just to decide how to assemble them
@@ -156,7 +162,7 @@ called [changes](https://docs.jj-vcs.dev/latest/glossary/#change).
 Each change keeps a stable identity as its underlying commit is rewritten.
 Edit one in the middle of a stack and jj rebases its descendants automatically;
 [conflicts](https://docs.jj-vcs.dev/latest/conflicts/) can remain in commits
-rather than being an interruptable operation,
+rather than being an interruptible operation,
 and the [operation log](https://docs.jj-vcs.dev/latest/operation-log/)
 makes the rearrangement inspectable and undoable.
 
@@ -200,8 +206,8 @@ my convention happens to leave room for it.
 So we are just deciding the naming of the umbrella and the primary clone now.
 
 People already use `somerepo.worktrees/` in the sibling-container way;
-someone deleting old worktrees could possibly delete the primary clone by accident
-if one names the umbrella with this.
+someone deleting old worktrees could delete the primary clone by accident
+if one names the umbrella that way.
 `somerepo.workspace/` is decent and weakly aligns with VS Code usage,
 but I just like jj enough that I want to avoid its word for the counterpart of worktrees.
 `somerepo.grove/` sounds intuitive enough to me.
@@ -215,8 +221,8 @@ I had a little too much fun naming the primary clone though:
 | &nbsp;                    | &nbsp;                                                                                                       |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `<umbrella>/.repo`        | Closest to the plain arrangement example in `git worktree` documentation.                                    |
-| `<umbrella>/somerepo`     | Repetitive in the path, if the umbrella also uses the basename; but plays nice with editor titlebars.        |
-| `<umbrella>/.somerepo`    | A dot-dir can suggest that one probably does not work in this checkout, and may even be leaving it detached. |
+| `<umbrella>/somerepo`     | Repetitive in the path if the umbrella also uses the basename, but plays nice with editor titlebars.         |
+| `<umbrella>/.somerepo`    | A dot-dir can suggest that one probably does not work in this checkout, and may even leave it detached.      |
 | `.root`                   | The agent makes a mistake with a shell command, and boom.                                                    |
 | `.anchor`                 | Apt if this checkout is only administrative; less so if active development also happens in it.               |
 | `.control`                | Similar.                                                                                                     |
@@ -253,7 +259,7 @@ Next time, I am cloning into this:
 └── somerepo/                 # umbrella; normally just the repository basename
     ├── .twit/                # ordinary clone; main worktree; real .git/
     ├── dev/                  # a long-lived Git worktree
-    ├── auth-retry/           # another Git worktree
+    ├── auth/                 # another Git worktree
     ├── parser-probe/         # perhaps temporary, but mine
     └── jj-type-inference/    # perhaps a jj workspace
 ```
@@ -286,13 +292,11 @@ git init -b main somerepo/.twit
 # Make the first commit before adding linked worktrees.
 ```
 
-`prune` removes stale registrations, not live worktree directories;
-`repair` fixes pointers after the directories move.
 If the whole umbrella moved without Git's notice,
 give `repair` every new worktree path:
 
 ```console
-git -C .twit worktree repair ../dev ../auth-retry ../parser-probe
+git worktree repair ../dev ../auth ../parser-probe
 ```
 
 or, with Git 2.48 or higher, you can actually make
@@ -300,6 +304,7 @@ the worktree links relative:
 
 ```console
 git config worktree.useRelativePaths true
+git worktree repair
 ```
 
 so that the umbrella is more self-contained.
@@ -308,7 +313,8 @@ The umbrella is not a repository,
 so open `.twit/` or one of its siblings in editors and coding agents.
 Give an agent the umbrella as its "project root"
 and it may reasonably treat every checkout as in scope;
-or alternatively, give a subagent a specific worktree, and you have slightly better isolation.
+or give a subagent a specific worktree,
+and you have slightly better isolation.
 
 A small wrapper is enough to create worktrees in this layout:
 pass a directory, a branch and, when needed, a starting point to Git.
@@ -347,16 +353,18 @@ If a directory was definitely deleted behind Git's back,
 override the usual three-month expiry:
 
 ```console
-git -C .twit worktree prune --dry-run --verbose --expire now
-git -C .twit worktree prune --verbose --expire now
+git worktree prune --dry-run --verbose --expire now
+git worktree prune --verbose --expire now
 ```
+
+`prune` removes stale registrations, not live worktree directories.
 
 Submodules remain the conspicuous exception to automatic cleanup.
 Git's own [worktree manual](https://git-scm.com/docs/git-worktree#_bugs)
 still calls their multiple-checkout support incomplete.
 A linked worktree containing submodules cannot be moved with `git worktree move`,
 and even a clean one needs `--force` to be removed.
-So don't use agent orchestration with those.
+So don't let agent orchestration automate either operation.
 
 ---
 

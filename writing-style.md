@@ -65,6 +65,12 @@ Explicit instructions for a particular piece take precedence.
   uses; “not content” assembles the umbrella compromise; the jj section explains
   why *workspace* cannot name the umbrella; the final section chooses names and
   shows the resulting practice.
+- The jj section deliberately gives Git-familiar readers a short account of
+  changes, stacks and colocation before arriving at *workspace*. Tighten it
+  locally; do not reduce it to a terminology footnote.
+- The long naming table is the controlled version of the naming digression.
+  Its blank comments and increasingly strange candidates are intentional; do
+  not collapse it to a sensible shortlist.
 - Do not insert research at the first technically related sentence. Place it
   only where it advances the section's current move. In particular, the final
   section must not become a second survey of manager tools.
