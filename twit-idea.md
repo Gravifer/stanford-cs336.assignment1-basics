@@ -12,6 +12,8 @@
 
 -->
 
+> Disclaimer: the author relied heavily on LLM agents to search the web and fix the grammar.
+
 Vibe coding has made worktrees a must!
 But I'd found them useful even before I had a coding plan subscription
 or accidentally burnt through my wallet by selecting Opus on Fast through OpenRouter.
