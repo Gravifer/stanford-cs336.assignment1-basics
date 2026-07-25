@@ -155,7 +155,8 @@ and the second is that it does not care about 'branches' like Git
 (what Git calls branches are physiologically [buds](https://en.wikipedia.org/wiki/Bud) on a plant).
 But most of its appeal lies in how casually it lets you edit a stack of changes.
 The working copy belongs to the change being edited;
-`jj` snapshots it into a new commit at the start of almost every command.
+`jj` snapshots any working-copy changes into a new commit
+at the start of almost every command.
 
 What makes a branchless and stackful life easy is the new layer of abstraction
 called [changes](https://docs.jj-vcs.dev/latest/glossary/#change).
@@ -168,7 +169,7 @@ The [operation log](https://docs.jj-vcs.dev/latest/operation-log/)
 makes the rearrangement inspectable and undoable.
 
 Jujutsu is very Git-compatible at the moment:
-a Git-backed workspace created by current jj is
+`jj git init` and `jj git clone` create Git-backed workspaces
 [colocated by default](https://docs.jj-vcs.dev/latest/git-compatibility/#colocated-jujutsugit-workspaces):
 `.git/` and `.jj/` sit beside each other,
 both tools use the same working copy,
@@ -223,7 +224,7 @@ I had a little too much fun naming the primary clone though:
 | ------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `<umbrella>/.repo`        | Closest to the plain arrangement example in `git worktree` documentation.                                    |
 | `<umbrella>/somerepo`     | Repetitive in the path if the umbrella also uses the basename, but plays nice with editor titlebars.         |
-| `<umbrella>/.somerepo`    | A dot-dir can suggest that this is not the checkout for daily work, and may even stay detached.              |
+| `<umbrella>/.somerepo`    | A dot-dir can suggest that this is not the checkout for daily work, and that it may even stay detached.      |
 | `.root`                   | The agent makes a mistake with a shell command, and boom.                                                    |
 | `.anchor`                 | Apt if this checkout is only administrative; less so if active development also happens in it.               |
 | `.control`                | Similar.                                                                                                     |
