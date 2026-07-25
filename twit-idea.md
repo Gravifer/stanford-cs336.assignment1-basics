@@ -63,7 +63,7 @@ That is about all the Git lesson this post needs.
 The path argument was left to the caller.
 My problem is with what callers have lately decided it means.
 
-## Why do harness people hype it?
+## Why do harness people hype it up?
 
 For a human dev with a healthy life,
 a second worktree lets the half-debugged thing remain half-debugged
@@ -117,7 +117,7 @@ and prefers `my-project.worktrees/feature-name`.
 I like the roof; leaving the original clone beside it
 still gives one local project two external entry points.
 I want the original checkout beneath the roof as well,
-so the obvious basename means the whole local project.
+so the obvious basename means the whole household.
 
 The bare layout from the previous section gets that symmetry by doing without a main worktree.
 Modern tools generally cope with it,
@@ -222,7 +222,7 @@ I had a little too much fun naming the primary clone though:
 | ------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `<umbrella>/.repo`        | Closest to the plain arrangement example in `git worktree` documentation.                                    |
 | `<umbrella>/somerepo`     | Repetitive in the path if the umbrella also uses the basename, but plays nice with editor titlebars.         |
-| `<umbrella>/.somerepo`    | A dot-dir can suggest that one probably does not work in this checkout, and may even leave it detached.      |
+| `<umbrella>/.somerepo`    | A dot-dir can suggest that this is not the checkout for daily work, and may even stay detached.              |
 | `.root`                   | The agent makes a mistake with a shell command, and boom.                                                    |
 | `.anchor`                 | Apt if this checkout is only administrative; less so if active development also happens in it.               |
 | `.control`                | Similar.                                                                                                     |
@@ -259,7 +259,7 @@ Next time, I am cloning into this:
 └── somerepo/                 # umbrella; normally just the repository basename
     ├── .twit/                # ordinary clone; main worktree; real .git/
     ├── dev/                  # a long-lived Git worktree
-    ├── auth/                 # another Git worktree
+    ├── invoice-rounding/     # another Git worktree
     ├── parser-probe/         # perhaps temporary, but mine
     └── jj-type-inference/    # perhaps a jj workspace
 ```
@@ -267,13 +267,15 @@ Next time, I am cloning into this:
 I may also name the umbrella `owner.somerepo(.grove)/` or even `forge.owner.somerepo(.grove)/`
 if I need disambiguation.
 
-The primary clone is still an ordinary clone:
+The primary clone is still an ordinary clone.
+With Git 2.48 or higher, its worktree links can be relative from the start:
 
 ```console
 mkdir somerepo
 git clone REMOTE somerepo/.twit
 cd somerepo/.twit
 
+git config worktree.useRelativePaths true
 git worktree add -b feat/oauth-retry ../auth origin/main
 # or if `feat/oauth-retry` already exists:
 # git worktree add ../auth feat/oauth-retry
@@ -281,6 +283,7 @@ git worktree list
 ```
 
 where `origin/main` just stands for the actual remote branch you want.
+Relative links make the umbrella more self-contained.
 `auth/` is the name you see in a shell prompt or editor title;
 Git can keep calling the branch `feat/oauth-retry`.
 
@@ -292,22 +295,12 @@ git init -b main somerepo/.twit
 # Make the first commit before adding linked worktrees.
 ```
 
-If the whole umbrella moved without Git's notice,
+If an umbrella with absolute links moved without Git's notice,
 give `repair` every new worktree path:
 
 ```console
-git worktree repair ../dev ../auth ../parser-probe
+git worktree repair ../dev ../invoice-rounding ../parser-probe
 ```
-
-or, with Git 2.48 or higher, you can actually make
-the worktree links relative:
-
-```console
-git config worktree.useRelativePaths true
-git worktree repair
-```
-
-so that the umbrella is more self-contained.
 
 The umbrella is not a repository,
 so open `.twit/` or one of its siblings in editors and coding agents.
@@ -349,6 +342,7 @@ git worktree remove ../auth
 git branch -d feat/oauth-retry
 ```
 
+`prune` removes stale registrations, not live worktree directories.
 If a directory was definitely deleted behind Git's back,
 override the usual three-month expiry:
 
@@ -356,8 +350,6 @@ override the usual three-month expiry:
 git worktree prune --dry-run --verbose --expire now
 git worktree prune --verbose --expire now
 ```
-
-`prune` removes stale registrations, not live worktree directories.
 
 Submodules remain the conspicuous exception to automatic cleanup.
 Git's own [worktree manual](https://git-scm.com/docs/git-worktree#_bugs)
