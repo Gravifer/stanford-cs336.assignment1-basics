@@ -202,25 +202,47 @@ So we are just deciding the naming of the umbrella and the primary clone now.
 People already use `somerepo.worktrees/` in the sibling-container way;
 someone deleting old worktrees could possibly delete the primary clone by accident
 if one names the umbrella with this.
-`somerepo.workspace/` is decent and weakly aligns with vs code usage,
+`somerepo.workspace/` is decent and weakly aligns with VS Code usage,
 but I just like jj enough that I want to avoid its word for the counterpart of worktrees.
 `somerepo.grove/` sounds intuitive enough to me.
 Several worktree tools use the word *grove* too, but I don't think a collision is likely.
-It remains a useful variation, though for me the basename already suffices for me.
+It remains a useful variation, though the basename already suffices for me.
 
-I had a little too much fun naming the primary clone though.
-It is Git's main worktree, but it need not contain the main branch;
-it holds the common Git directory, but the other working copies are its siblings.
-Names of authority overstate the case,
-names of initialization age badly,
-and branch-like names describe the wrong thing.
-I could avoid inventing a role for it and repeat the basename:
-`somerepo/somerepo` gives the inner checkout a wonderfully normal editor title,
-while `somerepo/.somerepo` makes the distinction visible in the path.
-Neither is a deal-breaker.
-I still prefer a short dot-name; after all that ontology,
-`.twit` wins because I like it.
-I decline to make it stand for anything.
+I had a little too much fun naming the primary clone though:
+
+| | |
+|---|---|
+| `<umbrella>/.repo` | Closest to the plain arrangement example in `git worktree` documentation. |
+| `<umbrella>/somerepo` | Repetitive in the path, if the umbrella also uses the basename; but plays nice with editor titlebars. |
+| `<umbrella>/.somerepo` | Can suggest that one probably does not work in this checkout, and may even be leaving it detached. |
+| `.root` | The agent makes a mistake with a shell command, and boom. |
+| `.anchor` | Apt if this checkout is only administrative; less so if active development also happens in it. |
+| `.control` | Similar. |
+| `.host` | The same sort of shell-command hazard as `.root`. |
+| `.master` / `.main` | Except one doesn't have to checkout the trunk here. |
+| `.GIT` | Immediately collides with `.git` on ordinary Windows filesystems. |
+| `.init` / `.clone` | Describes an event; perhaps too enigmatic? |
+| `.genesis` | More enigmatic. |
+| `.seed` | Sounds like an RNG. |
+| `.zero` | |
+| `.nucleus` | |
+| `.substrate` | |
+| `.canopy` | There is already a [project](https://canopy.itsol.tech/) with this name. |
+| `.hermit` | There is already a [project](https://cashapp.github.io/hermit/usage/get-started/) with this name. |
+| `.self` | |
+| `.ansich` | |
+| `.monos` / `.monad` | |
+| `.noumenon` / `.demiurge` | |
+| `.sith` / `.vader` | |
+| `.dictator` / `.stalin` | |
+| `.prime` | Conveys that this is either the OG init or the first clone; looks pretty good? |
+| `.primary` | Variant of `.prime`. |
+| `.twit` | or `.twig`; whatever. |
+
+`.prime` feels like the all-rounder to me,
+though `.anchor` may convey your intention more clearly
+when you're doing a bare-like experience.
+`.twit`/`.twig` would be a good pun on Git itself though.
 
 Next time, I am cloning into this:
 
@@ -375,24 +397,6 @@ A linked worktree containing submodules cannot be moved with `git worktree move`
 and even a clean one needs `--force` to be removed.
 I would not let an automatic janitor learn about that flag.
 
-A naming epilogue, because the bracket deserves a record.
-Honourable nominations went to `.prime`,
-a repeated `.somerepo`, `.canopy`, `.hermit` and `.monad`;
-the other side contained `.ansein`, `.noumenon`, `.self`, `.GIT`,
-`.master`, `.sith`, `.inclave`, `.vader`, `.monos`, `.demiurge`,
-`.init`, `.dictator`, `.stalin`
-and several things best left in the chat log.
-`.host` was rejected.
-`.seed` sounds like an RNG.
-`.init` describes an event.
-`.master` suggests the wrong relationship with the checked out branch.
-`.demiurge` beats `.noumenon` in their particular niche.
-Repeating the basename remains the option for people with better judgment.
-
-I am choosing `.twit`.
-Future me can reopen the tournament if he likes;
-he will at least have to argue with a directory full of evidence.
-
 ---
 
 **References accumulated while overthinking this**
@@ -415,6 +419,8 @@ he will at least have to argue with a directory full of evidence.
 - [Wisetree](https://github.com/victorcorcos/wisetree)
 - [rust-git-worktree](https://github.com/ozankasikci/rust-git-worktree)
 - [forestui](https://pypi.org/project/forestui/)
+- [Canopy](https://canopy.itsol.tech/)
+- [Hermit](https://cashapp.github.io/hermit/usage/get-started/)
 - [Nicholas Zakas: An introduction to Git worktrees](https://humanwhocodes.com/blog/2026/07/introduction-git-worktrees/)
 - [Morgan Cugerone: a bare-repository worktree layout](https://morgan.cugerone.com/blog/how-to-use-git-worktree-and-in-a-clean-way/)
 - [Sellout's worktree layout note](https://gist.github.com/sellout/3361145fac9bf2dfdc6a9bc18dcdff36)
