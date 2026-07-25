@@ -362,6 +362,12 @@ A linked worktree containing submodules cannot be moved with `git worktree move`
 and even a clean one needs `--force` to be removed.
 So don't let agent orchestration automate either operation.
 
+<figure>
+<!-- [![shaven-yak_image2](https://gist.github.com/user-attachments/assets/ed3896ae-3de2-4ea3-949d-8ffd7f941422)]() -->
+<!-- [![shaven-yak_chatgpt](https://gist.github.com/user-attachments/assets/9194ceed-eddc-43c8-ad66-99f06e3848f8)]() -->
+<img src="https://gist.github.com/user-attachments/assets/9194ceed-eddc-43c8-ad66-99f06e3848f8" alt="Yak shaved." width="200">
+</figure>
+
 ---
 ##
 **See also**
