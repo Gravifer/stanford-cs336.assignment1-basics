@@ -1,7 +1,7 @@
 """Functional neural-network primitives with named tensor transformations."""
 
 import warnings
-from typing import Literal
+from typing import Literal, overload
 
 import einx
 import torch
@@ -92,6 +92,35 @@ def softmax(
     return exp_input / sum_exp
     # return einx.divide(f"{_shape}, {_kept} -> {_shape}", exp_input, sum_exp, **axes_map)
     # return einx.divide(f"{_shape}, {_reduced} -> {_shape}", exp_input, sum_exp, **axes_map)
+
+
+def log_softmax(
+    input: Float[torch.Tensor, "*shape"],
+    dim: int | None = None,
+    _stacklevel: int = 3,
+    dtype: torch.dtype | None = None,
+) -> Float[torch.Tensor, "*shape"]:
+    """Apply a softmax followed by a logarithm.
+
+    While mathematically equivalent to log(softmax(x)), doing these two
+    operations separately is slower and numerically unstable.
+    """  # so we copy our softmax but replace multiplicative stuff with additive stuff
+    type InputShaped = Float[torch.Tensor, "*shape"]
+    type KeptShaped = Float[torch.Tensor, "*kept"]
+    if dim is None:
+        warnings.warn(
+            "Implicit dimension choice for softmax has been deprecated. "
+            "Change the call to include dim=X as an argument.",
+            stacklevel=_stacklevel,
+        )
+        dim = 0 if input.ndim in (0, 1, 3) else 1
+    if dtype is not None:
+        input = input.to(dtype)
+    # return einx.log_softmax(_shape, input, **axes_map) # * arguably cheating
+    max_kept: KeptShaped = torch.max(input, dim=dim, keepdim=True).values
+    sub_input: InputShaped = input - max_kept
+    sum_exp: KeptShaped = torch.sum(sub_input.exp(), dim=dim, keepdim=True)
+    return sub_input - torch.log(sum_exp)
 
 
 def linear(
@@ -189,6 +218,138 @@ def rms_norm(  # torch flavored
             f"mapped... {_normed}, {_normed} -> mapped... {_normed}", normed, weight, **axes_map
         )
     return normed
+
+
+@overload
+def nll_loss(
+    logprobs: Float[torch.Tensor, "*shape classes"],
+    target: Int[torch.Tensor, "*shape"],
+    *,
+    weight: Float[torch.Tensor, "classes"] | None = None,  # noqa: F821
+    ignore_index: int | None = None,
+    reduction: Literal["none"],
+) -> Float[torch.Tensor, "*shape"]: ...
+
+
+@overload
+def nll_loss(
+    logprobs: Float[torch.Tensor, "*shape classes"],
+    target: Int[torch.Tensor, "*shape"],
+    *,
+    weight: Float[torch.Tensor, "classes"] | None = None,  # noqa: F821
+    ignore_index: int | None = None,
+    reduction: Literal["mean", "sum"] = "mean",
+) -> Float[torch.Tensor, ""]: ...
+
+
+def nll_loss(
+    logprobs: Float[torch.Tensor, "*shape classes"],
+    target: Int[torch.Tensor, "*shape"],
+    *,
+    weight: Float[torch.Tensor, "classes"] | None = None,  # noqa: F821
+    ignore_index: int | None = None,
+    # ^ torch 7 had the default sentinel -100 for whatever reasons; we mostly won't use it, so we will use None here
+    reduction: Literal["none", "mean", "sum"] = "mean",
+) -> Float[torch.Tensor, "*shape"] | Float[torch.Tensor, ""]:
+    r"""Negative log likelihood loss.
+
+    Args:
+        logprobs: Predicted log probabilities of shape (*shape, classes).
+        target: Class indices of shape (*shape).
+        weight: Optional per-class weights of shape (classes,).
+        ignore_index: Exact target value whose prediction sites are omitted.
+            The value may lie outside the valid class range. (optional)
+        reduction: ``"none"`` preserves *shape; ``"sum"`` and ``"mean"``
+            return a scalar.
+
+    Returns:
+        The negative log likelihood loss of shape (*shape) when unreduced,
+        or a scalar when reduced by summation or averaging.
+    """
+    prediction_shape = logprobs.shape[:-1]
+    classes = logprobs.shape[-1]
+    if prediction_shape != target.shape:
+        raise ValueError(
+            "target shape must equal logprobs shape without its classes axis; "
+            f"got logprobs of shape {logprobs.shape} and target of {target.shape}"
+        )
+
+    if reduction not in ("none", "mean", "sum"):
+        raise ValueError(f"unsupported reduction: {reduction!r}")
+
+    if weight is not None and weight.shape != (classes,):
+        raise ValueError(f"weight must have shape ({classes},), got {weight.shape}")
+
+    is_ignored = (
+        torch.zeros_like(target, dtype=torch.bool)
+        if ignore_index is None
+        else einx.equal("shape..., -> shape...", target, ignore_index)
+    )
+
+    # Apply ignoring without changing the prediction shape. Ignored sites carry
+    # class 0 only as a valid dummy gather index; is_ignored retains their actual
+    # meaning, so a genuine class-0 target remains distinguishable.
+    masked_target = torch.where(is_ignored, 0, target)
+
+    # Turn every remaining negative target into a positive out-of-range index
+    # so that gathering rejects invalid input instead of wrapping around to a
+    # class at the end. Ignored negative sentinels have already become the dummy
+    # index 0. Unlike einx.get_at's ravelled indexing, torch.gather preserves
+    # the class-axis bound for every prediction site.
+    gather_target = torch.where(masked_target < 0, classes, masked_target)
+
+    selected_logprobs = torch.gather(logprobs, dim=-1, index=gather_target.unsqueeze(-1)).squeeze(-1)
+
+    loss = -selected_logprobs
+    if weight is None:
+        reduction_weight = ~is_ignored # like we got all 1 weights
+    else:
+        selected_weight = einx.get_at(
+            "[classes], shape... -> shape...",
+            weight,
+            gather_target,
+        )
+        reduction_weight = selected_weight.masked_fill(is_ignored, 0)
+        loss = loss * reduction_weight
+    loss = loss.masked_fill(is_ignored, 0)
+
+    if reduction == "none":
+        return loss
+
+    total = einx.sum("[shape...] ->", loss)
+
+    if reduction == "sum":
+        return total
+
+    denominator = einx.sum("[shape...] ->", reduction_weight)
+    return total / denominator
+
+
+def cross_entropy(
+    input: Float[torch.Tensor, "*shape classes"],
+    target: Int[torch.Tensor, "*shape"],
+    weight: Float[torch.Tensor, "classes"] | None = None,  # noqa: F821
+    reduction: Literal["none", "mean", "sum"] = "mean",
+    label_smoothing: float = 0.0,
+) -> Float[torch.Tensor, "*shape"]:
+    r"""Cross entropy loss.
+
+    Args:
+        input: Predicted logits of shape (*shape, classes).
+        target: Ground truth labels of shape (*shape).
+        weight: Optional tensor of shape (classes,) to weight the loss.
+        reduction: Specifies the reduction to apply to the output.
+        label_smoothing: Label smoothing factor.
+
+    Returns:
+        The cross entropy loss of shape (*shape).
+    """
+    if label_smoothing < 0.0 or label_smoothing > 1.0:
+        raise ValueError("label_smoothing must be in [0, 1]")
+    if weight is not None and weight.shape[0] != input.shape[-1]:
+        raise ValueError("weight tensor must have the same number of classes as input")
+    logprobs: Float[torch.Tensor, "*shape classes"] = log_softmax(input, dim=-1)
+    return nll_loss(logprobs, target, weight=weight, reduction=reduction)
 
 
 def _attention_weights(
