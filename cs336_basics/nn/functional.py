@@ -266,13 +266,15 @@ def nll_loss(
         The negative log likelihood loss of shape (*shape) when unreduced,
         or a scalar when reduced by summation or averaging.
     """
-    prediction_shape = logprobs.shape[:-1]
-    classes = logprobs.shape[-1]
-    if prediction_shape != target.shape:
+    type LossShaped = Float[torch.Tensor, "*shape"]
+    type TargetShaped = Int[torch.Tensor, "*shape"]
+    type ScalarShaped = Float[torch.Tensor, ""]
+    if logprobs.shape[:-1] != target.shape:
         raise ValueError(
             "target shape must equal logprobs shape without its classes axis; "
             f"got logprobs of shape {logprobs.shape} and target of {target.shape}"
         )
+    classes: int = logprobs.shape[-1]
 
     if reduction not in ("none", "mean", "sum"):
         raise ValueError(f"unsupported reduction: {reduction!r}")
@@ -280,7 +282,7 @@ def nll_loss(
     if weight is not None and weight.shape != (classes,):
         raise ValueError(f"weight must have shape ({classes},), got {weight.shape}")
 
-    is_ignored = (
+    is_ignored: Bool[torch.Tensor, "*shape"] = (
         torch.zeros_like(target, dtype=torch.bool)
         if ignore_index is None
         else einx.equal("shape..., -> shape...", target, ignore_index)
@@ -289,39 +291,40 @@ def nll_loss(
     # Apply ignoring without changing the prediction shape. Ignored sites carry
     # class 0 only as a valid dummy gather index; is_ignored retains their actual
     # meaning, so a genuine class-0 target remains distinguishable.
-    masked_target = torch.where(is_ignored, 0, target)
+    masked_target: TargetShaped = torch.where(is_ignored, 0, target)
 
     # Turn every remaining negative target into a positive out-of-range index
     # so that gathering rejects invalid input instead of wrapping around to a
     # class at the end. Ignored negative sentinels have already become the dummy
     # index 0. Unlike einx.get_at's ravelled indexing, torch.gather preserves
     # the class-axis bound for every prediction site.
-    gather_target = torch.where(masked_target < 0, classes, masked_target)
+    gather_target: TargetShaped = torch.where(masked_target < 0, classes, masked_target)
 
-    selected_logprobs = torch.gather(logprobs, dim=-1, index=gather_target.unsqueeze(-1)).squeeze(-1)
+    # ! as of writing (einx 0.4.2), einx.get_at allowing out-of-range class indices to spill into adjacent prediction sites <https://github.com/fferflo/einx/issues/37>
+    selected_logprobs: LossShaped = torch.gather(logprobs, dim=-1, index=gather_target.unsqueeze(-1)).squeeze(-1)
 
-    loss = -selected_logprobs
+    loss: LossShaped = -selected_logprobs
     if weight is None:
-        reduction_weight = ~is_ignored # like we got all 1 weights
+        reduction_weight: LossShaped = ~is_ignored  # like we got all 1 weights
     else:
-        selected_weight = einx.get_at(
+        selected_weight: LossShaped = einx.get_at(
             "[classes], shape... -> shape...",
             weight,
             gather_target,
         )
-        reduction_weight = selected_weight.masked_fill(is_ignored, 0)
-        loss = loss * reduction_weight
-    loss = loss.masked_fill(is_ignored, 0)
+        reduction_weight: LossShaped = selected_weight.masked_fill(is_ignored, 0)
+        loss: LossShaped = loss * reduction_weight
+    loss: LossShaped = loss.masked_fill(is_ignored, 0)
 
     if reduction == "none":
         return loss
 
-    total = einx.sum("[shape...] ->", loss)
+    total: ScalarShaped = einx.sum("[shape...] ->", loss)
 
     if reduction == "sum":
         return total
 
-    denominator = einx.sum("[shape...] ->", reduction_weight)
+    denominator: ScalarShaped = einx.sum("[shape...] ->", reduction_weight)
     return total / denominator
 
 
