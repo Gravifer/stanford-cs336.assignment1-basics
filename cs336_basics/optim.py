@@ -101,3 +101,15 @@ class AdamW(torch.optim.Optimizer):
                 state["t"] = t + 1
 
         return loss
+
+
+def _lr_cosine_schedule(t: int, alpha_max: float, alpha_min: float, T_warmup: int, T_annealing: int) -> float:
+    """Compute the learning rate at a given step using a cosine schedule with warmup."""
+    assert 0 <= T_warmup < T_annealing, "Warmup iterations must be positive and less than annealing iterations."
+    if t < T_warmup:
+        return alpha_max * t / T_warmup
+    elif t >= T_annealing:  # annealing refers to the warmup + cosine time
+        return alpha_min
+    else:
+        progress: float = (t - T_warmup) / (T_annealing - T_warmup)
+        return alpha_min + 0.5 * (1 + math.cos(math.pi * progress)) * (alpha_max - alpha_min)
