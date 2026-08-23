@@ -446,7 +446,8 @@ class SoftMax(Module):  # mimicking :cls:`torch.nn.Softmax`
             warnings.warn(
                 "SoftMax dim is None; "
                 "Implicit dimension choice for softmax has been deprecated. "
-                "Change the call to include dim=X as an argument."
+                "Change the call to include dim=X as an argument.",
+                stacklevel=2
             )
         elif not isinstance(dim, int):
             raise TypeError(f"dim must be an int, but got {type(dim).__name__}")
