@@ -64,6 +64,8 @@ def softmax(
     # type ReducedShaped = Float[torch.Tensor, "*reduced"]
     type KeptShaped = Float[torch.Tensor, "*kept"]
     if dim is None:
+        # Preserve PyTorch's deprecated implicit-axis compatibility; see
+        # torch.nn.functional._get_softmax_dim.
         warnings.warn(
             "Implicit dimension choice for softmax has been deprecated. "
             "Change the call to include dim=X as an argument.",
