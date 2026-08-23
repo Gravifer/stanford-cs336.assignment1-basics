@@ -1,8 +1,14 @@
+"""Optimizers and optimizer-adjacent training utilities."""
+
 import math
 from collections.abc import Callable, Iterable
 
+import einops
 import torch
 from torch.optim.optimizer import ParamsT
+
+
+__all__ = ["AdamW", "SGD", "clip_grad_norm_", "cosine_annealing_learning_rate"]
 
 
 class SGD(torch.optim.Optimizer):
@@ -103,34 +109,55 @@ class AdamW(torch.optim.Optimizer):
         return loss
 
 
-def _lr_cosine_schedule(t: int, alpha_max: float, alpha_min: float, T_warmup: int, T_annealing: int) -> float:
+def cosine_annealing_learning_rate(
+    t: int,
+    alpha_max: float,
+    alpha_min: float,
+    T_warmup: int,
+    T_annealing: int,
+) -> float:
     """Compute the learning rate at a given step using a cosine schedule with warmup."""
-    assert 0 <= T_warmup < T_annealing, "Warmup iterations must be positive and less than annealing iterations."
+    assert 0 <= T_warmup < T_annealing, "Warmup iterations must be nonnegative and precede annealing end."
     if t < T_warmup:
         return alpha_max * t / T_warmup
-    elif t >= T_annealing:  # annealing refers to the warmup + cosine time
+    elif t >= T_annealing:
         return alpha_min
     else:
         progress: float = (t - T_warmup) / (T_annealing - T_warmup)
         return alpha_min + 0.5 * (1 + math.cos(math.pi * progress)) * (alpha_max - alpha_min)
 
 
-def _grad_norm_clip_(params: Iterable[torch.nn.Parameter], max_norm: float, eps: float = 1e-6) -> float:
+@torch.no_grad()
+def clip_grad_norm_(
+    parameters: Iterable[torch.nn.Parameter],
+    max_norm: float,
+    *,
+    eps: float = 1e-6,
+) -> torch.Tensor:
     """Clip the gradients of the parameters in-place to have a maximum norm of `max_norm`.
 
     Args:
-        params: Iterable of parameters whose gradients will be clipped.
+        parameters: Iterable of parameters whose gradients will be clipped.
         max_norm: The maximum allowed norm of the gradients.
         eps: A small value to avoid division by zero.
-    """
-    if isinstance(params, torch.nn.Parameter):
-        params: list[torch.nn.Parameter] = [params]
-    total_norm: float = sum(p.grad.norm(2).item() ** 2 for p in params if p.grad is not None) ** 0.5
 
-    clip_coef: float = max_norm / (total_norm + eps)
-    if clip_coef < 1:
-        for p in params:
-            if p.grad is not None:
-                p.grad.mul_(clip_coef)
+    Returns:
+        The total gradient norm before clipping.
+    """
+    gradients = tuple(parameter.grad for parameter in parameters if parameter.grad is not None)
+    if not gradients:
+        return torch.tensor(0.0)
+
+    norm_device = gradients[0].device
+    gradient_norms, _ = einops.pack(
+        [torch.linalg.vector_norm(gradient, ord=2).to(norm_device) for gradient in gradients],
+        "*",
+    )
+    total_norm = torch.linalg.vector_norm(gradient_norms, ord=2)
+
+    clip_coefficient = max_norm / (total_norm + eps)
+    clip_coefficient = torch.clamp(clip_coefficient, max=1.0)
+    for gradient in gradients:
+        gradient.mul_(clip_coefficient.to(device=gradient.device, dtype=gradient.dtype))
 
     return total_norm
