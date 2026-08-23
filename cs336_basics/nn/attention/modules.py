@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from math import prod
-from typing import Any, Literal, overload
+from typing import Any, Final, Literal, overload
 
 import einx
 import torch
@@ -46,22 +46,20 @@ class MultiheadAttention(Module):
     their leading suffix as an explicit query-head axis instead.
     """
 
-    __constants__ = [
-        "embed_dim",
-        "num_heads",
-        "num_kv_heads",
-        "kdim",
-        "vdim",
-        "qk_head_dim",
-        "value_head_dim",
-        "dropout",
-        "q_proj_dim",
-        "k_proj_dim",
-        "v_proj_dim",
-        "_qkv_same_input_dim",
-        "_layout_strategy",
-        "_qk_execution_strategy",
-    ]
+    embed_dim: Final[int]
+    num_heads: Final[int]
+    num_kv_heads: Final[int]
+    kdim: Final[int]
+    vdim: Final[int]
+    qk_head_dim: Final[int]
+    value_head_dim: Final[int]
+    dropout: float
+    q_proj_dim: Final[int]
+    k_proj_dim: Final[int]
+    v_proj_dim: Final[int]
+    _qkv_same_input_dim: Final[bool]
+    _layout_strategy: Final[Literal["head_before_sequence", "head_after_sequence"]]
+    _qk_execution_strategy: Final[Literal["auto", "separate", "stacked"]]
 
     type QueryVec = Float[torch.Tensor, "{self.embed_dim}"]  # noqa: F821
     type KeyVec = Float[torch.Tensor, "{self.kdim}"]  # noqa: F821

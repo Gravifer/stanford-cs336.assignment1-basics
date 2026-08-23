@@ -10,13 +10,13 @@ import argparse
 import importlib
 from collections.abc import Callable
 from contextlib import nullcontext
-from typing import Any
+from typing import Any, Final
 
 import torch
 from jaxtyping import install_import_hook
 
 
-TARGET_MODULE = "scripts.probes.import_hook_target"
+TARGET_MODULE: Final = "scripts.probes.import_hook_target"
 
 
 def report(label: str, probe: Callable[[], Any]) -> None:

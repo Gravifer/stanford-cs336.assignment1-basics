@@ -1,9 +1,10 @@
 """Core neural-network modules used by the course implementations."""
 
+import warnings
 from collections.abc import Callable, Iterable, Mapping
 from functools import update_wrapper
 from math import prod
-from typing import Any, Never, NoReturn, cast
+from typing import Any, Final, Never, NoReturn, cast
 
 import einx
 import einx._src.namedtensor.stage1 as einx_stage1
@@ -67,9 +68,7 @@ class Module(nn.Module):
 
     def _cost_children(self, scope: _CostScope) -> Iterable[_CostChild]:
         """Expose registered children as inventory until a subclass authors calls."""
-        return tuple(
-            scope.inventory(name, child) for name, child in self._modules.items() if child is not None
-        )
+        return tuple(scope.inventory(name, child) for name, child in self._modules.items() if child is not None)
 
     def _cost_call_bindings(
         self,
@@ -110,9 +109,8 @@ def DeltaLayer[ModuleT: nn.Module](module_type: type[ModuleT]) -> type[ModuleT]:
 class Embedding(Module):  # mimicking :cls:`torch.nn.Embedding` in :module:`torch.nn.sparse`
     """Lookup table mapping token IDs to learned embedding vectors."""
 
-    __constants__ = ["num_embeddings", "embedding_dim"]
-    num_embeddings: int  # vocab_size
-    embedding_dim: int  # d_model
+    num_embeddings: Final[int]  # vocab_size
+    embedding_dim: Final[int]  # d_model
     weight: Float[torch.Tensor, "{self.num_embeddings} {self.embedding_dim}"]  # matrix of embeddings
 
     def __init__(
@@ -198,11 +196,10 @@ class RMSNorm(Module):  # mimicking :cls:`torch.nn.RMSNorm`; used for layer norm
     and :math:`eps` is a hyperparameter that is often fixed at `1e-5`.
     """
 
-    __constants__ = ["d_model", "eps"]
-    d_model: int
+    d_model: Final[int]
     eps: float
     weight: ModelVec | None  # the `gᵢ`s # noqa: F821
-    elementwise_affine: bool
+    elementwise_affine: Final[bool]
 
     def __init__(
         self,
@@ -441,12 +438,18 @@ class SoftMax(Module):  # mimicking :cls:`torch.nn.Softmax`
     the static method softmax_einx allows more flexible operation.
     """
 
-    __constants__ = ["dim"]
-    dim: int | None
+    dim: int
 
-    def __init__(self, dim: int | None = None) -> None:
+    def __init__(self, dim: int) -> None:
         super().__init__()
-        if dim is not None and not isinstance(dim, int):
+        if dim is None:
+            warnings.warn(
+                "SoftMax dim is None; "
+                "Implicit dimension choice for softmax has been deprecated. "
+                "Change the call to include dim=X as an argument.",
+                stacklevel=2
+            )
+        elif not isinstance(dim, int):
             raise TypeError(f"dim must be an int, but got {type(dim).__name__}")
         self.dim = dim
 
@@ -469,7 +472,7 @@ class SoftMax(Module):  # mimicking :cls:`torch.nn.Softmax`
 
     @staticmethod
     def softmax_torch(
-        in_features: Float[torch.Tensor, "*batch shape"], dim: int | None = None
+        in_features: Float[torch.Tensor, "*batch shape"], dim: int
     ) -> Float[torch.Tensor, "*batch shape"]:
         """Functional interface to SoftMax in torch flavor"""
         return F.softmax(in_features, dim=dim)
@@ -485,9 +488,8 @@ class SoftMax(Module):  # mimicking :cls:`torch.nn.Softmax`
 class Linear(Module):  # mimicking :cls:`torch.nn.Linear`, but NO bias
     """Applies a linear transformation to the incoming data: :math:`y = x A^T` where :math:`A` is the learnable weight matrix."""
 
-    __constants__ = ["in_features", "out_features"]
-    in_features: int
-    out_features: int
+    in_features: Final[int]
+    out_features: Final[int]
     weight: Float[torch.Tensor, "{self.out_features} {self.in_features}"]
     bias: Never
 

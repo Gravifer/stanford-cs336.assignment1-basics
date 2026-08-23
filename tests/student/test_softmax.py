@@ -13,7 +13,7 @@ def test_softmax_none_matches_torch_implicit_dimension(shape: tuple[int, ...]) -
     with pytest.warns(UserWarning, match="Implicit dimension choice"):
         expected = torch_f.softmax(input, dim=None)
     with pytest.warns(UserWarning, match="Implicit dimension choice"):
-        actual = F.softmax(input, dim=None)
+        actual = F.softmax(input, dim=None)  # ty: ignore[invalid-argument-type]
 
     torch.testing.assert_close(actual, expected)
 
@@ -28,9 +28,18 @@ def test_softmax_dtype_controls_computation_and_output_dtype() -> None:
     torch.testing.assert_close(actual, expected)
 
 
-def test_softmax_module_preserves_none_dimension_semantics() -> None:
+def test_softmax_requires_an_explicit_dimension() -> None:
+    input = torch.randn(2, 3)
+
+    with pytest.raises(TypeError):
+        F.softmax(input)  # ty: ignore[missing-argument]
+    with pytest.raises(TypeError):
+        SoftMax()  # ty: ignore[missing-argument]
+
+
+def test_softmax_module_preserves_explicit_none_dimension_semantics() -> None:
     input = torch.randn(2, 3, 4)
-    module = SoftMax()
+    module = SoftMax(None)  # ty: ignore[invalid-argument-type]
 
     assert module.dim is None
     with pytest.warns(UserWarning, match="Implicit dimension choice"):

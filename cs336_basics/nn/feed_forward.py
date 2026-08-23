@@ -4,7 +4,7 @@ import warnings  # noqa: F401
 from collections.abc import Mapping
 from math import prod
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 import einx
 import torch
@@ -26,7 +26,7 @@ __all__ = [
 ]
 
 
-_COURSE_SWIGLU_KEY_TO_ROLE = {
+_COURSE_SWIGLU_KEY_TO_ROLE: Final = {
     "w1.weight": "gate",
     "w2.weight": "output",
     "w3.weight": "value",
@@ -66,10 +66,10 @@ def _projection_cost(
     )
 
 
-_COURSE_SWIGLU_WARNING = (
+_COURSE_SWIGLU_WARNING: Final = (
     "loading course SwiGLU keys: w1.weight maps to gate, w2.weight maps to output, and w3.weight maps to value"
 )
-_SWIGLU_WARNING_SKIP_PREFIXES = (str(Path(__file__).parent), str(Path(torch.__path__[0])))
+_SWIGLU_WARNING_SKIP_PREFIXES: Final = (str(Path(__file__).parent), str(Path(torch.__path__[0])))
 
 
 def _translate_swiglu_state_dict(
@@ -200,9 +200,8 @@ class SwiGLU_delegate(Module):
     where :math:`SiLU` is the Sigmoid Linear Unit activation function.
     """
 
-    __constants__ = ["d_ff", "d_model"]
-    d_ff: int
-    d_model: int
+    d_ff: Final[int]
+    d_model: Final[int]
     value_linear: Float[Linear, "{self.d_ff} {self.d_model}"]
     gate_linear: Float[Linear, "{self.d_ff} {self.d_model}"]
     out_linear: Float[Linear, "{self.d_model} {self.d_ff}"]
@@ -306,9 +305,8 @@ class SwiGLU_own_weights(Module):
     where :math:`SiLU` is the Sigmoid Linear Unit activation function.
     """
 
-    __constants__ = ["d_ff", "d_model"]
-    d_ff: int
-    d_model: int
+    d_ff: Final[int]
+    d_model: Final[int]
     value_weight: Float[torch.Tensor, "{self.d_ff} {self.d_model}"]
     gate_weight: Float[torch.Tensor, "{self.d_ff} {self.d_model}"]
     out_weight: Float[torch.Tensor, "{self.d_model} {self.d_ff}"]
@@ -397,9 +395,8 @@ class SwiGLU_packed_input(Module):
     where :math:`SiLU` is the Sigmoid Linear Unit activation function.
     """
 
-    __constants__ = ["d_ff", "d_model"]
-    d_ff: int
-    d_model: int
+    d_ff: Final[int]
+    d_model: Final[int]
     in_weight: Float[torch.Tensor, "2*{self.d_ff} {self.d_model}"]
     out_weight: Float[torch.Tensor, "{self.d_model} {self.d_ff}"]
 

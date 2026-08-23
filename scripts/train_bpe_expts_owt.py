@@ -3,12 +3,13 @@ import json
 import pickle
 import resource
 import time
+from typing import Final
 
 from cs336_basics.common import PeakMemoryMonitor, prettyprint_vocab
 from cs336_basics.tokenizer import train_bpe
 
 # TODO: enforce memory limit in MB
-MEMORY_LIMIT_MB = 16000
+MEMORY_LIMIT_MB: Final = 16000
 
 if __name__ != "__main__":
     print("This script should not be imported")

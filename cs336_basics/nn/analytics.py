@@ -6,7 +6,7 @@ import keyword
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, overload, runtime_checkable
+from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, cast, overload, runtime_checkable
 
 import torch
 from torch import nn
@@ -306,7 +306,7 @@ def _require_local_symbols(
         )
 
 
-_RESERVED_SYMBOL_NAMES = frozenset(
+_RESERVED_SYMBOL_NAMES: Final = frozenset(
     {
         "bind",
         "declare",
@@ -867,8 +867,8 @@ def observe_costs(module: nn.Module) -> CostObserver:
     return CostObserver(module)
 
 
-_REGISTERED_SLOT_CONTAINERS = (nn.ModuleDict, nn.ModuleList, nn.Sequential)
-_EXECUTING_TORCH_CONTAINERS = (nn.Sequential,)
+_REGISTERED_SLOT_CONTAINERS: Final = (nn.ModuleDict, nn.ModuleList, nn.Sequential)
+_EXECUTING_TORCH_CONTAINERS: Final = (nn.Sequential,)
 
 
 def _structural_children(module: nn.Module) -> tuple[tuple[str, nn.Module], ...]:
@@ -1171,7 +1171,7 @@ def _baddbmm_flops(
     return flops
 
 
-_MATMUL_POLICIES = {
+_MATMUL_POLICIES: Final = {
     torch.ops.aten.mm.default: _mm_flops,
     torch.ops.aten.addmm.default: _addmm_flops,
     torch.ops.aten.bmm.default: _bmm_flops,
