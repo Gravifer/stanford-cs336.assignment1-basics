@@ -12,8 +12,12 @@ class SGD(torch.optim.Optimizer):
         defaults = {"lr": lr}
         super().__init__(params, defaults)
 
+    @torch.no_grad()
     def step(self, closure: Callable | None = None):
-        loss = None if closure is None else closure()
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
         for group in self.param_groups:
             lr: float = group["lr"]  # Get the learning rate.
             for p in group["params"]:
@@ -22,8 +26,8 @@ class SGD(torch.optim.Optimizer):
 
                 state = self.state[p]  # Get state associated with p.
                 t: int = state.get("t", 0)  # Get iteration number from the state, or 0.
-                grad = p.grad.data  # Get the gradient of loss with respect to p.
-                p.data -= lr / math.sqrt(t + 1) * grad  # Update weight tensor in-place.
+                grad = p.grad  # Get the gradient of loss with respect to p.
+                p.add_(grad, alpha=-lr / math.sqrt(t + 1))  # Update weight tensor in-place.
                 state["t"] = t + 1  # Increment iteration number.
         return loss
 
@@ -52,8 +56,12 @@ class AdamW(torch.optim.Optimizer):
         defaults = {"lr": lr, "betas": betas, "eps": eps, "weight_decay": weight_decay}
         super().__init__(params, defaults)
 
+    @torch.no_grad()
     def step(self, closure: Callable | None = None):
-        loss = None if closure is None else closure()
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
         for group in self.param_groups:
             α: float = group["lr"]  # Get the learning rate
             β1, β2 = group["betas"]
@@ -65,14 +73,19 @@ class AdamW(torch.optim.Optimizer):
 
                 state = self.state[p]
                 # State load/init
-                t: int = state.get("t", 1)  # Get iteration number from the state, or 1
-                m: torch.Tensor = state.get("m1", torch.zeros_like(p.data))  # First moment m
-                v: torch.Tensor = state.get("m2", torch.zeros_like(p.data))  # Second moment v
+                if not state:
+                    state["t"] = 1
+                    state["m1"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state["m2"] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-                g = p.grad.data
+                t: int = state["t"]
+                m: torch.Tensor = state["m1"]  # First moment m
+                v: torch.Tensor = state["m2"]  # Second moment v
+
+                g = p.grad
                 step_size: float = α * math.sqrt(1 - β2**t) / (1 - β1**t)  # t starts from 1 so that this works
 
-                p.data.add_(p.data, alpha=-λ * α)  # Apply weight decay
+                p.mul_(1 - λ * α)  # Apply weight decay
 
                 # Update moment estimates
                 m.mul_(β1).add_(g, alpha=1 - β1)
@@ -81,7 +94,7 @@ class AdamW(torch.optim.Optimizer):
                 denom = v.sqrt().add_(ε)
 
                 # Update parameters with decoupled weight decay
-                p.data.add_(m / denom, alpha=-step_size)
+                p.addcdiv_(m, denom, value=-step_size)
 
                 state["m1"] = m
                 state["m2"] = v
