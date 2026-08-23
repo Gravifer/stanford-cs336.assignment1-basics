@@ -1,5 +1,5 @@
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 import torch
 from torch.optim.optimizer import ParamsT
@@ -113,3 +113,24 @@ def _lr_cosine_schedule(t: int, alpha_max: float, alpha_min: float, T_warmup: in
     else:
         progress: float = (t - T_warmup) / (T_annealing - T_warmup)
         return alpha_min + 0.5 * (1 + math.cos(math.pi * progress)) * (alpha_max - alpha_min)
+
+
+def _grad_norm_clip_(params: Iterable[torch.nn.Parameter], max_norm: float, eps: float = 1e-6) -> float:
+    """Clip the gradients of the parameters in-place to have a maximum norm of `max_norm`.
+
+    Args:
+        params: Iterable of parameters whose gradients will be clipped.
+        max_norm: The maximum allowed norm of the gradients.
+        eps: A small value to avoid division by zero.
+    """
+    if isinstance(params, torch.nn.Parameter):
+        params: list[torch.nn.Parameter] = [params]
+    total_norm: float = sum(p.grad.norm(2).item() ** 2 for p in params if p.grad is not None) ** 0.5
+
+    clip_coef: float = max_norm / (total_norm + eps)
+    if clip_coef < 1:
+        for p in params:
+            if p.grad is not None:
+                p.grad.mul_(clip_coef)
+
+    return total_norm
