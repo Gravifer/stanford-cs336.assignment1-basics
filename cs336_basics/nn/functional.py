@@ -47,7 +47,7 @@ def gelu(
 
 def softmax(
     input: Float[torch.Tensor, "*shape"],
-    dim: int | None = None,
+    dim: int,
     _stacklevel: int = 3,
     dtype: torch.dtype | None = None,
 ) -> Float[torch.Tensor, "*shape"]:
@@ -96,7 +96,7 @@ def softmax(
 
 def log_softmax(
     input: Float[torch.Tensor, "*shape"],
-    dim: int | None = None,
+    dim: int,
     _stacklevel: int = 3,
     dtype: torch.dtype | None = None,
 ) -> Float[torch.Tensor, "*shape"]:
@@ -328,31 +328,115 @@ def nll_loss(
     return total / denominator
 
 
+def kl_div(
+    logprobs: Float[torch.Tensor, "*shape classes"],
+    target: Int[torch.Tensor, "*shape classes"],
+    reduction: Literal["none", "batchmean", "mean", "sum"] = "batchmean",  # ! not finalized yet.
+    log_target: bool = False,
+) -> Float[torch.Tensor, "*shape"] | Float[torch.Tensor, ""]:
+    r"""KL Divergence loss.
+
+    Refer - The `Kullback-Leibler divergence Loss
+    <https://en.wikipedia.org/wiki/Kullback-Leibler_divergence>`__
+
+    See :func:`~torch.nn.kl_div` for details.
+
+    Args:
+        logprobs: Predicted log probabilities of shape (*shape, classes).
+        target: Tensor of the same shape as logprobs.
+            See :attr:`log_target` for the target's interpretation.
+        reduction (str, optional): Specifies the reduction to apply to the output:
+            ``'none'`` | ``'batchmean'`` | ``'mean'`` | ``'sum'``.
+            ``'none'``: no reduction will be applied
+            ``'batchmean'``: the sum of the output will be divided by the batchsize
+            ``'mean'``: the output will be divided by the number of elements in the output
+            ``'sum'``: the output will be summed
+            Default: ``'batchmean'``
+        log_target (bool): A flag indicating whether ``target`` is passed in the log space.
+            It is recommended to pass certain distributions (like ``softmax``)
+            in the log space to avoid numerical issues caused by explicit ``log``.
+            Default: ``False``
+
+    .. warning::
+        :attr:`reduction` = ``'mean'`` doesn't return the true kl divergence value, please use
+        :attr:`reduction` = ``'batchmean'`` which aligns with KL math definition.
+    """
+    raise NotImplementedError("KL divergence loss is not implemented yet.")
+
+
 def cross_entropy(
-    input: Float[torch.Tensor, "*shape classes"],
-    target: Int[torch.Tensor, "*shape"],
+    logits: Float[torch.Tensor, "*shape classes"],
+    target: Int[torch.Tensor, "*shape"] | Int[torch.Tensor, "*shape classes"],
+    *,
     weight: Float[torch.Tensor, "classes"] | None = None,  # noqa: F821
+    ignore_index: int | None = None,
+    # ^ torch 7 had the default sentinel -100 for whatever reasons; we mostly won't use it, so we will use None here
     reduction: Literal["none", "mean", "sum"] = "mean",
     label_smoothing: float = 0.0,
-) -> Float[torch.Tensor, "*shape"]:
+) -> Float[torch.Tensor, "*shape"] | Float[torch.Tensor, ""]:
     r"""Cross entropy loss.
 
     Args:
-        input: Predicted logits of shape (*shape, classes).
-        target: Ground truth labels of shape (*shape).
-        weight: Optional tensor of shape (classes,) to weight the loss.
-        reduction: Specifies the reduction to apply to the output.
-        label_smoothing: Label smoothing factor.
+        logits: Predicted logits of shape (*shape, classes).
+        target: Ground truth class indices of shape (*shape) or class probabilities of shape (*shape, classes).
+        weight: Optional per-class weights of shape (classes,).
+        ignore_index: Exact target value whose prediction sites are omitted.
+            The value may lie outside the valid class range. Only
+            applicable when the target contains class indices. (optional)
+        reduction: ``"none"`` preserves *shape; ``"sum"`` and ``"mean"``
+            return a scalar.
+        label_smoothing:  A float in [0.0, 1.0]. Specifies the amount
+            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
+            become a mixture of the original ground truth and a uniform distribution as described in
+            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Returns:
-        The cross entropy loss of shape (*shape).
+        The cross entropy loss of shape (*shape) when unreduced,
+        or a scalar when reduced by summation or averaging.
     """
+    type LogitsShaped = Float[torch.Tensor, "*shape classes"]
+    type LossShaped = Float[torch.Tensor, "*shape"]
+    type ScalarShaped = Float[torch.Tensor, ""]
+
+    target_probs: bool = False
+    if logits.shape == target.shape:
+        if ignore_index is not None:
+            raise ValueError("ignore_index is not applicable when the target contains class probabilities.")
+        target_probs: bool = True
+        # return -torch.sum(target * log_softmax(logits, dim=-1), dim=-1)
+    elif logits.shape[:-1] != target.shape:
+        raise ValueError(
+            "target shape must equal logprobs shape without its classes axis; "
+            f"got logprobs of shape {logits.shape} and target of {target.shape}"
+        )
+    classes: int = logits.shape[-1]
+
+    if reduction not in ("none", "mean", "sum"):
+        raise ValueError(f"unsupported reduction: {reduction!r}")
+
+    if weight is not None and weight.shape != (classes,):
+        raise ValueError(f"weight must have shape ({classes},), got {weight.shape}")
+
     if label_smoothing < 0.0 or label_smoothing > 1.0:
         raise ValueError("label_smoothing must be in [0, 1]")
-    if weight is not None and weight.shape[0] != input.shape[-1]:
-        raise ValueError("weight tensor must have the same number of classes as input")
-    logprobs: Float[torch.Tensor, "*shape classes"] = log_softmax(input, dim=-1)
-    return nll_loss(logprobs, target, weight=weight, reduction=reduction)
+
+    logprobs: LogitsShaped = log_softmax(logits, dim=-1)
+
+    if target_probs:  # target is class probabilities
+        if label_smoothing > 0.0:
+            raise ValueError("label_smoothing is not applicable when the target contains class probabilities.")
+        loss: LossShaped = -torch.sum(target * logprobs, dim=-1)
+        if weight is not None:
+            loss: LossShaped = loss * torch.sum(target * weight, dim=-1)
+        if reduction == "none":
+            return loss
+        total: ScalarShaped = einx.sum("[shape...] ->", loss)
+        if reduction == "sum":
+            return total
+        denominator: ScalarShaped = einx.sum("[shape...] ->", torch.sum(target, dim=-1))
+        return total / denominator
+
+    return nll_loss(logprobs, target, weight=weight, ignore_index=ignore_index, reduction=reduction)
 
 
 def _attention_weights(

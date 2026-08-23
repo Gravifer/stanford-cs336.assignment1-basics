@@ -1,5 +1,6 @@
 """Core neural-network modules used by the course implementations."""
 
+import warnings
 from collections.abc import Callable, Iterable, Mapping
 from functools import update_wrapper
 from math import prod
@@ -67,9 +68,7 @@ class Module(nn.Module):
 
     def _cost_children(self, scope: _CostScope) -> Iterable[_CostChild]:
         """Expose registered children as inventory until a subclass authors calls."""
-        return tuple(
-            scope.inventory(name, child) for name, child in self._modules.items() if child is not None
-        )
+        return tuple(scope.inventory(name, child) for name, child in self._modules.items() if child is not None)
 
     def _cost_call_bindings(
         self,
@@ -439,11 +438,17 @@ class SoftMax(Module):  # mimicking :cls:`torch.nn.Softmax`
     the static method softmax_einx allows more flexible operation.
     """
 
-    dim: int | None
+    dim: int
 
-    def __init__(self, dim: int | None = None) -> None:
+    def __init__(self, dim: int) -> None:
         super().__init__()
-        if dim is not None and not isinstance(dim, int):
+        if dim is None:
+            warnings.warn(
+                "SoftMax dim is None; "
+                "Implicit dimension choice for softmax has been deprecated. "
+                "Change the call to include dim=X as an argument."
+            )
+        elif not isinstance(dim, int):
             raise TypeError(f"dim must be an int, but got {type(dim).__name__}")
         self.dim = dim
 
@@ -466,7 +471,7 @@ class SoftMax(Module):  # mimicking :cls:`torch.nn.Softmax`
 
     @staticmethod
     def softmax_torch(
-        in_features: Float[torch.Tensor, "*batch shape"], dim: int | None = None
+        in_features: Float[torch.Tensor, "*batch shape"], dim: int
     ) -> Float[torch.Tensor, "*batch shape"]:
         """Functional interface to SoftMax in torch flavor"""
         return F.softmax(in_features, dim=dim)
