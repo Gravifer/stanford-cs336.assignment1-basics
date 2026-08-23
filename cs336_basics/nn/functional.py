@@ -319,12 +319,12 @@ def nll_loss(
     if reduction == "none":
         return loss
 
-    total: ScalarShaped = einx.sum("[shape...] ->", loss)
+    total: ScalarShaped = einx.sum("[shape...]", loss)
 
     if reduction == "sum":
         return total
 
-    denominator: ScalarShaped = einx.sum("[shape...] ->", reduction_weight)
+    denominator: ScalarShaped = einx.sum("[shape...]", reduction_weight)
     return total / denominator
 
 
@@ -364,9 +364,33 @@ def kl_div(
     raise NotImplementedError("KL divergence loss is not implemented yet.")
 
 
+@overload
 def cross_entropy(
     logits: Float[torch.Tensor, "*shape classes"],
-    target: Int[torch.Tensor, "*shape"] | Int[torch.Tensor, "*shape classes"],
+    target: Int[torch.Tensor, "*shape"] | Float[torch.Tensor, "*shape classes"],
+    *,
+    weight: Float[torch.Tensor, "classes"] | None = None,  # noqa: F821
+    ignore_index: int | None = None,
+    reduction: Literal["none"],
+    label_smoothing: float = 0.0,
+) -> Float[torch.Tensor, "*shape"]: ...
+
+
+@overload
+def cross_entropy(
+    logits: Float[torch.Tensor, "*shape classes"],
+    target: Int[torch.Tensor, "*shape"] | Float[torch.Tensor, "*shape classes"],
+    *,
+    weight: Float[torch.Tensor, "classes"] | None = None,  # noqa: F821
+    ignore_index: int | None = None,
+    reduction: Literal["mean", "sum"] = "mean",
+    label_smoothing: float = 0.0,
+) -> Float[torch.Tensor, ""]: ...
+
+
+def cross_entropy(
+    logits: Float[torch.Tensor, "*shape classes"],
+    target: Int[torch.Tensor, "*shape"] | Float[torch.Tensor, "*shape classes"],
     *,
     weight: Float[torch.Tensor, "classes"] | None = None,  # noqa: F821
     ignore_index: int | None = None,
@@ -398,17 +422,20 @@ def cross_entropy(
     type LossShaped = Float[torch.Tensor, "*shape"]
     type ScalarShaped = Float[torch.Tensor, ""]
 
-    target_probs: bool = False
+    target_probs = False
     if logits.shape == target.shape:
+        if not target.is_floating_point():
+            raise TypeError("class-probability targets must have a floating-point dtype")
         if ignore_index is not None:
             raise ValueError("ignore_index is not applicable when the target contains class probabilities.")
-        target_probs: bool = True
-        # return -torch.sum(target * log_softmax(logits, dim=-1), dim=-1)
+        target_probs = True
     elif logits.shape[:-1] != target.shape:
         raise ValueError(
             "target shape must equal logprobs shape without its classes axis; "
             f"got logprobs of shape {logits.shape} and target of {target.shape}"
         )
+    elif target.is_floating_point():
+        raise TypeError("class-index targets must have an integer dtype")
     classes: int = logits.shape[-1]
 
     if reduction not in ("none", "mean", "sum"):
@@ -424,19 +451,57 @@ def cross_entropy(
 
     if target_probs:  # target is class probabilities
         if label_smoothing > 0.0:
-            raise ValueError("label_smoothing is not applicable when the target contains class probabilities.")
-        loss: LossShaped = -torch.sum(target * logprobs, dim=-1)
+            target = target * (1.0 - label_smoothing) + label_smoothing / classes
         if weight is not None:
-            loss: LossShaped = loss * torch.sum(target * weight, dim=-1)
+            target = einx.multiply("shape... classes, classes", target, weight)
+        loss: LossShaped = -einx.sum(
+            "shape... [classes]",
+            einx.multiply("shape... classes, shape... classes", target, logprobs),
+        )
         if reduction == "none":
             return loss
-        total: ScalarShaped = einx.sum("[shape...] ->", loss)
+        total: ScalarShaped = einx.sum("[shape...]", loss)
         if reduction == "sum":
             return total
-        denominator: ScalarShaped = einx.sum("[shape...] ->", torch.sum(target, dim=-1))
-        return total / denominator
+        return einx.mean("[shape...]", loss)
 
-    return nll_loss(logprobs, target, weight=weight, ignore_index=ignore_index, reduction=reduction)
+    nll = nll_loss(
+        logprobs,
+        target,
+        weight=weight,
+        ignore_index=ignore_index,
+        reduction=reduction if label_smoothing == 0.0 else "none",
+    )
+    if label_smoothing == 0.0:
+        return nll
+
+    uniform_terms: LogitsShaped = logprobs
+    if weight is not None:
+        uniform_terms = einx.multiply("shape... classes, classes", uniform_terms, weight)
+    uniform_loss: LossShaped = -einx.mean("shape... [classes]", uniform_terms)
+
+    is_ignored: Bool[torch.Tensor, "*shape"] = (
+        torch.zeros_like(target, dtype=torch.bool)
+        if ignore_index is None
+        else einx.equal("shape..., -> shape...", target, ignore_index)
+    )
+    uniform_loss = uniform_loss.masked_fill(is_ignored, 0)
+    loss = nll * (1.0 - label_smoothing) + uniform_loss * label_smoothing
+    if reduction == "none":
+        return loss
+
+    total = einx.sum("[shape...]", loss)
+    if reduction == "sum":
+        return total
+
+    if weight is None:
+        reduction_weight: LossShaped = ~is_ignored
+    else:
+        masked_target = torch.where(is_ignored, 0, target)
+        selected_weight: LossShaped = einx.get_at("[classes], shape... -> shape...", weight, masked_target)
+        reduction_weight = selected_weight.masked_fill(is_ignored, 0)
+    denominator: ScalarShaped = einx.sum("[shape...]", reduction_weight)
+    return total / denominator
 
 
 def _attention_weights(
