@@ -328,40 +328,85 @@ def nll_loss(
     return total / denominator
 
 
+@overload
 def kl_div(
     logprobs: Float[torch.Tensor, "*shape classes"],
-    target: Int[torch.Tensor, "*shape classes"],
-    reduction: Literal["none", "batchmean", "mean", "sum"] = "batchmean",  # ! not finalized yet.
+    target: Float[torch.Tensor, "*shape classes"],
+    *,
+    reduction: Literal["none"],
+    log_target: bool = False,
+) -> Float[torch.Tensor, "*shape"]: ...
+
+
+@overload
+def kl_div(
+    logprobs: Float[torch.Tensor, "*shape classes"],
+    target: Float[torch.Tensor, "*shape classes"],
+    *,
+    reduction: Literal["batchmean", "mean", "sum"] = "mean",
+    log_target: bool = False,
+) -> Float[torch.Tensor, ""]: ...
+
+
+def kl_div(
+    logprobs: Float[torch.Tensor, "*shape classes"],
+    target: Float[torch.Tensor, "*shape classes"],
+    *,
+    reduction: Literal["none", "batchmean", "mean", "sum"] = "mean",
     log_target: bool = False,
 ) -> Float[torch.Tensor, "*shape"] | Float[torch.Tensor, ""]:
-    r"""KL Divergence loss.
+    r"""Compute categorical KL divergence from target to prediction.
 
-    Refer - The `Kullback-Leibler divergence Loss
-    <https://en.wikipedia.org/wiki/Kullback-Leibler_divergence>`__
+    For every prediction site, this computes
+    :math:`D_{KL}(P\Vert Q)=\sum_c P_c(\log P_c-\log Q_c)`, where
+    ``logprobs`` contains :math:`\log Q` and ``target`` describes :math:`P`.
+    Inputs are assumed to describe distributions but are not normalized or
+    otherwise validated as such.
 
-    See :func:`~torch.nn.kl_div` for details.
+    Unlike :func:`torch.nn.functional.kl_div`, the class reduction is
+    intrinsic: an unreduced result has shape ``(*shape)`` rather than
+    ``(*shape, classes)``.
 
     Args:
         logprobs: Predicted log probabilities of shape (*shape, classes).
-        target: Tensor of the same shape as logprobs.
-            See :attr:`log_target` for the target's interpretation.
-        reduction (str, optional): Specifies the reduction to apply to the output:
-            ``'none'`` | ``'batchmean'`` | ``'mean'`` | ``'sum'``.
-            ``'none'``: no reduction will be applied
-            ``'batchmean'``: the sum of the output will be divided by the batchsize
-            ``'mean'``: the output will be divided by the number of elements in the output
-            ``'sum'``: the output will be summed
-            Default: ``'batchmean'``
-        log_target (bool): A flag indicating whether ``target`` is passed in the log space.
-            It is recommended to pass certain distributions (like ``softmax``)
-            in the log space to avoid numerical issues caused by explicit ``log``.
-            Default: ``False``
+        target: Target probabilities, or target log probabilities when
+            ``log_target`` is true, with the same shape as ``logprobs``.
+        reduction: ``"none"`` returns one KL value per prediction site;
+            ``"sum"`` sums all sites; ``"mean"`` averages all sites; and
+            ``"batchmean"`` sums all sites and divides by the first leading
+            dimension, which is interpreted as batch.
+        log_target: Whether ``target`` contains log probabilities. Passing log
+            probabilities can avoid numerical issues from taking their logarithm.
 
-    .. warning::
-        :attr:`reduction` = ``'mean'`` doesn't return the true kl divergence value, please use
-        :attr:`reduction` = ``'batchmean'`` which aligns with KL math definition.
+    Returns:
+        KL divergence of shape (*shape) when unreduced, or a scalar when reduced.
     """
-    raise NotImplementedError("KL divergence loss is not implemented yet.")
+    type ProbsShaped = Float[torch.Tensor, "*shape classes"]
+    type LossShaped = Float[torch.Tensor, "*shape"]
+    type ScalarShaped = Float[torch.Tensor, ""]
+
+    if logprobs.shape != target.shape:
+        raise ValueError(f"target shape must equal logprobs shape; got {target.shape} and {logprobs.shape}")
+    if reduction not in ("none", "batchmean", "mean", "sum"):
+        raise ValueError(f"unsupported reduction: {reduction!r}")
+    if reduction == "batchmean" and logprobs.ndim < 2:
+        raise ValueError("batchmean requires a leading batch axis before the classes axis")
+
+    if log_target:
+        classwise_loss: ProbsShaped = target.exp() * (target - logprobs)
+    else:
+        classwise_loss = torch.xlogy(target, target) - target * logprobs
+    loss: LossShaped = einx.sum("shape... [classes]", classwise_loss)
+
+    if reduction == "none":
+        return loss
+    if reduction == "mean":
+        return einx.mean("[shape...]", loss)
+
+    total: ScalarShaped = einx.sum("[shape...]", loss)
+    if reduction == "sum":
+        return total
+    return total / logprobs.shape[0]
 
 
 @overload
